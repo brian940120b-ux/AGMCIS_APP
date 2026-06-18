@@ -13,6 +13,7 @@ from paper_trading import (
 
 from analytics import get_trade_analytics
 from notifier import send_telegram
+from news_center import get_crypto_news
 
 app = FastAPI()
 
@@ -204,6 +205,17 @@ def home():
     summary = get_paper_summary()
     analytics = get_trade_analytics()
     market = get_market_center()
+    news_items = get_crypto_news()
+    news_cards = ""
+
+    for item in news_items:
+     news_cards += f"""
+    <div class="news-card">
+        <h3>{item["title"]}</h3>
+        <p>{item["source"]}</p>
+        <a href="{item["url"]}" target="_blank">閱讀新聞</a>
+    </div>
+    """
 
     open_rows = build_trade_rows(summary["open_trades"])
     closed_rows = build_trade_rows(summary["closed_trades"][-10:])
@@ -246,6 +258,7 @@ def home():
                     <a href="#trading">Paper Trading</a>
                     <a href="#analytics">Analytics</a>
                     <a href="#history">History</a>
+                    <a href="#news">News Center</a>
                 </nav>
 
                 <div class="sidebar-footer">
@@ -339,6 +352,14 @@ def home():
                     </div>
                 </section>
 
+                <section id="news" class="panel">
+    <h2>News Center</h2>
+    <p class="muted">CoinDesk / CoinTelegraph / Decrypt RSS</p>
+
+    <div class="news-grid">
+        {news_cards}
+    </div>
+</section>
                 <section class="stats">
                     <div class="box">
                         <h3>總報酬率</h3>
@@ -854,36 +875,65 @@ def home():
                 color:#94a3b8;
             }}
 
-            @media (max-width: 1100px) {{
-                .grid-three {{
-                    grid-template-columns:1fr;
-                }}
-
-                .grid-two {{
-                    grid-template-columns:1fr;
-                }}
-            }}
-
             @media (max-width: 900px) {{
-                .sidebar {{
-                    display:none;
-                }}
 
-                .main {{
-                    margin-left:0;
-                    width:100%;
-                    padding:18px;
-                }}
+    .sidebar {{
+        display:none;
+    }}
 
-                .hero {{
-                    flex-direction:column;
-                    align-items:flex-start;
-                    gap:18px;
-                }}
-            }}
-        </style>
-    </html>
-    """
+    .main {{
+        margin-left:0;
+        width:100%;
+        padding:18px;
+    }}
+
+    .hero {{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:18px;
+    }}
+
+}}
+
+/* News Center */
+
+.news-grid {{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+    gap:18px;
+}}
+
+.news-card {{
+    background:#020617;
+    border:1px solid #334155;
+    border-radius:18px;
+    padding:18px;
+}}
+
+.news-card h3 {{
+    font-size:16px;
+    line-height:1.5;
+    margin-top:0;
+}}
+
+.news-card p {{
+    color:#94a3b8;
+    margin:10px 0;
+}}
+
+.news-card a {{
+    color:#38bdf8;
+    text-decoration:none;
+    font-weight:bold;
+}}
+
+.news-card a:hover {{
+    text-decoration:underline;
+}}
+
+</style>
+</html>
+"""
 
 
 @app.post("/open-trade")
