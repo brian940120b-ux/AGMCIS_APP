@@ -2,6 +2,7 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from market_data import get_ohlcv
+from market_center import get_market_center
 from strategy import analyze_symbol
 
 from paper_trading import (
@@ -14,6 +15,24 @@ from analytics import get_trade_analytics
 from notifier import send_telegram
 
 app = FastAPI()
+
+
+def build_market_rows(items):
+    rows = ""
+
+    for item in items:
+        color = "#22c55e" if item["change_24h"] >= 0 else "#ef4444"
+
+        rows += f"""
+        <tr>
+            <td>{item["symbol"]}</td>
+            <td>{item["price"]}</td>
+            <td style="color:{color}; font-weight:bold;">{item["change_24h"]}%</td>
+            <td>{item["volume_24h"]}</td>
+        </tr>
+        """
+
+    return rows
 
 
 def build_trade_rows(trades):
@@ -184,6 +203,7 @@ def build_signal_cards():
 def home():
     summary = get_paper_summary()
     analytics = get_trade_analytics()
+    market = get_market_center()
 
     open_rows = build_trade_rows(summary["open_trades"])
     closed_rows = build_trade_rows(summary["closed_trades"][-10:])
@@ -191,13 +211,21 @@ def home():
     symbol_stats_rows = build_symbol_stats_rows(analytics["symbol_stats"])
     equity_svg = build_equity_svg(analytics["equity_curve"])
 
+    market_rows = build_market_rows(market["market_data"])
+    gainer_rows = build_market_rows(market["gainers"])
+    volume_rows = build_market_rows(market["volume_rank"])
+
     total_pnl_color = "#22c55e" if analytics["total_pnl"] >= 0 else "#ef4444"
     pf_color = "#22c55e" if analytics["profit_factor"] >= 1 else "#ef4444"
+
+    sentiment_color = "#22c55e" if market["market_sentiment"] == "偏多" else "#facc15"
+    if market["market_sentiment"] == "偏空":
+        sentiment_color = "#ef4444"
 
     return f"""
     <html>
         <head>
-            <title>AGMCIS PRO V12.0</title>
+            <title>AGMCIS PRO V12.1</title>
             <meta http-equiv="refresh" content="60">
         </head>
 
@@ -213,6 +241,7 @@ def home():
 
                 <nav>
                     <a href="#dashboard">Dashboard</a>
+                    <a href="#market">Market Center</a>
                     <a href="#signals">Signals</a>
                     <a href="#trading">Paper Trading</a>
                     <a href="#analytics">Analytics</a>
@@ -229,15 +258,30 @@ def home():
                 <section id="dashboard" class="hero">
                     <div>
                         <h1>AGMCIS PRO</h1>
-                        <p>Professional Crypto Intelligence & Paper Trading Dashboard</p>
+                        <p>Crypto Intelligence, Market Center & Paper Trading Dashboard</p>
                     </div>
 
                     <div class="status-pill">
-                        LIVE SIGNAL ENGINE
+                        MARKET CENTER ONLINE
                     </div>
                 </section>
 
                 <section class="stats">
+                    <div class="box">
+                        <h3>市場情緒</h3>
+                        <p style="color:{sentiment_color};">{market["market_sentiment"]}</p>
+                    </div>
+
+                    <div class="box">
+                        <h3>市場分數</h3>
+                        <p>{market["market_score"]}%</p>
+                    </div>
+
+                    <div class="box">
+                        <h3>AGMCIS 熱門標的</h3>
+                        <p>{market["best_symbol"]}</p>
+                    </div>
+
                     <div class="box">
                         <h3>模擬資金</h3>
                         <p>{summary["balance"]} USDT</p>
@@ -249,6 +293,54 @@ def home():
                     </div>
 
                     <div class="box">
+                        <h3>Profit Factor</h3>
+                        <p style="color:{pf_color};">{analytics["profit_factor"]}</p>
+                    </div>
+                </section>
+
+                <section id="market" class="grid-three">
+                    <div class="panel">
+                        <h2>Market Watch</h2>
+                        <table>
+                            <tr>
+                                <th>幣種</th>
+                                <th>價格</th>
+                                <th>24H</th>
+                                <th>成交量</th>
+                            </tr>
+                            {market_rows}
+                        </table>
+                    </div>
+
+                    <div class="panel">
+                        <h2>24H 漲幅排行</h2>
+                        <table>
+                            <tr>
+                                <th>幣種</th>
+                                <th>價格</th>
+                                <th>24H</th>
+                                <th>成交量</th>
+                            </tr>
+                            {gainer_rows}
+                        </table>
+                    </div>
+
+                    <div class="panel">
+                        <h2>成交量排行</h2>
+                        <table>
+                            <tr>
+                                <th>幣種</th>
+                                <th>價格</th>
+                                <th>24H</th>
+                                <th>成交量</th>
+                            </tr>
+                            {volume_rows}
+                        </table>
+                    </div>
+                </section>
+
+                <section class="stats">
+                    <div class="box">
                         <h3>總報酬率</h3>
                         <p style="color:{total_pnl_color};">{analytics["total_return_pct"]}%</p>
                     </div>
@@ -259,13 +351,18 @@ def home():
                     </div>
 
                     <div class="box">
-                        <h3>Profit Factor</h3>
-                        <p style="color:{pf_color};">{analytics["profit_factor"]}</p>
+                        <h3>勝率</h3>
+                        <p>{summary["win_rate"]}%</p>
                     </div>
 
                     <div class="box">
-                        <h3>勝率</h3>
-                        <p>{summary["win_rate"]}%</p>
+                        <h3>最佳幣種</h3>
+                        <p>{analytics["best_symbol"]}</p>
+                    </div>
+
+                    <div class="box">
+                        <h3>最差幣種</h3>
+                        <p>{analytics["worst_symbol"]}</p>
                     </div>
                 </section>
 
@@ -668,6 +765,12 @@ def home():
                 gap:24px;
             }}
 
+            .grid-three {{
+                display:grid;
+                grid-template-columns:repeat(3, 1fr);
+                gap:24px;
+            }}
+
             .mini-grid {{
                 display:grid;
                 grid-template-columns:1fr 1fr;
@@ -738,6 +841,7 @@ def home():
                 width:100%;
                 border-collapse:collapse;
                 margin-top:15px;
+                font-size:14px;
             }}
 
             th, td {{
@@ -750,6 +854,16 @@ def home():
                 color:#94a3b8;
             }}
 
+            @media (max-width: 1100px) {{
+                .grid-three {{
+                    grid-template-columns:1fr;
+                }}
+
+                .grid-two {{
+                    grid-template-columns:1fr;
+                }}
+            }}
+
             @media (max-width: 900px) {{
                 .sidebar {{
                     display:none;
@@ -759,10 +873,6 @@ def home():
                     margin-left:0;
                     width:100%;
                     padding:18px;
-                }}
-
-                .grid-two {{
-                    grid-template-columns:1fr;
                 }}
 
                 .hero {{
