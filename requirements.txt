@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+ccxt
+pandas
+numpy
+ta
+requests
+python-dotenv
+python-multipart
+matplotlib
