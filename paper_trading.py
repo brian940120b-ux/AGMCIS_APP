@@ -1,82 +1,42 @@
-import json
-import os
-from datetime import datetime
-
-ACCOUNT_FILE = "data/paper_account.json"
-TRADES_FILE = "data/paper_trades.json"
-
-
-def ensure_files():
-    os.makedirs("data", exist_ok=True)
-
-    if not os.path.exists(ACCOUNT_FILE):
-        with open(ACCOUNT_FILE, "w", encoding="utf-8") as file:
-            json.dump(
-                {
-                    "balance": 10000,
-                    "wins": 0,
-                    "losses": 0,
-                    "trades": 0
-                },
-                file,
-                ensure_ascii=False,
-                indent=4
-            )
-
-    if not os.path.exists(TRADES_FILE):
-        with open(TRADES_FILE, "w", encoding="utf-8") as file:
-            json.dump([], file, ensure_ascii=False, indent=4)
+from database_service import (
+    get_account,
+    update_account,
+    get_trades,
+    get_open_trades,
+    get_open_trade,
+    insert_trade,
+    close_trade
+)
 
 
 def load_account():
-    ensure_files()
-
-    with open(ACCOUNT_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
+    return get_account()
 
 
 def save_account(account):
-    ensure_files()
-
-    with open(ACCOUNT_FILE, "w", encoding="utf-8") as file:
-        json.dump(account, file, ensure_ascii=False, indent=4)
+    update_account(
+        account["balance"],
+        account["wins"],
+        account["losses"],
+        account["trades"]
+    )
 
 
 def load_trades():
-    ensure_files()
-
-    with open(TRADES_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
+    return get_trades()
 
 
 def save_trades(trades):
-    ensure_files()
-
-    with open(TRADES_FILE, "w", encoding="utf-8") as file:
-        json.dump(trades, file, ensure_ascii=False, indent=4)
+    # V13.4 起不再使用 JSON 儲存
+    pass
 
 
-def get_open_trade(symbol):
-    trades = load_trades()
-
-    for trade in trades:
-        if trade["symbol"] == symbol and trade["status"] == "OPEN":
-            return trade
-
-    return None
+def get_all_open_trades():
+    return get_open_trades()
 
 
 def has_open_trade(symbol):
     return get_open_trade(symbol) is not None
-
-
-def get_all_open_trades():
-    trades = load_trades()
-
-    return [
-        trade for trade in trades
-        if trade["status"] == "OPEN"
-    ]
 
 
 def create_paper_trade(
@@ -93,77 +53,96 @@ def create_paper_trade(
             "message": f"{symbol} 已有持倉，不重複開倉"
         }
 
-    trades = load_trades()
-
-    trade = {
-        "symbol": symbol,
-        "signal": signal,
-        "entry_price": float(entry_price),
-        "size_usdt": float(size_usdt),
-        "stoploss": float(stoploss) if stoploss != "-" and stoploss is not None else None,
-        "takeprofit": float(takeprofit) if takeprofit != "-" and takeprofit is not None else None,
-        "status": "OPEN",
-        "opened_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    trades.append(trade)
-    save_trades(trades)
+    insert_trade(
+        symbol=symbol,
+        signal=signal,
+        entry_price=float(entry_price),
+        size_usdt=float(size_usdt),
+        stoploss=None if stoploss == "-" else stoploss,
+        takeprofit=None if takeprofit == "-" else takeprofit
+    )
 
     return {
         "success": True,
         "message": "模擬開倉成功",
-        "trade": trade
+        "trade": {
+            "symbol": symbol,
+            "signal": signal,
+            "entry_price": float(entry_price),
+            "size_usdt": float(size_usdt),
+            "stoploss": None if stoploss == "-" else stoploss,
+            "takeprofit": None if takeprofit == "-" else takeprofit,
+            "status": "OPEN"
+        }
     }
 
 
 def close_paper_trade(symbol, exit_price, close_reason="手動平倉"):
-    trades = load_trades()
+    trades = get_all_open_trades()
     account = load_account()
 
+    target_trade = None
+
     for trade in trades:
-        if trade["symbol"] == symbol and trade["status"] == "OPEN":
-            entry_price = float(trade["entry_price"])
-            size_usdt = float(trade["size_usdt"])
-            signal = trade["signal"]
-            exit_price = float(exit_price)
+        if trade["symbol"] == symbol:
+            target_trade = trade
+            break
 
-            if signal == "做多":
-                pnl_pct = (exit_price - entry_price) / entry_price
-            elif signal == "做空":
-                pnl_pct = (entry_price - exit_price) / entry_price
-            else:
-                pnl_pct = 0
+    if target_trade is None:
+        return {
+            "success": False,
+            "message": f"{symbol} 沒有可平倉的持倉"
+        }
 
-            pnl_usdt = size_usdt * pnl_pct
+    entry_price = float(target_trade["entry_price"])
+    size_usdt = float(target_trade["size_usdt"])
+    signal = target_trade["signal"]
+    exit_price = float(exit_price)
 
-            account["balance"] += pnl_usdt
-            account["trades"] += 1
+    if signal == "做多":
+        pnl_pct = (exit_price - entry_price) / entry_price
+    elif signal == "做空":
+        pnl_pct = (entry_price - exit_price) / entry_price
+    else:
+        pnl_pct = 0
 
-            if pnl_usdt > 0:
-                account["wins"] += 1
-            else:
-                account["losses"] += 1
+    pnl_usdt = size_usdt * pnl_pct
 
-            trade["status"] = "CLOSED"
-            trade["exit_price"] = exit_price
-            trade["pnl_pct"] = round(pnl_pct * 100, 2)
-            trade["pnl_usdt"] = round(pnl_usdt, 2)
-            trade["close_reason"] = close_reason
-            trade["closed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    account["balance"] += pnl_usdt
+    account["trades"] += 1
 
-            save_trades(trades)
-            save_account(account)
+    if pnl_usdt > 0:
+        account["wins"] += 1
+    else:
+        account["losses"] += 1
 
-            return {
-                "success": True,
-                "message": "模擬平倉成功",
-                "trade": trade,
-                "account": account
-            }
+    update_account(
+        account["balance"],
+        account["wins"],
+        account["losses"],
+        account["trades"]
+    )
+
+    close_trade(
+        symbol=symbol,
+        exit_price=exit_price,
+        pnl_pct=round(pnl_pct * 100, 2),
+        pnl_usdt=round(pnl_usdt, 2),
+        close_reason=close_reason
+    )
+
+    closed_trade = target_trade.copy()
+    closed_trade["status"] = "CLOSED"
+    closed_trade["exit_price"] = exit_price
+    closed_trade["pnl_pct"] = round(pnl_pct * 100, 2)
+    closed_trade["pnl_usdt"] = round(pnl_usdt, 2)
+    closed_trade["close_reason"] = close_reason
 
     return {
-        "success": False,
-        "message": f"{symbol} 沒有可平倉的持倉"
+        "success": True,
+        "message": "模擬平倉成功",
+        "trade": closed_trade,
+        "account": account
     }
 
 

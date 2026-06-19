@@ -5,17 +5,14 @@ def get_account():
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
+    cur.execute("""
         SELECT balance, wins, losses, trades
         FROM accounts
         ORDER BY id DESC
         LIMIT 1;
-        """
-    )
+    """)
 
     row = cur.fetchone()
-
     cur.close()
     conn.close()
 
@@ -35,12 +32,27 @@ def get_account():
     }
 
 
+def update_account(balance, wins, losses, trades):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM accounts;")
+
+    cur.execute("""
+        INSERT INTO accounts (balance, wins, losses, trades)
+        VALUES (%s, %s, %s, %s);
+    """, (balance, wins, losses, trades))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def get_trades():
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
+    cur.execute("""
         SELECT
             symbol,
             signal,
@@ -51,14 +63,15 @@ def get_trades():
             pnl_pct,
             pnl_usdt,
             opened_at,
-            closed_at
+            closed_at,
+            stoploss,
+            takeprofit,
+            close_reason
         FROM trades
         ORDER BY id ASC;
-        """
-    )
+    """)
 
     rows = cur.fetchall()
-
     cur.close()
     conn.close()
 
@@ -75,91 +88,105 @@ def get_trades():
             "pnl_pct": float(row[6]) if row[6] is not None else None,
             "pnl_usdt": float(row[7]) if row[7] is not None else None,
             "opened_at": row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else None,
-            "closed_at": row[9].strftime("%Y-%m-%d %H:%M:%S") if row[9] else None
+            "closed_at": row[9].strftime("%Y-%m-%d %H:%M:%S") if row[9] else None,
+            "stoploss": float(row[10]) if row[10] is not None else None,
+            "takeprofit": float(row[11]) if row[11] is not None else None,
+            "close_reason": row[12]
         })
 
     return trades
 
 
 def get_open_trades():
-    trades = get_trades()
-
     return [
-        trade for trade in trades
+        trade for trade in get_trades()
         if trade["status"] == "OPEN"
     ]
 
 
 def get_closed_trades():
-    trades = get_trades()
-
     return [
-        trade for trade in trades
+        trade for trade in get_trades()
         if trade["status"] == "CLOSED"
     ]
 
 
-def insert_trade(trade):
+def get_open_trade(symbol):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
+    cur.execute("""
+        SELECT id
+        FROM trades
+        WHERE symbol = %s AND status = 'OPEN'
+        ORDER BY id DESC
+        LIMIT 1;
+    """, (symbol,))
+
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    return row[0] if row else None
+
+
+def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
         INSERT INTO trades (
             symbol,
             signal,
             entry_price,
-            exit_price,
             size_usdt,
             status,
-            pnl_pct,
-            pnl_usdt,
-            opened_at,
-            closed_at
+            stoploss,
+            takeprofit,
+            opened_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s);
-        """,
-        (
-            trade.get("symbol"),
-            trade.get("signal"),
-            trade.get("entry_price"),
-            trade.get("exit_price"),
-            trade.get("size_usdt"),
-            trade.get("status", "OPEN"),
-            trade.get("pnl_pct"),
-            trade.get("pnl_usdt"),
-            trade.get("closed_at")
-        )
-    )
+        VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, CURRENT_TIMESTAMP);
+    """, (
+        symbol,
+        signal,
+        entry_price,
+        size_usdt,
+        stoploss,
+        takeprofit
+    ))
 
     conn.commit()
     cur.close()
     conn.close()
 
 
-def update_account(balance, wins, losses, trades):
+def close_trade(symbol, exit_price, pnl_pct, pnl_usdt, close_reason):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM accounts;")
-
-    cur.execute(
-        """
-        INSERT INTO accounts (
-            balance,
-            wins,
-            losses,
-            trades
-        )
-        VALUES (%s, %s, %s, %s);
-        """,
-        (
-            balance,
-            wins,
-            losses,
-            trades
-        )
-    )
+    cur.execute("""
+        UPDATE trades
+        SET
+            status = 'CLOSED',
+            exit_price = %s,
+            pnl_pct = %s,
+            pnl_usdt = %s,
+            close_reason = %s,
+            closed_at = CURRENT_TIMESTAMP
+        WHERE id = (
+            SELECT id
+            FROM trades
+            WHERE symbol = %s AND status = 'OPEN'
+            ORDER BY id DESC
+            LIMIT 1
+        );
+    """, (
+        exit_price,
+        pnl_pct,
+        pnl_usdt,
+        close_reason,
+        symbol
+    ))
 
     conn.commit()
     cur.close()
