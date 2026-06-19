@@ -14,6 +14,7 @@ from paper_trading import (
 from analytics import get_trade_analytics
 from notifier import send_telegram
 from news_center import get_crypto_news
+from smart_ranking import get_smart_ranking
 
 app = FastAPI()
 
