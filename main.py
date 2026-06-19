@@ -17,6 +17,7 @@ from news_center import get_crypto_news
 from smart_ranking import get_smart_ranking
 from portfolio_manager import get_portfolio_summary
 from rebalance_engine import get_rebalance_recommendation
+from risk_control import get_risk_control_status
 
 app = FastAPI()
 
@@ -208,6 +209,25 @@ def home():
     analytics = get_trade_analytics()
     market = get_market_center()
     portfolio = get_portfolio_summary()
+    risk = get_risk_control_status()
+
+    risk_cards = ""
+
+    for alert in risk["alerts"]:
+        risk_color = "#22c55e"
+
+        if alert["level"] == "HIGH":
+            risk_color = "#ef4444"
+        elif alert["level"] == "MEDIUM":
+            risk_color = "#facc15"
+
+        risk_cards += f"""
+        <div class="risk-card">
+            <span style="color:{risk_color};">{alert["level"]}</span>
+            <h3>{alert["title"]}</h3>
+            <p>{alert["message"]}</p>
+        </div>
+        """
     rebalance = get_rebalance_recommendation()
 
     rebalance_cards = ""
@@ -364,6 +384,20 @@ def home():
 <div class="box">
     <h3>Exposure Ratio</h3>
     <p>{portfolio["exposure_ratio"]}%</p>
+</div>
+<div class="box">
+    <h3>System Status</h3>
+    <p>{risk["system_status"]}</p>
+</div>
+
+<div class="box">
+    <h3>Allow New Trade</h3>
+    <p>{risk["allow_new_trade"]}</p>
+</div>
+
+<div class="box">
+    <h3>Emergency Stop</h3>
+    <p>{risk["emergency_stop"]}</p>
 </div>
                 </section>
 
@@ -622,6 +656,14 @@ def home():
 
     <div class="advisor-grid">
         {rebalance_cards}
+    </div>
+</section>
+<section class="panel">
+    <h2>Risk Control Center</h2>
+    <p class="muted">根據最大回撤、曝險比例、持倉數與 Profit Factor 判斷系統風險。</p>
+
+    <div class="risk-grid">
+        {risk_cards}
     </div>
 </section>
             </main>
@@ -1036,6 +1078,33 @@ def home():
 }}
 
 .advisor-card p {{
+    color:#94a3b8;
+    line-height:1.6;
+}}
+.risk-grid {{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));
+    gap:18px;
+}}
+
+.risk-card {{
+    background:#020617;
+    border:1px solid #334155;
+    border-radius:18px;
+    padding:18px;
+}}
+
+.risk-card span {{
+    font-weight:bold;
+    font-size:13px;
+}}
+
+.risk-card h3 {{
+    margin:10px 0;
+    color:#e2e8f0;
+}}
+
+.risk-card p {{
     color:#94a3b8;
     line-height:1.6;
 }}
