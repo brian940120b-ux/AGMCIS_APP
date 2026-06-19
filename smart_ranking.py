@@ -1,51 +1,55 @@
-from market_center import get_market_center
 from market_data import get_ohlcv
 from strategy import analyze_symbol
+from news_impact import get_news_impact
+from exchange_universe import get_top_volume_symbols
+from symbol_filter import filter_symbols
 
 
 def get_smart_ranking():
-
-    market = get_market_center()
+    market = filter_symbols(
+        get_top_volume_symbols(limit=50)
+    )
 
     ranking = []
 
-    for item in market["market_data"]:
-
+    for item in market:
         symbol = item["symbol"]
 
         try:
             df = get_ohlcv(symbol)
-
             signal = analyze_symbol(symbol, df)
 
             score = 0
 
-            # 技術面
-            score += signal["score"]
+            technical_score = signal["score"]
+            score += technical_score
 
-            # 成交量加分
             volume_score = min(
-                item["volume_24h"] / 10000000,
+                item["volume"] / 10000000,
                 20
             )
 
             score += volume_score
 
-            # 漲幅加分
-            score += max(
-                item["change_24h"],
-                0
-            )
+            news_bonus = get_news_impact(symbol)
+
+            final_score = score + news_bonus
+            final_score = max(0, min(100, final_score))
 
             ranking.append({
                 "symbol": symbol,
-                "score": round(score, 2),
+                "score": round(final_score, 2),
+                "technical_score": round(technical_score, 2),
+                "volume_score": round(volume_score, 2),
+                "news_impact": news_bonus,
                 "signal": signal["signal"],
-                "price": signal["price"]
+                "price": signal["price"],
+                "exchanges": item["exchanges"],
+                "volume": round(item["volume"], 2)
             })
 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"{symbol} ranking error: {e}")
 
     ranking.sort(
         key=lambda x: x["score"],
