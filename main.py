@@ -18,6 +18,7 @@ from smart_ranking import get_smart_ranking
 from portfolio_manager import get_portfolio_summary
 from rebalance_engine import get_rebalance_recommendation
 from risk_control import get_risk_control_status
+from strategy_optimizer import get_strategy_optimizer
 
 app = FastAPI()
 
@@ -228,6 +229,18 @@ def home():
             <p>{alert["message"]}</p>
         </div>
         """
+    optimizer = get_strategy_optimizer()
+
+    optimizer_rows = ""
+
+    for item in optimizer["symbol_best"]:
+        optimizer_rows += f"""
+        <tr>
+            <td>{item["symbol"]}</td>
+            <td>{item["strategy"]}</td>
+            <td>{item["return_pct"]}%</td>
+        </tr>
+        """
     rebalance = get_rebalance_recommendation()
 
     rebalance_cards = ""
@@ -388,6 +401,15 @@ def home():
 <div class="box">
     <h3>System Status</h3>
     <p>{risk["system_status"]}</p>
+</div>
+<div class="box">
+    <h3>Best Strategy</h3>
+    <p>{optimizer["best_overall"]["strategy"]}</p>
+</div>
+
+<div class="box">
+    <h3>Strategy Avg Return</h3>
+    <p>{optimizer["best_overall"]["avg_return"]}%</p>
 </div>
 
 <div class="box">
@@ -665,6 +687,23 @@ def home():
     <div class="risk-grid">
         {risk_cards}
     </div>
+</section>
+<section class="panel">
+    <h2>Strategy Optimizer</h2>
+
+    <p class="muted">
+        系統自動比較 EMA / RSI / BREAKOUT 策略績效
+    </p>
+
+    <table>
+        <tr>
+            <th>Symbol</th>
+            <th>Best Strategy</th>
+            <th>Return</th>
+        </tr>
+
+        {optimizer_rows}
+    </table>
 </section>
             </main>
         </body>
