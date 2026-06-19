@@ -206,17 +206,13 @@ def home():
     summary = get_paper_summary()
     analytics = get_trade_analytics()
     market = get_market_center()
-    news_items = get_crypto_news()
-    news_cards = ""
+    smart_ranking = get_smart_ranking()
 
-    for item in news_items:
-     news_cards += f"""
-    <div class="news-card">
-        <h3>{item["title"]}</h3>
-        <p>{item["source"]}</p>
-        <a href="{item["url"]}" target="_blank">閱讀新聞</a>
-    </div>
-    """
+    top_pick = smart_ranking[0] if smart_ranking else {
+    "symbol": "-",
+    "score": 0,
+    "signal": "-"
+}
 
     open_rows = build_trade_rows(summary["open_trades"])
     closed_rows = build_trade_rows(summary["closed_trades"][-10:])
@@ -295,6 +291,20 @@ def home():
                         <h3>AGMCIS 熱門標的</h3>
                         <p>{market["best_symbol"]}</p>
                     </div>
+                    <div class="box">
+    <h3>Smart Top Pick</h3>
+    <p>{top_pick["symbol"]}</p>
+</div>
+
+<div class="box">
+    <h3>AI Score</h3>
+    <p>{top_pick["score"]}</p>
+</div>
+
+<div class="box">
+    <h3>AI Signal</h3>
+    <p>{top_pick["signal"]}</p>
+</div>
 
                     <div class="box">
                         <h3>模擬資金</h3>
@@ -358,8 +368,8 @@ def home():
     <p class="muted">CoinDesk / CoinTelegraph / Decrypt RSS</p>
 
     <div class="news-grid">
-        {news_cards}
-    </div>
+    {news_cards}
+    </div> 
 </section>
                 <section class="stats">
                     <div class="box">
