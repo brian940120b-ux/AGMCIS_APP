@@ -16,6 +16,7 @@ from notifier import send_telegram
 from news_center import get_crypto_news
 from smart_ranking import get_smart_ranking
 from portfolio_manager import get_portfolio_summary
+from rebalance_engine import get_rebalance_recommendation
 
 app = FastAPI()
 
@@ -207,6 +208,18 @@ def home():
     analytics = get_trade_analytics()
     market = get_market_center()
     portfolio = get_portfolio_summary()
+    rebalance = get_rebalance_recommendation()
+
+    rebalance_cards = ""
+
+    for item in rebalance["recommendations"]:
+        rebalance_cards += f"""
+        <div class="advisor-card">
+            <span>{item["type"]}</span>
+            <h3>{item["action"]}</h3>
+            <p>{item["reason"]}</p>
+        </div>
+        """
     smart_ranking = get_smart_ranking()
     news_items = get_crypto_news()
 
@@ -603,6 +616,14 @@ def home():
         }
     </table>
 </section>
+<section class="panel">
+    <h2>Portfolio AI Advisor</h2>
+    <p class="muted">根據目前持倉、曝險比例與 Smart Ranking 產生再平衡建議。</p>
+
+    <div class="advisor-grid">
+        {rebalance_cards}
+    </div>
+</section>
             </main>
         </body>
 
@@ -989,6 +1010,34 @@ def home():
 
 .news-card a:hover {{
     text-decoration:underline;
+}}
+.advisor-grid {{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));
+    gap:18px;
+}}
+
+.advisor-card {{
+    background:#020617;
+    border:1px solid #334155;
+    border-radius:18px;
+    padding:18px;
+}}
+
+.advisor-card span {{
+    color:#38bdf8;
+    font-weight:bold;
+    font-size:13px;
+}}
+
+.advisor-card h3 {{
+    margin:10px 0;
+    color:#e2e8f0;
+}}
+
+.advisor-card p {{
+    color:#94a3b8;
+    line-height:1.6;
 }}
 
 </style>
