@@ -15,6 +15,7 @@ from analytics import get_trade_analytics
 from notifier import send_telegram
 from news_center import get_crypto_news
 from smart_ranking import get_smart_ranking
+from portfolio_manager import get_portfolio_summary
 
 app = FastAPI()
 
@@ -200,19 +201,31 @@ def build_signal_cards():
 
     return cards
 
-
 @app.get("/", response_class=HTMLResponse)
 def home():
     summary = get_paper_summary()
     analytics = get_trade_analytics()
     market = get_market_center()
+    portfolio = get_portfolio_summary()
     smart_ranking = get_smart_ranking()
+    news_items = get_crypto_news()
+
+    news_cards = ""
+
+    for item in news_items:
+        news_cards += f"""
+        <div class="news-card">
+            <h3>{item["title"]}</h3>
+            <p>{item["source"]}</p>
+            <a href="{item["url"]}" target="_blank">閱讀新聞</a>
+        </div>
+        """
 
     top_pick = smart_ranking[0] if smart_ranking else {
-    "symbol": "-",
-    "score": 0,
-    "signal": "-"
-}
+        "symbol": "-",
+        "score": 0,
+        "signal": "-"
+    }
 
     open_rows = build_trade_rows(summary["open_trades"])
     closed_rows = build_trade_rows(summary["closed_trades"][-10:])
@@ -320,6 +333,25 @@ def home():
                         <h3>Profit Factor</h3>
                         <p style="color:{pf_color};">{analytics["profit_factor"]}</p>
                     </div>
+                    <div class="box">
+    <h3>Portfolio Risk</h3>
+    <p>{portfolio["risk_level"]}</p>
+</div>
+
+<div class="box">
+    <h3>Open Positions</h3>
+    <p>{portfolio["open_positions"]}</p>
+</div>
+
+<div class="box">
+    <h3>Total Exposure</h3>
+    <p>{portfolio["total_exposure"]} USDT</p>
+</div>
+
+<div class="box">
+    <h3>Exposure Ratio</h3>
+    <p>{portfolio["exposure_ratio"]}%</p>
+</div>
                 </section>
 
                 <section id="market" class="grid-three">
@@ -554,6 +586,23 @@ def home():
                         {closed_rows}
                     </table>
                 </section>
+                <section class="panel">
+    <h2>Portfolio Allocation</h2>
+
+    <table>
+        <tr>
+            <th>幣種</th>
+            <th>倉位 USDT</th>
+            <th>配置比例</th>
+        </tr>
+        {
+            "".join([
+                f"<tr><td>{item['symbol']}</td><td>{item['size_usdt']}</td><td>{item['percent']}%</td></tr>"
+                for item in portfolio["allocation"]
+            ]) if portfolio["allocation"] else "<tr><td colspan='3'>目前沒有持倉配置</td></tr>"
+        }
+    </table>
+</section>
             </main>
         </body>
 
