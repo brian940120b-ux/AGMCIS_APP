@@ -64,6 +64,20 @@ async function loadDashboard() {
             riskBox.style.color = "#ef4444";
             }
        }
+const statusBox =
+    document.getElementById("system_status");
+
+if (statusBox) {
+    statusBox.innerText = data.system_status || "-";
+
+    if (data.system_status === "ACTIVE") {
+        statusBox.style.color = "#22c55e";
+    } else if (data.system_status === "LIMITED") {
+        statusBox.style.color = "#f59e0b";
+    } else {
+        statusBox.style.color = "#ef4444";
+    }
+}
 
         const statsRes =
     await fetch("/api/stats");

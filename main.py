@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from database_service import get_account,get_open_trades,get_closed_trades
 from market_data import get_price
 from datetime import datetime
+from risk_control import get_risk_control_status
 app=FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 def tr(x):
@@ -32,7 +33,7 @@ def home():
     return f"""<html><head><meta charset='utf-8'><title>AGMCIS Dashboard</title><style>
 body{{margin:0;background:#020617;color:#e5e7eb;font-family:Arial;padding:28px}}h1{{color:#38bdf8}}.muted{{color:#94a3b8}}.grid{{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}}.card{{background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:18px}}.card b{{font-size:24px}}table{{width:100%;border-collapse:collapse;background:#0f172a;margin:18px 0;border-radius:14px;overflow:hidden}}th,td{{padding:11px;border-bottom:1px solid #1e293b;text-align:left}}th{{background:#111827;color:#38bdf8}}.pos{{color:#22c55e;font-weight:bold}}.neg{{color:#ef4444;font-weight:bold}}</style></head><body>
 <h1>AGMCIS Dashboard Lite</h1><p class='muted'>Top50 掃描、模擬交易、TP/SL、Telegram 都在背景服務運作。API 即時更新模式。</p><p class='muted'>最後更新：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-<div class='grid'><div class='card'>帳戶資金<br><b id='balance'>{a.get('balance')} USDT</b></div><div class='card'>總交易<br><b id='trades'>{n}</b></div><div class='card'>勝率<br><b id='win_rate'>{wr}%</b></div><div class='card'>目前持倉<br><b id='open_count'>{len(o)}</b></div><div class='card'>淨損益<br><b class='{netc}'>{net} USDT</b></div><div class='card'>槓桿模式<br><b>2x / 3x / 5x</b></div><div class='card'>總浮盈虧<br><b id='total_open_upnl'>0 USDT</b></div><div class='card'>風險等級<br><b id='risk_level'>LOW</b></div><div class='card'>最佳交易<br><b id='best_trade'>0</b></div><div class='card'>最差交易<br><b id='worst_trade'>0</b></div><div class='card'>Profit Factor<br><b id='profit_factor'>0</b></div><div class='card'>已平倉<br><b id='total_closed_trades'>0</b></div></div>
+<div class='grid'><div class='card'>帳戶資金<br><b id='balance'>{a.get('balance')} USDT</b></div><div class='card'>總交易<br><b id='trades'>{n}</b></div><div class='card'>勝率<br><b id='win_rate'>{wr}%</b></div><div class='card'>目前持倉<br><b id='open_count'>{len(o)}</b></div><div class='card'>淨損益<br><b class='{netc}'>{net} USDT</b></div><div class='card'>槓桿模式<br><b>2x / 3x / 5x</b></div><div class='card'>總浮盈虧<br><b id='total_open_upnl'>0 USDT</b></div><div class='card'>風險等級<br><b id='risk_level'>LOW</b></div><div class='card'>系統狀態<br><b id='system_status'>-</b></div><div class='card'>最佳交易<br><b id='best_trade'>0</b></div><div class='card'>最差交易<br><b id='worst_trade'>0</b></div><div class='card'>Profit Factor<br><b id='profit_factor'>0</b></div><div class='card'>已平倉<br><b id='total_closed_trades'>0</b></div></div>
 <h2>目前持倉</h2><table id="open_positions_table"><tr><th>幣種</th><th>方向</th><th>槓桿</th><th>倉位價值</th><th>進場</th><th>現價</th><th>出場</th><th>停損</th><th>停利</th><th>ROI</th><th>UPNL</th><th>已實現</th><th>狀態</th><th>時間/原因</th></tr>{tr(o)}</table>
 <h2>資金曲線</h2><div class="card"><div id="equity_curve">Loading...</div></div><h2>排行榜</h2><div class="grid"><div class="card"><h3>🏆 Top Winners</h3><div id="top_winners">Loading...</div></div><div class="card"><h3>💀 Top Losers</h3><div id="top_losers">Loading...</div></div></div><h2>持倉總覽</h2><div class="grid"><div class="card">🟢 獲利持倉<br><b id="profit_positions">0</b></div><div class="card">🔴 虧損持倉<br><b id="loss_positions">0</b></div><div class="card">⚪ 打平持倉<br><b id="flat_positions">0</b></div><div class="card">📈 最大浮盈<br><b id="max_profit_position">-</b></div><div class="card">📉 最大浮虧<br><b id="max_loss_position">-</b></div></div><h2>目前持倉排行</h2><div class="grid"><div class="card"><h3>🔥 最佳持倉</h3><div id="best_positions">Loading...</div></div><div class="card"><h3>⚠️ 最差持倉</h3><div id="worst_positions">Loading...</div></div></div><h2>最近平倉</h2><table><tr><th>幣種</th><th>方向</th><th>槓桿</th><th>倉位價值</th><th>進場</th><th>現價</th><th>出場</th><th>停損</th><th>停利</th><th>ROI</th><th>UPNL</th><th>已實現</th><th>狀態</th><th>時間/原因</th></tr>{tr(c[-10:])}</table>
 <p class='muted'>服務：agmcis / agmcis-opportunity / agmcis-position / agmcis-report</p><script src='/static/dashboard.js'></script></body></html>"""
@@ -42,6 +43,7 @@ def api_dashboard():
     a = get_account()
     o = get_open_trades()
     c = get_closed_trades()
+    risk = get_risk_control_status()
 
     positions = []
 
@@ -90,6 +92,7 @@ def api_dashboard():
         "closed_count": len(c),
         "total_open_upnl": round(sum(p["upnl"] for p in positions), 2),
         "risk_level": "HIGH" if sum(p["upnl"] for p in positions) < -100 else "MEDIUM" if sum(p["upnl"] for p in positions) < 0 else "LOW",
+        "system_status": risk.get("system_status"),
         "positions": positions
     }
 
