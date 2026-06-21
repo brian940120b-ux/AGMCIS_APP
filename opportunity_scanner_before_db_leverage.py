@@ -68,16 +68,16 @@ def scan_opportunities():
         else:
             continue
 
-        leverage = get_leverage(score)
-        position_value = POSITION_SIZE_USDT * leverage
-
-        result = create_paper_trade(symbol=symbol, entry_price=price, signal=signal, size_usdt=POSITION_SIZE_USDT, stoploss=stoploss, takeprofit=takeprofit, leverage=leverage, position_value=position_value)
+        result = create_paper_trade(symbol=symbol, entry_price=price, signal=signal, size_usdt=POSITION_SIZE_USDT, stoploss=stoploss, takeprofit=takeprofit)
 
         if not result.get("success"):
             print(f"Skip {symbol}: {result.get('message')}")
             continue
 
         opened_count += 1
+
+        leverage = get_leverage(score)
+        position_value = POSITION_SIZE_USDT * leverage
 
         message = f"""
 AGMCIS AUTO PAPER TRADE OPENED

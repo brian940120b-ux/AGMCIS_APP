@@ -2,6 +2,7 @@ import ccxt
 
 
 EXCHANGES = {
+    "binance": ccxt.binance(),
     "okx": ccxt.okx(),
     "bingx": ccxt.bingx()
 }
@@ -22,7 +23,8 @@ BLOCK_WORDS = [
     "AMZN",
     "GOOG",
     "META",
-    "NVDA"
+    "NVDA",
+    "ON"
 ]
 
 
@@ -55,14 +57,20 @@ def get_top_volume_symbols(limit=50):
         print(f"Loading {exchange_name}...")
 
         try:
-            exchange.load_markets()
+            markets = exchange.load_markets()
             tickers = exchange.fetch_tickers()
 
             for symbol, ticker in tickers.items():
+                if symbol not in markets:
+                    continue
+
                 if not is_valid_symbol(symbol):
                     continue
 
-                quote_volume = ticker.get("quoteVolume") or 0
+                quote_volume = ticker.get("quoteVolume")
+
+                if quote_volume is None:
+                    quote_volume = 0
 
                 if symbol not in candidates:
                     candidates[symbol] = {
@@ -72,9 +80,7 @@ def get_top_volume_symbols(limit=50):
                     }
 
                 candidates[symbol]["volume"] += quote_volume
-
-                if exchange_name not in candidates[symbol]["exchanges"]:
-                    candidates[symbol]["exchanges"].append(exchange_name)
+                candidates[symbol]["exchanges"].append(exchange_name)
 
         except Exception as e:
             print(exchange_name, "ERROR:", e)

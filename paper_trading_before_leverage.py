@@ -45,9 +45,7 @@ def create_paper_trade(
     signal,
     size_usdt=1000,
     stoploss=None,
-    takeprofit=None,
-    leverage=3,
-    position_value=3000
+    takeprofit=None
 ):
     if has_open_trade(symbol):
         return {
@@ -61,9 +59,7 @@ def create_paper_trade(
         entry_price=float(entry_price),
         size_usdt=float(size_usdt),
         stoploss=None if stoploss == "-" else stoploss,
-        takeprofit=None if takeprofit == "-" else takeprofit,
-        leverage=leverage,
-        position_value=position_value
+        takeprofit=None if takeprofit == "-" else takeprofit
     )
 
     return {

@@ -130,7 +130,7 @@ def get_open_trade(symbol):
     return row[0] if row else None
 
 
-def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None, leverage=3, position_value=3000):
+def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None):
     conn = get_connection()
     cur = conn.cursor()
 
@@ -143,20 +143,16 @@ def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprof
             status,
             stoploss,
             takeprofit,
-            leverage,
-            position_value,
             opened_at
         )
-        VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, CURRENT_TIMESTAMP);
+        VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, CURRENT_TIMESTAMP);
     """, (
         symbol,
         signal,
         entry_price,
         size_usdt,
         stoploss,
-        takeprofit,
-        leverage,
-        position_value
+        takeprofit
     ))
 
     conn.commit()

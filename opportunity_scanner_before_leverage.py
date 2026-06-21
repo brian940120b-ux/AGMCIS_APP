@@ -10,13 +10,6 @@ MAX_OPEN_TRADES = 5
 POSITION_SIZE_USDT = 1000
 ALLOWED_SIGNALS = ["做多", "做空"]
 
-def get_leverage(score):
-    if score >= 90:
-        return 5
-    if score >= 80:
-        return 3
-    return 2
-
 
 def scan_opportunities():
     ranking = get_smart_ranking()
@@ -68,10 +61,7 @@ def scan_opportunities():
         else:
             continue
 
-        leverage = get_leverage(score)
-        position_value = POSITION_SIZE_USDT * leverage
-
-        result = create_paper_trade(symbol=symbol, entry_price=price, signal=signal, size_usdt=POSITION_SIZE_USDT, stoploss=stoploss, takeprofit=takeprofit, leverage=leverage, position_value=position_value)
+        result = create_paper_trade(symbol=symbol, entry_price=price, signal=signal, size_usdt=POSITION_SIZE_USDT, stoploss=stoploss, takeprofit=takeprofit)
 
         if not result.get("success"):
             print(f"Skip {symbol}: {result.get('message')}")
@@ -89,9 +79,7 @@ Symbol: {symbol}
 Signal: {signal}
 Score: {score}
 Entry: {price}
-Margin: {POSITION_SIZE_USDT} USDT
-Leverage: {leverage}x
-Position Value: {position_value} USDT
+Size: {POSITION_SIZE_USDT} USDT
 
 Stop Loss: {stoploss}
 Take Profit: {takeprofit}

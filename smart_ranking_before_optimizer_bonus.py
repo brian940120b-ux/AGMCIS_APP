@@ -3,7 +3,6 @@ from strategy import analyze_symbol
 from news_impact import get_news_impact
 from exchange_universe import get_top_volume_symbols
 from symbol_filter import filter_symbols
-from optimizer_bonus import get_optimizer_bonus
 
 
 def get_smart_ranking():
@@ -33,9 +32,8 @@ def get_smart_ranking():
             score += volume_score
 
             news_bonus = get_news_impact(symbol)
-            optimizer_bonus = get_optimizer_bonus(symbol)
 
-            final_score = score + news_bonus + optimizer_bonus
+            final_score = score + news_bonus
             final_score = max(0, min(100, final_score))
 
             ranking.append({
@@ -44,7 +42,6 @@ def get_smart_ranking():
                 "technical_score": round(technical_score, 2),
                 "volume_score": round(volume_score, 2),
                 "news_impact": news_bonus,
-                "optimizer_bonus": optimizer_bonus,
                 "signal": signal["signal"],
                 "price": signal["price"],
                 "exchanges": item["exchanges"],

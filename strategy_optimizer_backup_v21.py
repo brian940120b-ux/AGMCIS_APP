@@ -8,14 +8,13 @@ import strategies.rsi_strategy as rsi_strategy
 import strategies.breakout_strategy as breakout_strategy
 
 
-from exchange_universe import get_top_volume_symbols
-
-
-def get_dynamic_symbols(limit=20):
-    return [item["symbol"] for item in get_top_volume_symbols(limit=limit)]
-
-
-SYMBOLS = get_dynamic_symbols(limit=20)
+SYMBOLS = [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT"
+]
 
 
 STRATEGIES = [

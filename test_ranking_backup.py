@@ -11,7 +11,7 @@ for index, item in enumerate(ranking[:20], start=1):
         f"Score={item['score']} | "
         f"Tech={item['technical_score']} | "
         f"Vol={item['volume_score']} | "
-        f"News={item['news_impact']} | Opt={item.get('optimizer_bonus',0)} | "
+        f"News={item['news_impact']} | "
         f"Signal={item['signal']} | "
         f"Exchanges={item['exchanges']}"
     )

@@ -2,10 +2,10 @@ import time
 from datetime import datetime
 
 from auto_trader import run_auto_trader
-from daily_report import send_daily_report
+
 
 INTERVAL_SECONDS = 300  # 300秒 = 5分鐘
-last_report_date = None
+
 
 def main():
     print()
@@ -19,18 +19,6 @@ def main():
 
         print()
         print(f"執行時間：{now}")
-	
-        global last_report_date
-
-        now_dt = datetime.now()
-
-        if now_dt.hour == 8 and last_report_date != now_dt.date():
-            try:
-                send_daily_report()
-                last_report_date = now_dt.date()
-                print("Daily Report 已發送")
-            except Exception as e:
-                print(f"Daily Report 發送失敗：{e}")
 
         try:
             run_auto_trader()
