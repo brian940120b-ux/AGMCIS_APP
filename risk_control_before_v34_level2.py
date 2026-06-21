@@ -6,7 +6,6 @@ MAX_DRAWDOWN_LIMIT = 15
 MAX_EXPOSURE_LIMIT = 80
 MAX_OPEN_POSITIONS = 5
 MIN_PROFIT_FACTOR = 0.8
-MAX_TOTAL_OPEN_LOSS = -300
 
 
 def get_risk_control_status():
@@ -21,7 +20,6 @@ def get_risk_control_status():
     profit_factor = analytics.get("profit_factor", 0)
     exposure_ratio = portfolio.get("exposure_ratio", 0)
     open_positions = portfolio.get("open_positions", 0)
-    total_open_upnl = portfolio.get("total_open_upnl", 0)
 
     if max_drawdown >= MAX_DRAWDOWN_LIMIT:
         alerts.append({
@@ -48,13 +46,6 @@ def get_risk_control_status():
         })
         allow_new_trade = False
 
-    if total_open_upnl <= MAX_TOTAL_OPEN_LOSS:
-        alerts.append({
-            "level": "HIGH",
-            "title": "總浮虧過高",
-            "message": f"目前總浮虧 {total_open_upnl} USDT，已低於限制 {MAX_TOTAL_OPEN_LOSS} USDT，暫停新開倉。"
-        })
-        allow_new_trade = False
     if profit_factor != 0 and profit_factor < MIN_PROFIT_FACTOR:
         alerts.append({
             "level": "MEDIUM",
@@ -84,6 +75,5 @@ def get_risk_control_status():
         "exposure_ratio": exposure_ratio,
         "open_positions": open_positions,
         "profit_factor": profit_factor,
-        "total_open_upnl": total_open_upnl,
         "alerts": alerts
     }

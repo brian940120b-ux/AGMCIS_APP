@@ -2,54 +2,12 @@ from database_service import get_open_trades
 from market_data import get_price
 from notifier import send_telegram
 from paper_trading import close_paper_trade
-from portfolio_manager import get_portfolio_summary
 
 ALERT_PERCENT = 3
 EMERGENCY_ROI = -15
-FULL_BREAKER_UPNL = -500
 
 def check_risk_alerts():
-    portfolio = get_portfolio_summary()
-    total_open_upnl = float(portfolio.get("total_open_upnl") or 0)
 
-    if total_open_upnl <= FULL_BREAKER_UPNL:
-
-        closed = []
-
-        for trade in portfolio.get("open_trades", []):
-
-            symbol = trade.get("symbol")
-            price = get_price(symbol)
-
-            if not price:
-                continue
-
-            result = close_paper_trade(
-                symbol,
-                price,
-                "V35 全倉熔斷平倉"
-            )
-
-            if result.get("success"):
-                closed.append(symbol)
-        with open("trading_pause.flag", "w") as f:
-            f.write("V35 FULL CIRCUIT BREAKER")
-
-        send_telegram(
-            f"""🚨 AGMCIS FULL CIRCUIT BREAKER
-
-總浮盈虧：{round(total_open_upnl,2)} USDT
-
-觸發條件：總浮虧小於等於 {FULL_BREAKER_UPNL} USDT
-
-已強制平倉：
-{", ".join(closed) if closed else "無"}
-
-系統狀態：全倉風控已執行
-"""
-        )
-
-        return
     trades = get_open_trades()
 
     for t in trades:

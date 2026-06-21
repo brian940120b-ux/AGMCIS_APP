@@ -2,7 +2,7 @@ from smart_ranking import get_smart_ranking
 from risk_control import get_risk_control_status
 from notifier import send_telegram
 from paper_trading import create_paper_trade, get_paper_summary
-import os
+
 
 MIN_SCORE = 70
 TOP_N = 5
@@ -37,13 +37,7 @@ def scan_opportunities():
             f"System Status: {risk['system_status']}"
         )
         return
-    if os.path.exists("trading_pause.flag"):
-        send_telegram(
-            "⛔ AGMCIS Trading Paused\n\n"
-            "偵測到 trading_pause.flag\n"
-            "目前暫停新開倉。"
-        )
-        return
+
     summary = get_paper_summary()
     open_trades = summary.get("open_trades", [])
 

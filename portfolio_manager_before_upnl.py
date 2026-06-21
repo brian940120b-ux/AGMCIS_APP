@@ -1,5 +1,4 @@
 from paper_trading import load_trades, load_account
-from market_data import get_price
 
 
 def get_portfolio_summary():
@@ -23,31 +22,7 @@ def get_portfolio_summary():
         if balance > 0
         else 0
     )
-    total_open_upnl = 0
 
-    for trade in open_trades:
-        symbol = trade.get("symbol")
-        signal = trade.get("signal")
-        entry = float(trade.get("entry_price") or 0)
-        size = float(trade.get("size_usdt") or 0)
-        leverage = float(trade.get("leverage") or 3)
-
-        current = get_price(symbol)
-
-        if not current or entry <= 0:
-            continue
-
-        if signal == "做多":
-            raw = (float(current) - entry) / entry * 100
-        elif signal == "做空":
-            raw = (entry - float(current)) / entry * 100
-        else:
-            raw = 0
-
-        roi = raw * leverage
-        upnl = size * roi / 100
-
-        total_open_upnl += upnl
     allocation_map = {}
 
     for trade in open_trades:
@@ -95,6 +70,5 @@ def get_portfolio_summary():
         "exposure_ratio": round(exposure_ratio, 2),
         "risk_level": risk_level,
         "allocation": allocation,
-        "open_trades": open_trades,
-        "total_open_upnl": round(total_open_upnl, 2),
+        "open_trades": open_trades
     }
