@@ -183,7 +183,26 @@ data.positions.forEach(function(p){
                 table.innerHTML = html;    
         }
 
-        const eqRes =
+        
+const analyticsRes =
+    await fetch("/api/analytics_pro");
+
+const analytics =
+    await analyticsRes.json();
+
+document.getElementById("total_realized").innerText =
+    analytics.total_realized + " USDT";
+
+document.getElementById("max_win_streak").innerText =
+    analytics.max_win_streak;
+
+document.getElementById("max_loss_streak").innerText =
+    analytics.max_loss_streak;
+
+document.getElementById("analytics_closed_trades").innerText =
+    analytics.closed_trades;
+
+const eqRes =
             await fetch("/api/equity_curve");
 
         const eq =
