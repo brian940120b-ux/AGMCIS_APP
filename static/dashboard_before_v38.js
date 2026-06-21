@@ -71,20 +71,11 @@ if (statusBox) {
     statusBox.innerText = data.system_status || "-";
 
     if (data.system_status === "ACTIVE") {
-        statusBox.innerText = "🟢 ACTIVE";
         statusBox.style.color = "#22c55e";
-
     } else if (data.system_status === "LIMITED") {
-        statusBox.innerText = "🟡 LIMITED";
         statusBox.style.color = "#f59e0b";
-
-    } else if (data.system_status === "EMERGENCY_STOP") {
-        statusBox.innerText = "🔴 EMERGENCY STOP";
-        statusBox.style.color = "#ef4444";
-
     } else {
-        statusBox.innerText = "⛔ PAUSED";
-        statusBox.style.color = "#94a3b8";
+        statusBox.style.color = "#ef4444";
     }
 }
 
@@ -169,8 +160,8 @@ data.positions.forEach(function(p){
     "<td>-</td>" +
     "<td>" + p.stoploss + "</td>" +
     "<td>" + p.takeprofit + "</td>" +
-    "<td class='" + (Number(p.distance_to_sl) <= 3 ? "neg" : "") + "'>" + (Number(p.distance_to_sl) <= 3 ? "🚨 " : "") + p.distance_to_sl + "%</td>" +
-    "<td class='" + (Number(p.distance_to_tp) <= 3 ? "pos" : "") + "'>" + (Number(p.distance_to_tp) <= 3 ? "🎯 " : "") + p.distance_to_tp + "%</td>" +
+    "<td>" + p.distance_to_sl + "%</td>" +
+    "<td>" + p.distance_to_tp + "%</td>" +
     "<td class='" + cls + "'>" + p.roi + "%</td>" +
     "<td class='" + cls + "'>" + p.upnl + " USDT</td>" +
     "<td>-</td>" +

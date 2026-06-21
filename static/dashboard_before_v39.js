@@ -169,8 +169,8 @@ data.positions.forEach(function(p){
     "<td>-</td>" +
     "<td>" + p.stoploss + "</td>" +
     "<td>" + p.takeprofit + "</td>" +
-    "<td class='" + (Number(p.distance_to_sl) <= 3 ? "neg" : "") + "'>" + (Number(p.distance_to_sl) <= 3 ? "🚨 " : "") + p.distance_to_sl + "%</td>" +
-    "<td class='" + (Number(p.distance_to_tp) <= 3 ? "pos" : "") + "'>" + (Number(p.distance_to_tp) <= 3 ? "🎯 " : "") + p.distance_to_tp + "%</td>" +
+    "<td>" + p.distance_to_sl + "%</td>" +
+    "<td>" + p.distance_to_tp + "%</td>" +
     "<td class='" + cls + "'>" + p.roi + "%</td>" +
     "<td class='" + cls + "'>" + p.upnl + " USDT</td>" +
     "<td>-</td>" +

@@ -195,26 +195,3 @@ def close_trade(symbol, exit_price, pnl_pct, pnl_usdt, close_reason):
     conn.commit()
     cur.close()
     conn.close()
-def update_trade_stoploss(symbol, stoploss):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        UPDATE paper_trades
-        SET stoploss = %s
-        WHERE symbol = %s
-        AND status = 'OPEN'
-        """,
-        (
-            stoploss,
-            symbol
-        )
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return True
-
