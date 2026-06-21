@@ -319,6 +319,35 @@ if (worstBox) {
 
     worstBox.innerHTML = html;
 }
+
+const nearestSLBox =
+    document.getElementById("nearest_sl");
+
+if (nearestSLBox) {
+    let html = "";
+    [...data.positions]
+        .sort((a,b) => Number(a.distance_to_sl) - Number(b.distance_to_sl))
+        .slice(0,3)
+        .forEach(function(p){
+            html += "🚨 " + p.symbol + " : " + p.distance_to_sl + "%<br>";
+        });
+    nearestSLBox.innerHTML = html;
+}
+
+const nearestTPBox =
+    document.getElementById("nearest_tp");
+
+if (nearestTPBox) {
+    let html = "";
+    [...data.positions]
+        .sort((a,b) => Number(a.distance_to_tp) - Number(b.distance_to_tp))
+        .slice(0,3)
+        .forEach(function(p){
+            html += "🎯 " + p.symbol + " : " + p.distance_to_tp + "%<br>";
+        });
+    nearestTPBox.innerHTML = html;
+}
+
 const profitCount =
     data.positions.filter(p => Number(p.upnl) > 0).length;
 
@@ -370,7 +399,25 @@ if (maxLossBox && sortedPositions.length > 0) {
 }
         }
 
-        document.title =
+        
+
+const uptimeBox =
+    document.getElementById("uptime");
+
+if (uptimeBox) {
+    uptimeBox.innerText =
+        formatUptime(data.uptime_seconds);
+}
+
+const lastUpdateBox =
+    document.getElementById("last_update");
+
+if (lastUpdateBox) {
+    lastUpdateBox.innerText =
+        new Date().toLocaleTimeString();
+}
+
+document.title =
             "AGMCIS Live " +
             new Date().toLocaleTimeString();
 
@@ -385,6 +432,16 @@ if (maxLossBox && sortedPositions.length > 0) {
     }
 }
 
-setInterval(loadDashboard, 1000);
+setInterval(loadDashboard, 5000);
 
 loadDashboard();
+
+function formatUptime(sec) {
+    sec = Number(sec || 0);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return d + "d " + h + "h";
+    return h + "h " + m + "m";
+}
+
