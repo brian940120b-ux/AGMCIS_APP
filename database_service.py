@@ -201,7 +201,7 @@ def update_trade_stoploss(symbol, stoploss):
 
     cur.execute(
         """
-        UPDATE paper_trades
+        UPDATE trades
         SET stoploss = %s
         WHERE symbol = %s
         AND status = 'OPEN'
