@@ -99,13 +99,6 @@ def close_paper_trade(symbol, exit_price, close_reason="手動平倉"):
         }
 
     entry_price = float(target_trade["entry_price"])
-
-    if entry_price <= 0:
-        return {
-            "success": False,
-            "message": f"{symbol} entry_price 異常，已略過平倉，避免除以 0"
-        }
-
     size_usdt = float(target_trade["size_usdt"])
     signal = target_trade["signal"]
     exit_price = float(exit_price)
