@@ -104,3 +104,13 @@ def handle_positions():
         "📈 AGMCIS Positions Pro\n\n" +
         "\n".join(lines)
     )
+
+def handle_pause():
+    from system_control import pause_system
+    pause_system()
+    send_message("⏸ AGMCIS 已暫停自動開倉\n\n持倉管理、停損、Trailing Stop 仍會繼續運作。")
+
+def handle_resume():
+    from system_control import resume_system
+    resume_system()
+    send_message("▶️ AGMCIS 已恢復自動開倉")
