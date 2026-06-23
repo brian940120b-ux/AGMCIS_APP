@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from database_service import get_account,get_open_trades,get_closed_trades
 from market_data import get_price
 from datetime import datetime
 import time
+import os
 from risk_control import get_risk_control_status
 START_TIME = time.time()
 app=FastAPI()
@@ -28,7 +29,18 @@ def tr(x):
         s+=f"<tr><td>{t.get('symbol','-')}</td><td>{t.get('signal','-')}</td><td>3x</td><td>{round((t.get('size_usdt') or 0)*3,2)} USDT</td><td>{t.get('entry_price','-')}</td><td>{current if current else '-'}</td><td>{t.get('exit_price','-')}</td><td>{t.get('stoploss','-')}</td><td>{t.get('takeprofit','-')}</td><td class='{pnlc}'>{roi}%</td><td class='{pnlc}'>{upnl} USDT</td><td class='{pnlc}'>{pnl if pnl is not None else '-'}</td><td>{t.get('status','-')}</td><td>{t.get('close_reason') or t.get('opened_at','-')}</td></tr>"
     return s
 @app.get("/",response_class=HTMLResponse)
-def home():
+def home(request: Request):
+
+    key = request.query_params.get("key")
+    expected = os.getenv("DASHBOARD_KEY", "agmcis2026")
+
+    if key != expected:
+        return """<html><head><meta charset='utf-8'><title>AGMCIS Login</title></head>
+        <body style='background:#020617;color:#e5e7eb;font-family:Arial;padding:40px'>
+        <h1>AGMCIS Protected</h1>
+        <p>請在網址後面加上 ?key=你的密碼</p>
+        </body></html>"""
+
     a=get_account();o=get_open_trades();c=get_closed_trades();w=a.get("wins",0);l=a.get("losses",0);n=a.get("trades",0);wr=round(w/n*100,2) if n else 0
     net=round(sum((t.get("pnl_usdt") or 0) for t in c),2)
     netc="pos" if net>=0 else "neg"
