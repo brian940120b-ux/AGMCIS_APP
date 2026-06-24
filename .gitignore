@@ -21,4 +21,5 @@ signal_cache.json
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.db*.tar.gz
+*.zip
