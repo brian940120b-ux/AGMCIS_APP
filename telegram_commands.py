@@ -349,3 +349,57 @@ def handle_losers():
 
     send_message(msg)
 
+
+def handle_balance():
+
+    from database_service import (
+        get_account,
+        get_open_trades,
+        get_closed_trades
+    )
+
+    account = get_account()
+    open_trades = get_open_trades()
+    closed_trades = get_closed_trades()
+
+    from market_data import get_price
+
+    total_upnl = 0
+
+    for t in open_trades:
+        symbol = t.get("symbol")
+        signal = t.get("signal")
+        entry = float(t.get("entry_price") or 0)
+        size = float(t.get("size_usdt") or 0)
+
+        price = get_price(symbol)
+
+        if not price or entry <= 0:
+            continue
+
+        price = float(price)
+
+        if signal == "做多":
+            roi = (price-entry)/entry*100*3
+        else:
+            roi = (entry-price)/entry*100*3
+
+        total_upnl += size*roi/100
+
+    msg = f"""
+💰 AGMCIS Balance
+
+帳戶資金：{account.get("balance")} USDT
+
+總浮盈虧：{round(total_upnl,2)} USDT
+
+目前持倉：{len(open_trades)}
+已平倉：{len(closed_trades)}
+
+勝場：{account.get("wins")}
+敗場：{account.get("losses")}
+總交易：{account.get("trades")}
+"""
+
+    send_message(msg)
+
