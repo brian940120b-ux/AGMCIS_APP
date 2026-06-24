@@ -427,26 +427,54 @@ def handle_scan():
 
 
 def handle_close(symbol):
+
     from database_service import get_open_trades
-    from pathlib import Path
-    import json
 
     trades = get_open_trades()
 
+    target = None
+
     for t in trades:
         if t.get("symbol") == symbol:
-            Path("pending_close.json").write_text(
-                json.dumps({"symbol": symbol})
-            )
-            send_message(
-                f"⚠️ 平倉確認\n\n"
-                f"幣種：{symbol}\n\n"
-                f"如確認要平倉，請輸入：\n"
-                f"/confirm_close {symbol.replace('/', '')}"
-            )
-            return
+            target = t
+            break
 
-    send_message(f"❌ 找不到持倉：{symbol}")
+    if target is None:
+        send_message(f"❌ 找不到持倉：{symbol}")
+        return
+
+
+    from market_data import get_price
+    from paper_trading import close_paper_trade
+
+    price = get_price(symbol)
+
+    if not price:
+        send_message(f"❌ 無法取得價格：{symbol}")
+        return
+
+    result = close_paper_trade(
+        symbol=symbol,
+        exit_price=price,
+        close_reason="Telegram 手動平倉"
+    )
+
+
+    if result.get("success"):
+        trade = result.get("trade", {})
+        send_message(
+            f"✅ 手動平倉完成\n\n"
+            f"幣種：{symbol}\n"
+            f"出場價：{price}\n"
+            f"盈虧：{trade.get('pnl_usdt')} USDT\n"
+            f"報酬率：{trade.get('pnl_pct')}%"
+        )
+    else:
+        send_message(
+            f"❌ 手動平倉失敗\n\n"
+            f"幣種：{symbol}\n"
+            f"原因：{result.get('message')}"
+        )
 
 
 def handle_confirm_close(symbol):

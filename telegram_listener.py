@@ -16,7 +16,9 @@ from telegram_commands import (
     handle_top,
     handle_losers,
     handle_balance,
-    handle_scan
+    handle_scan,
+    handle_close,
+    handle_confirm_close
 )
 
 load_dotenv()
@@ -91,6 +93,54 @@ while True:
 
             elif text == "/scan":
                 handle_scan()
+
+            elif text.startswith("/close "):
+                symbol = text.replace("/close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_close(symbol)
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text.startswith("/close "):
+                symbol = text.replace("/close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_close(symbol)
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
 
     except Exception as e:
         print("ERROR:", e)
