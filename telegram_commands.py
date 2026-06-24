@@ -114,3 +114,68 @@ def handle_resume():
     from system_control import resume_system
     resume_system()
     send_message("▶️ AGMCIS 已恢復自動開倉")
+
+def handle_report():
+    from position_report import send_position_report
+    send_position_report()
+
+def handle_help():
+    msg = """
+🤖 AGMCIS Command Center
+
+/status - 系統狀態
+/positions - 目前持倉
+/report - 持倉完整報告
+/pause - 暫停自動開倉
+/resume - 恢復自動開倉
+/help - 指令說明
+
+AGMCIS V62 Pro
+"""
+    send_message(msg)
+
+def handle_analytics():
+    import requests
+
+    data = requests.get(
+        "http://127.0.0.1:8000/api/analytics_pro",
+        timeout=10
+    ).json()
+
+    msg = f"""
+📊 AGMCIS Analytics
+
+已實現收益：{data.get('total_realized')} USDT
+最大連勝：{data.get('max_win_streak')}
+最大連敗：{data.get('max_loss_streak')}
+已平倉交易：{data.get('closed_trades')}
+
+AGMCIS V62 Pro
+"""
+    send_message(msg)
+
+def handle_risk():
+    import requests
+
+    data = requests.get(
+        "http://127.0.0.1:8000/api/dashboard",
+        timeout=10
+    ).json()
+
+    msg = f"""
+⚠️ AGMCIS Risk Center
+
+風險等級：{data.get('risk_level')}
+系統狀態：{data.get('system_status')}
+
+持倉數量：{data.get('open_count')}
+已平倉：{data.get('closed_count')}
+
+總浮盈虧：
+{data.get('total_open_upnl')} USDT
+
+AGMCIS V62 Pro
+"""
+
+    send_message(msg)
+

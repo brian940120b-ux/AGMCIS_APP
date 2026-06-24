@@ -7,7 +7,11 @@ from telegram_commands import (
     handle_status,
     handle_positions,
     handle_pause,
-    handle_resume
+    handle_resume,
+    handle_help,
+    handle_report,
+    handle_analytics,
+    handle_risk
 )
 
 load_dotenv()
