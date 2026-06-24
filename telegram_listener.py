@@ -15,7 +15,8 @@ from telegram_commands import (
     handle_health,
     handle_top,
     handle_losers,
-    handle_balance
+    handle_balance,
+    handle_scan
 )
 
 load_dotenv()
@@ -87,6 +88,9 @@ while True:
 
             elif text == "/balance":
                 handle_balance()
+
+            elif text == "/scan":
+                handle_scan()
 
     except Exception as e:
         print("ERROR:", e)

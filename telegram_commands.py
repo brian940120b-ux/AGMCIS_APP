@@ -403,3 +403,25 @@ def handle_balance():
 
     send_message(msg)
 
+
+def handle_scan():
+
+    try:
+        from opportunity_scanner import scan_opportunities
+
+        result = scan_opportunities()
+
+
+        msg = "🔍 AGMCIS Scan\n\n"
+
+        if result:
+            msg += str(result)
+        else:
+            msg += "掃描完成，無新訊號"
+
+        send_message(msg)
+
+
+    except Exception as e:
+        send_message(f"❌ Scan Error\n\n{e}")
+
