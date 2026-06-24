@@ -1,4 +1,3 @@
-from pathlib import Path
 from analytics import get_trade_analytics
 from portfolio_manager import get_portfolio_summary
 
@@ -17,15 +16,6 @@ def get_risk_control_status():
     alerts = []
     allow_new_trade = True
     emergency_stop = False
-
-    if Path("emergency.stop").exists():
-        alerts.append({
-            "level": "HIGH",
-            "title": "Telegram 緊急停止",
-            "message": "偵測到 emergency.stop，暫停新開倉。"
-        })
-        allow_new_trade = False
-        emergency_stop = True
 
     max_drawdown = analytics.get("max_drawdown", 0)
     profit_factor = analytics.get("profit_factor", 0)

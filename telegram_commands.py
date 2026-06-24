@@ -498,3 +498,41 @@ def handle_confirm_close(symbol):
             f"原因：{result.get('message')}"
         )
 
+
+def handle_cancel_close():
+    from pathlib import Path
+
+    Path("pending_close.json").write_text("{}")
+
+    send_message("✅ 已取消待確認平倉")
+
+
+def handle_emergency():
+
+    from pathlib import Path
+
+    Path("emergency.stop").write_text("EMERGENCY")
+
+    send_message(
+        "🚨 AGMCIS EMERGENCY MODE\n\n"
+        "Scanner OFF\n"
+        "New Trades OFF\n"
+        "System Protected"
+    )
+
+
+def handle_resume_trading():
+
+    from pathlib import Path
+
+    p = Path("emergency.stop")
+
+    if p.exists():
+        p.unlink()
+
+    send_message(
+        "✅ AGMCIS Trading Resumed\n\n"
+        "Emergency Stop 已解除\n"
+        "Scanner 已恢復"
+    )
+
