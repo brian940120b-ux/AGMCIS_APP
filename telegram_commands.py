@@ -179,3 +179,173 @@ AGMCIS V62 Pro
 
     send_message(msg)
 
+
+def handle_health():
+    import subprocess
+
+    services = [
+        "agmcis",
+        "agmcis-position",
+        "agmcis-opportunity",
+        "agmcis-telegram-listener"
+    ]
+
+    lines = ["🟢 AGMCIS Health\n"]
+
+    for svc in services:
+        try:
+            status = subprocess.check_output(
+                ["systemctl","is-active",svc],
+                text=True
+            ).strip()
+
+            icon = "🟢" if status == "active" else "🔴"
+
+            lines.append(
+                f"{icon} {svc} : {status}"
+            )
+
+        except:
+            lines.append(
+                f"🔴 {svc} : error"
+            )
+
+    send_message("\n".join(lines))
+
+
+def handle_top():
+
+    from database_service import get_open_trades
+    from market_data import get_price
+
+    trades = get_open_trades()
+
+    if not trades:
+        send_message("目前沒有持倉")
+        return
+
+    rows = []
+
+    for t in trades:
+
+        symbol = t.get("symbol")
+        signal = t.get("signal")
+        entry = float(t.get("entry_price") or 0)
+        size = float(t.get("size_usdt") or 0)
+
+        price = get_price(symbol)
+
+        if not price or entry <= 0:
+            continue
+
+        price = float(price)
+
+        if signal == "做多":
+            roi = (price-entry)/entry*100*3
+        else:
+            roi = (entry-price)/entry*100*3
+
+        upnl = size*roi/100
+
+        rows.append((upnl,symbol,roi))
+
+    rows.sort(reverse=True)
+
+    msg = "🏆 Top Positions\n\n"
+
+    for i,r in enumerate(rows[:5],1):
+        msg += f"{i}. {r[1]}\nROI {round(r[2],2)}%\nUPNL {round(r[0],2)} USDT\n\n"
+
+    send_message(msg)
+
+
+def handle_top():
+
+    from database_service import get_open_trades
+    from market_data import get_price
+
+    trades = get_open_trades()
+
+    if not trades:
+        send_message("目前沒有持倉")
+        return
+
+    rows = []
+
+    for t in trades:
+
+        symbol = t.get("symbol")
+        signal = t.get("signal")
+        entry = float(t.get("entry_price") or 0)
+        size = float(t.get("size_usdt") or 0)
+
+        price = get_price(symbol)
+
+        if not price or entry <= 0:
+            continue
+
+        price = float(price)
+
+        if signal == "做多":
+            roi = (price-entry)/entry*100*3
+        else:
+            roi = (entry-price)/entry*100*3
+
+        upnl = size*roi/100
+
+        rows.append((upnl,symbol,roi))
+
+    rows.sort(reverse=True)
+
+    msg = "🏆 Top Positions\n\n"
+
+    for i,r in enumerate(rows[:5],1):
+        msg += f"{i}. {r[1]}\nROI {round(r[2],2)}%\nUPNL {round(r[0],2)} USDT\n\n"
+
+    send_message(msg)
+
+def handle_losers():
+
+    from database_service import get_open_trades
+    from market_data import get_price
+
+    trades = get_open_trades()
+
+    if not trades:
+        send_message("目前沒有持倉")
+        return
+
+    rows = []
+
+    for t in trades:
+
+        symbol = t.get("symbol")
+        signal = t.get("signal")
+        entry = float(t.get("entry_price") or 0)
+        size = float(t.get("size_usdt") or 0)
+
+        price = get_price(symbol)
+
+        if not price or entry <= 0:
+            continue
+
+        price = float(price)
+
+        if signal == "做多":
+            roi = (price-entry)/entry*100*3
+        else:
+            roi = (entry-price)/entry*100*3
+
+        upnl = size*roi/100
+
+        rows.append((upnl,symbol,roi))
+
+    rows.sort()
+
+    msg = "⚠️ Worst Positions\n\n"
+
+    for i,r in enumerate(rows[:5],1):
+        msg += f"{i}. {r[1]}\nROI {round(r[2],2)}%\nUPNL {round(r[0],2)} USDT\n\n"
+
+    send_message(msg)
+

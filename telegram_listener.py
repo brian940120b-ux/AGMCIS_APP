@@ -11,7 +11,10 @@ from telegram_commands import (
     handle_help,
     handle_report,
     handle_analytics,
-    handle_risk
+    handle_risk,
+    handle_health,
+    handle_top,
+    handle_losers
 )
 
 load_dotenv()
@@ -59,6 +62,27 @@ while True:
 
             elif text == "/resume":
                 handle_resume()
+
+            elif text == "/help":
+                handle_help()
+
+            elif text == "/report":
+                handle_report()
+
+            elif text == "/analytics":
+                handle_analytics()
+
+            elif text == "/risk":
+                handle_risk()
+
+            elif text == "/health":
+                handle_health()
+
+            elif text == "/top":
+                handle_top()
+
+            elif text == "/losers":
+                handle_losers()
 
     except Exception as e:
         print("ERROR:", e)
