@@ -15,38 +15,10 @@ async function refreshDashboard() {
         ]);
 
         console.log("Dashboard:", dashboard);
-
-document.getElementById("balance").innerText =
-dashboard.balance + " USDT";
         console.log("Portfolio:", portfolio);
-
-document.getElementById("win_rate").innerText =
-dashboard.win_rate + "%";
         console.log("Performance:", performance);
-
-document.getElementById("trades").innerText =
-dashboard.trades;
         console.log("Stats:", stats);
-
-document.getElementById("open_count").innerText =
-dashboard.open_count;
         console.log("Journal:", journal);
-
-document.getElementById("profit_factor").innerText =
-stats.profit_factor.toFixed(2);
-
-if (performance.best) {
-    document.getElementById("best_trade").innerText =
-        performance.best.pnl_usdt.toFixed(2) + " USDT";
-}
-
-if (performance.worst) {
-    document.getElementById("worst_trade").innerText =
-        performance.worst.pnl_usdt.toFixed(2) + " USDT";
-}
-
-document.getElementById("total_open_upnl").innerText =
-    dashboard.total_open_upnl.toFixed(2) + " USDT";
 
     } catch (err) {
         console.error("Dashboard refresh failed:", err);
