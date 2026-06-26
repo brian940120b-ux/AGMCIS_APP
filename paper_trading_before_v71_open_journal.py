@@ -76,12 +76,6 @@ def create_paper_trade(
         position_value=position_value
     )
 
-    try:
-        from journal_service import log_open
-        log_open(symbol, signal, float(entry_price), "Paper trade opened")
-    except Exception as e:
-        print("Journal OPEN failed:", e)
-
     return {
         "success": True,
         "message": "模擬開倉成功",

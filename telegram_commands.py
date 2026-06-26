@@ -562,3 +562,29 @@ def handle_journal():
 
     send_message(msg)
 
+
+def handle_performance():
+    from performance_service import get_performance_summary
+
+    p = get_performance_summary()
+    best = p.get("best") or {}
+    worst = p.get("worst") or {}
+
+    msg = f"""
+📊 AGMCIS Performance
+
+總交易：{p.get('total_trades')}
+已平倉：{p.get('closed_trades')}
+勝率：{p.get('win_rate')}%
+
+總損益：{p.get('total_pnl')} USDT
+平均每筆：{p.get('avg_pnl')} USDT
+
+🏆 最佳交易：
+{best.get('symbol', '-')} {best.get('pnl_usdt', '-')} USDT
+
+⚠️ 最差交易：
+{worst.get('symbol', '-')} {worst.get('pnl_usdt', '-')} USDT
+"""
+    send_message(msg)
+
