@@ -21,7 +21,10 @@ def get_indicators(symbol):
 
         trend = "BULLISH" if ema20 > ema60 else "BEARISH"
     except Exception:
-        pass
+        rsi = None
+    ema20 = None
+    ema60 = None
+    trend = "UNKNOWN"
 
     return {
         "symbol": symbol,
