@@ -9,6 +9,8 @@ import os
 from risk_control import get_risk_control_status
 START_TIME = time.time()
 app=FastAPI()
+from api.portfolio import router as portfolio_router
+app.include_router(portfolio_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 def tr(x):
     if not x:return "<tr><td colspan=9>目前沒有資料</td></tr>"
@@ -250,9 +252,6 @@ def api_analytics_pro():
         "closed_trades": len(trades)
     }
 
-@app.get("/api/portfolio")
-def api_portfolio():
-    from portfolio_service import get_portfolio
     return get_portfolio()
 
 
