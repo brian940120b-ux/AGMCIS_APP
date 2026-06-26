@@ -57,12 +57,28 @@ def create_paper_trade(
 
     try:
         entry_price = float(entry_price)
-        stoploss = float(stoploss)
-        takeprofit = float(takeprofit)
+        stoploss_value = float(stoploss)
+        takeprofit_value = float(takeprofit)
+    except Exception:
+        return {
+            "success": False,
+            "message": f"{symbol} 開倉資料異常，entry/SL/TP 無法轉為數字"
+        }
+
+    if entry_price <= 0 or stoploss_value <= 0 or takeprofit_value <= 0:
+        return {
+            "success": False,
+            "message": f"{symbol} 開倉資料異常，entry/SL/TP 不可為 0"
+        }
+
+    try:
+        entry_price = float(entry_price)
+        stoploss_value = float(stoploss)
+        takeprofit_value = float(takeprofit)
     except Exception:
         return {"success": False, "message": f"{symbol} 開倉資料異常"}
 
-    if entry_price <= 0 or stoploss <= 0 or takeprofit <= 0:
+    if entry_price <= 0 or stoploss_value <= 0 or takeprofit_value <= 0:
         return {"success": False, "message": f"{symbol} entry/SL/TP 不可為 0"}
 
     insert_trade(

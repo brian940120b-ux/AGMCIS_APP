@@ -55,16 +55,6 @@ def create_paper_trade(
             "message": f"{symbol} 已有持倉，不重複開倉"
         }
 
-    try:
-        entry_price = float(entry_price)
-        stoploss = float(stoploss)
-        takeprofit = float(takeprofit)
-    except Exception:
-        return {"success": False, "message": f"{symbol} 開倉資料異常"}
-
-    if entry_price <= 0 or stoploss <= 0 or takeprofit <= 0:
-        return {"success": False, "message": f"{symbol} entry/SL/TP 不可為 0"}
-
     insert_trade(
         symbol=symbol,
         signal=signal,
