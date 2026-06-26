@@ -23,6 +23,8 @@ from api.analytics import router as analytics_router
 app.include_router(analytics_router)
 from api.equity import router as equity_router
 app.include_router(equity_router)
+from api.dashboard import router as dashboard_router
+app.include_router(dashboard_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 def tr(x):
     if not x:return "<tr><td colspan=9>目前沒有資料</td></tr>"
