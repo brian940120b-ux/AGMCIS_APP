@@ -536,3 +536,29 @@ def handle_resume_trading():
         "Scanner 已恢復"
     )
 
+
+def handle_journal():
+    from journal_service import get_recent
+
+    rows = get_recent(10)
+
+    if not rows:
+        send_message("📒 目前沒有交易日誌")
+        return
+
+    msg = "📒 AGMCIS 最近交易日誌\n\n"
+
+    for r in rows:
+        symbol, action, price, reason, created_at = r
+        icon = "🟢" if action == "OPEN" else "🔴"
+
+        msg += (
+            f"{icon} {action}\n"
+            f"幣種：{symbol}\n"
+            f"價格：{price}\n"
+            f"原因：{reason}\n"
+            f"時間：{created_at}\n\n"
+        )
+
+    send_message(msg)
+

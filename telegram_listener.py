@@ -21,7 +21,8 @@ from telegram_commands import (
     handle_confirm_close,
     handle_cancel_close,
     handle_emergency,
-    handle_resume_trading
+    handle_resume_trading,
+    handle_journal
 )
 
 load_dotenv()
@@ -118,20 +119,8 @@ while True:
             elif text == "/resume_trading":
                 handle_resume_trading()
 
-            elif text.startswith("/confirm_close "):
-                symbol = text.replace("/confirm_close ", "").strip().upper()
-                if "/" not in symbol:
-                    symbol = symbol.replace("USDT", "") + "/USDT"
-                handle_confirm_close(symbol)
-
-            elif text == "/cancel_close":
-                handle_cancel_close()
-
-            elif text == "/emergency":
-                handle_emergency()
-
-            elif text == "/resume_trading":
-                handle_resume_trading()
+            elif text == "/journal":
+                handle_journal()
 
             elif text.startswith("/confirm_close "):
                 symbol = text.replace("/confirm_close ", "").strip().upper()
@@ -147,6 +136,27 @@ while True:
 
             elif text == "/resume_trading":
                 handle_resume_trading()
+
+            elif text == "/journal":
+                handle_journal()
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text == "/cancel_close":
+                handle_cancel_close()
+
+            elif text == "/emergency":
+                handle_emergency()
+
+            elif text == "/resume_trading":
+                handle_resume_trading()
+
+            elif text == "/journal":
+                handle_journal()
 
             elif text.startswith("/close "):
                 symbol = text.replace("/close ", "").strip().upper()
@@ -169,20 +179,8 @@ while True:
             elif text == "/resume_trading":
                 handle_resume_trading()
 
-            elif text.startswith("/confirm_close "):
-                symbol = text.replace("/confirm_close ", "").strip().upper()
-                if "/" not in symbol:
-                    symbol = symbol.replace("USDT", "") + "/USDT"
-                handle_confirm_close(symbol)
-
-            elif text == "/cancel_close":
-                handle_cancel_close()
-
-            elif text == "/emergency":
-                handle_emergency()
-
-            elif text == "/resume_trading":
-                handle_resume_trading()
+            elif text == "/journal":
+                handle_journal()
 
             elif text.startswith("/confirm_close "):
                 symbol = text.replace("/confirm_close ", "").strip().upper()
@@ -198,6 +196,27 @@ while True:
 
             elif text == "/resume_trading":
                 handle_resume_trading()
+
+            elif text == "/journal":
+                handle_journal()
+
+            elif text.startswith("/confirm_close "):
+                symbol = text.replace("/confirm_close ", "").strip().upper()
+                if "/" not in symbol:
+                    symbol = symbol.replace("USDT", "") + "/USDT"
+                handle_confirm_close(symbol)
+
+            elif text == "/cancel_close":
+                handle_cancel_close()
+
+            elif text == "/emergency":
+                handle_emergency()
+
+            elif text == "/resume_trading":
+                handle_resume_trading()
+
+            elif text == "/journal":
+                handle_journal()
 
     except Exception as e:
         print("ERROR:", e)
