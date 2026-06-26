@@ -257,6 +257,10 @@ def api_analytics_pro():
     return get_portfolio()
 
 
+@app.get("/api/performance")
+def api_performance():
+    from performance_service import get_performance_summary
+    return get_performance_summary()
 
 
 @app.get("/api/journal")
