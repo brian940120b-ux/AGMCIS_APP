@@ -253,12 +253,12 @@ async function updateAIDecisionBox(){
         if(!el) return;
 
         el.innerHTML=data.decisions.map(d=>`
-        <div style="padding:6px 0;border-bottom:1px solid #333;">
+        <div style="padding:10px 0;border-bottom:1px solid #333;">
             <b>${d.symbol}</b>
             <span style="float:right">${d.action}</span><br>
-            AI信心：${d.confidence}%｜
-            趨勢：${d.trend_score}｜
-            風險：${d.risk_score}
+            AI信心：${d.confidence}%｜ROI：${d.roi ?? "-"}%｜RSI：${d.indicators?.rsi ?? "-"}<br>
+            EMA20：${d.indicators?.ema20 ?? "-"}｜EMA60：${d.indicators?.ema60 ?? "-"}<br>
+            趨勢：${d.indicators?.trend ?? "-"}｜停損距離：${d.distance_to_sl ?? "-"}%｜停利距離：${d.distance_to_tp ?? "-"}%
         </div>`).join("");
     }catch(e){
         console.error(e);
