@@ -34,7 +34,6 @@ dashboard.open_count;
 
 updateOpenPositions(dashboard);
         updateJournal(journal);
-        updateEquityChart(await AGMCIS_API.equity());
 
 document.getElementById("profit_factor").innerText =
 stats.profit_factor.toFixed(2);
@@ -93,33 +92,4 @@ function updateJournal(journal) {
     ).join("");
 
   title.insertAdjacentElement("beforebegin", table);
-}
-
-let equityChart = null;
-
-function updateEquityChart(equity) {
-  const canvas = document.getElementById("equityChart");
-  if (!canvas || !equity || !equity.points) return;
-
-  const labels = equity.points.map(p => p.index);
-  const data = equity.points.map(p => p.balance);
-
-  if (equityChart) {
-    equityChart.data.labels = labels;
-    equityChart.data.datasets[0].data = data;
-    equityChart.update();
-    return;
-  }
-
-  equityChart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: labels,
-      datasets: [{
-        label: "Equity",
-        data: data,
-        tension: 0.35
-      }]
-    }
-  });
 }
