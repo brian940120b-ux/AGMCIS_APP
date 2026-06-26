@@ -250,3 +250,32 @@ def api_analytics_pro():
         "max_loss_streak": max_loss_streak,
         "closed_trades": len(trades)
     }
+
+@app.get("/api/portfolio")
+def api_portfolio():
+    from portfolio_service import get_portfolio
+    return get_portfolio()
+
+
+@app.get("/api/performance")
+def api_performance():
+    from performance_service import get_performance_summary
+    return get_performance_summary()
+
+
+@app.get("/api/journal")
+def api_journal():
+    from journal_service import get_recent
+    rows = get_recent(20)
+
+    return [
+        {
+            "symbol": r[0],
+            "action": r[1],
+            "price": float(r[2]),
+            "reason": r[3],
+            "created_at": str(r[4])
+        }
+        for r in rows
+    ]
+

@@ -616,3 +616,22 @@ def handle_portfolio():
         f"📦 開倉數：{p['open_positions']}"
     )
 
+
+def handle_stats():
+    from stats_service import get_stats
+
+    s = get_stats()
+
+    send_message(
+        f"📈 AGMCIS Trading Stats\n\n"
+        f"總交易：{s['total']}\n"
+        f"勝場：{s['wins']}\n"
+        f"敗場：{s['losses']}\n"
+        f"勝率：{s['win_rate']}%\n\n"
+        f"平均獲利：{s['avg_win']} USDT\n"
+        f"平均虧損：{s['avg_loss']} USDT\n"
+        f"Profit Factor：{s['profit_factor']}\n\n"
+        f"帳戶餘額：{s['balance']} USDT\n"
+        f"目前開倉：{s['open_positions']}"
+    )
+
