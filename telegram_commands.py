@@ -588,3 +588,31 @@ def handle_performance():
 """
     send_message(msg)
 
+
+def handle_portfolio():
+    from portfolio_service import get_portfolio
+
+    p = get_portfolio()
+
+    send_message(
+        f"💼 AGMCIS Portfolio\n\n"
+        f"💰 餘額：{p['balance']} USDT\n"
+        f"🔒 已用保證金：{p['margin_used']} USDT\n"
+        f"💵 可用資金：{p['available']} USDT\n"
+        f"📦 開倉數：{p['open_positions']}"
+    )
+
+
+def handle_portfolio():
+    from portfolio_service import get_portfolio
+
+    p = get_portfolio()
+
+    send_message(
+        f"💼 AGMCIS Portfolio\n\n"
+        f"💰 餘額：{p['balance']} USDT\n"
+        f"🔒 已用保證金：{p['margin_used']} USDT\n"
+        f"💵 可用資金：{p['available']} USDT\n"
+        f"📦 開倉數：{p['open_positions']}"
+    )
+
