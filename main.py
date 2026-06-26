@@ -13,6 +13,8 @@ from api.portfolio import router as portfolio_router
 app.include_router(portfolio_router)
 from api.performance import router as performance_router
 app.include_router(performance_router)
+from api.journal import router as journal_router
+app.include_router(journal_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 def tr(x):
     if not x:return "<tr><td colspan=9>目前沒有資料</td></tr>"
