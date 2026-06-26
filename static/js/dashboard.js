@@ -244,3 +244,26 @@ function updatePositionRankingBox() {
 updatePositionRankingBox();
 setInterval(updatePositionRankingBox,5000);
 
+
+
+async function updateAIDecisionBox(){
+    try{
+        const data=await AGMCIS_API.aiDecisions();
+        const el=document.getElementById("ai_decisions");
+        if(!el) return;
+
+        el.innerHTML=data.decisions.map(d=>`
+        <div style="padding:6px 0;border-bottom:1px solid #333;">
+            <b>${d.symbol}</b>
+            <span style="float:right">${d.action}</span><br>
+            AI信心：${d.confidence}%｜
+            趨勢：${d.trend_score}｜
+            風險：${d.risk_score}
+        </div>`).join("");
+    }catch(e){
+        console.error(e);
+    }
+}
+
+updateAIDecisionBox();
+setInterval(updateAIDecisionBox,5000);

@@ -13,5 +13,6 @@ const AGMCIS_API = {
   stats: () => apiGet("/api/stats"),
   journal: () => apiGet("/api/journal"),
   analytics: () => apiGet("/api/analytics_pro"),
-  equity: () => apiGet("/api/equity_curve")
+  equity: () => apiGet("/api/equity_curve"),
+  aiDecisions: () => apiGet("/api/ai_decisions")
 };
