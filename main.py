@@ -17,6 +17,8 @@ from api.journal import router as journal_router
 app.include_router(journal_router)
 from api.stats import router as stats_router
 app.include_router(stats_router)
+from api.leaderboard import router as leaderboard_router
+app.include_router(leaderboard_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 def tr(x):
     if not x:return "<tr><td colspan=9>目前沒有資料</td></tr>"
