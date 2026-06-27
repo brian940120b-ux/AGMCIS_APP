@@ -256,6 +256,7 @@ async function updateAIDecisionBox(){
         <div style="padding:10px 0;border-bottom:1px solid #333;">
             <b>${d.symbol}</b>
             <span style="float:right">${d.action}</span><br>
+            ${data.decisions.indexOf(d)===0 ? "🥇 Top Opportunity<br>" : ""}
             AI建議：${d.trade_signal ?? "-"}<br>AI信心：${d.confidence}%｜ROI：${d.roi ?? "-"}%｜RSI：${d.indicators?.rsi ?? "-"}<br>
             EMA20：${d.indicators?.ema20 ?? "-"}｜EMA60：${d.indicators?.ema60 ?? "-"}<br>
             MACD：${d.indicators?.macd ?? "-"}｜Signal：${d.indicators?.macd_signal ?? "-"}｜Hist：${d.indicators?.macd_hist ?? "-"}<br>
