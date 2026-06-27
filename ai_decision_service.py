@@ -21,6 +21,16 @@ def score_rsi(rsi):
         return 40
     return 60
 
+
+def score_macd(macd_hist):
+    if macd_hist is None:
+        return 50
+    if macd_hist > 0:
+        return 80
+    if macd_hist < 0:
+        return 40
+    return 50
+
 def score_trend(trend):
     if trend == "BULLISH":
         return 80
@@ -79,13 +89,15 @@ def get_ai_decisions():
         roi_score = score_roi(roi)
         rsi_score = score_rsi(indicators.get("rsi"))
         trend_score = score_trend(indicators.get("trend"))
+        macd_score = score_macd(indicators.get("macd_hist"))
         risk_score = score_risk(distance_sl, distance_tp)
 
         confidence = round(
-            roi_score * 0.30 +
+            roi_score * 0.25 +
             rsi_score * 0.20 +
-            trend_score * 0.30 +
-            risk_score * 0.20,
+            trend_score * 0.25 +
+            macd_score * 0.15 +
+            risk_score * 0.15,
             2
         )
 
