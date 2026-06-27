@@ -1,6 +1,7 @@
 from market_data import get_price, get_ohlcv
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
+from ta.volatility import AverageTrueRange
 
 def get_indicators(symbol):
     """
@@ -14,6 +15,7 @@ def get_indicators(symbol):
     macd = None
     macd_signal = None
     macd_hist = None
+    atr = None
     trend = "UNKNOWN"
 
     try:
@@ -27,6 +29,15 @@ def get_indicators(symbol):
         macd_signal = round(float(macd_obj.macd_signal().iloc[-1]),4)
         macd_hist = round(float(macd_obj.macd_diff().iloc[-1]),4)
 
+        atr = round(float(
+            AverageTrueRange(
+                high=df["high"],
+                low=df["low"],
+                close=df["close"],
+                window=14
+            ).average_true_range().iloc[-1]
+        ),4)
+
         trend = "BULLISH" if ema20 > ema60 else "BEARISH"
     except Exception:
         pass
@@ -38,6 +49,7 @@ def get_indicators(symbol):
         "macd": macd,
         "macd_signal": macd_signal,
         "macd_hist": macd_hist,
+        "atr": atr,
         "ema20": ema20,
         "ema60": ema60,
         "trend": trend,
