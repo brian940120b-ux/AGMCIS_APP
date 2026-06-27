@@ -4,6 +4,7 @@ router = APIRouter()
 import time
 from database_service import get_account, get_open_trades, get_closed_trades
 from market_data import get_price
+from technical_service import get_indicators
 from risk_control import get_risk_control_status
 
 
@@ -27,6 +28,8 @@ def api_dashboard():
         size = float(t.get("size_usdt") or 0)
         leverage = float(t.get("leverage") or 3)
         current = get_price(symbol)
+        if current is None:
+            current = get_indicators(symbol).get("price")
 
         if current and entry:
             if signal == "做多":
