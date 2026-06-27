@@ -296,3 +296,27 @@ async function updateLoggerHealthBox(){
 
 updateLoggerHealthBox();
 setInterval(updateLoggerHealthBox,10000);
+
+async function updateTopOpportunitiesBox(){
+    try{
+        const res = await fetch("/api/ai_decisions");
+        const data = await res.json();
+        const el = document.getElementById("top_opportunities");
+        if(!el) return;
+
+        const top3 = (data.decisions || []).slice(0,3);
+
+        el.innerHTML = top3.map((d,i)=>`
+            <div style="padding:8px 0;border-bottom:1px solid #333;">
+                <b>${i===0 ? "🥇" : i===1 ? "🥈" : "🥉"} ${d.symbol}</b>
+                <span style="float:right">${d.trade_signal ?? "-"}</span><br>
+                信心：${d.confidence}%｜ROI：${d.roi ?? "-"}%｜趨勢：${d.indicators?.trend ?? "-"}
+            </div>
+        `).join("");
+    }catch(e){
+        console.error(e);
+    }
+}
+
+updateTopOpportunitiesBox();
+setInterval(updateTopOpportunitiesBox,10000);
