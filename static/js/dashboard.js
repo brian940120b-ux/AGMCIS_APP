@@ -256,7 +256,7 @@ async function updateAIDecisionBox(){
         <div style="padding:10px 0;border-bottom:1px solid #333;">
             <b>${d.symbol}</b>
             <span style="float:right">${d.action}</span><br>
-            AI信心：${d.confidence}%｜ROI：${d.roi ?? "-"}%｜RSI：${d.indicators?.rsi ?? "-"}<br>
+            AI建議：${d.trade_signal ?? "-"}<br>AI信心：${d.confidence}%｜ROI：${d.roi ?? "-"}%｜RSI：${d.indicators?.rsi ?? "-"}<br>
             EMA20：${d.indicators?.ema20 ?? "-"}｜EMA60：${d.indicators?.ema60 ?? "-"}<br>
             MACD：${d.indicators?.macd ?? "-"}｜Signal：${d.indicators?.macd_signal ?? "-"}｜Hist：${d.indicators?.macd_hist ?? "-"}<br>
             趨勢：${d.indicators?.trend ?? "-"}｜停損距離：${d.distance_to_sl ?? "-"}%｜停利距離：${d.distance_to_tp ?? "-"}%
@@ -268,3 +268,30 @@ async function updateAIDecisionBox(){
 
 updateAIDecisionBox();
 setInterval(updateAIDecisionBox,5000);
+
+async function updateLoggerHealthBox(){
+    try{
+        const res = await fetch("/api/logger_health");
+        const data = await res.json();
+        const el = document.getElementById("logger_health");
+        if(!el) return;
+
+        const lines = data.last_20 || [];
+        const errors = lines.filter(x => x.includes("ERROR")).length;
+        const warnings = lines.filter(x => x.includes("WARNING")).length;
+
+        el.innerHTML = `
+            狀態：${data.status}｜
+            Log 行數：${data.line_count ?? 0}｜
+            ERROR：${errors}｜
+            WARNING：${warnings}
+            <hr>
+            <pre style="white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto;">${lines.join("\n")}</pre>
+        `;
+    }catch(e){
+        console.error(e);
+    }
+}
+
+updateLoggerHealthBox();
+setInterval(updateLoggerHealthBox,10000);

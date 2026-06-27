@@ -1,6 +1,7 @@
 from database_service import get_open_trades
 from market_data import get_price
 from technical_service import get_indicators
+from decision_engine import get_trade_signal
 
 def clamp(v, low=0, high=100):
     return max(low, min(high, v))
@@ -132,9 +133,12 @@ def get_ai_decisions():
         else:
             reason = "多因子 AI 評估：信心偏低，建議降低風險。"
 
+        trade_signal = get_trade_signal(confidence, action)
+
         results.append({
             "symbol": symbol,
             "action": action,
+            "trade_signal": trade_signal,
             "confidence": confidence,
             "trend_score": round(trend_score, 2),
             "risk_score": round(risk_score, 2),
