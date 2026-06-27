@@ -22,6 +22,21 @@ def score_rsi(rsi):
     return 60
 
 
+
+def score_atr(atr, price):
+    if atr is None or not price:
+        return 50
+
+    atr_pct = (atr / price) * 100
+
+    if atr_pct > 5:
+        return 30
+    if atr_pct > 3:
+        return 45
+    if atr_pct > 1.5:
+        return 60
+    return 75
+
 def score_macd(macd_hist):
     if macd_hist is None:
         return 50
@@ -90,14 +105,16 @@ def get_ai_decisions():
         rsi_score = score_rsi(indicators.get("rsi"))
         trend_score = score_trend(indicators.get("trend"))
         macd_score = score_macd(indicators.get("macd_hist"))
+        atr_score = score_atr(indicators.get("atr"), current)
         risk_score = score_risk(distance_sl, distance_tp)
 
         confidence = round(
-            roi_score * 0.25 +
-            rsi_score * 0.20 +
-            trend_score * 0.25 +
+            roi_score * 0.20 +
+            rsi_score * 0.18 +
+            trend_score * 0.22 +
             macd_score * 0.15 +
-            risk_score * 0.15,
+            risk_score * 0.15 +
+            atr_score * 0.10,
             2
         )
 
