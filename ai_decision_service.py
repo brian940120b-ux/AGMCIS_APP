@@ -133,7 +133,7 @@ def get_ai_decisions():
         else:
             reason = "多因子 AI 評估：信心偏低，建議降低風險。"
 
-        trade_signal = get_trade_signal(confidence, action)
+        trade_signal = get_trade_signal(confidence, action, indicators, roi, distance_sl)
 
         results.append({
             "symbol": symbol,
