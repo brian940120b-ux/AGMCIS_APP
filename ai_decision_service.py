@@ -2,6 +2,7 @@ from database_service import get_open_trades
 from market_data import get_price
 from technical_service import get_indicators
 from decision_engine import get_trade_signal
+from logger_service import logger
 
 def clamp(v, low=0, high=100):
     return max(low, min(high, v))
@@ -134,6 +135,8 @@ def get_ai_decisions():
             reason = "多因子 AI 評估：信心偏低，建議降低風險。"
 
         trade_signal = get_trade_signal(confidence, action, indicators, roi, distance_sl)
+
+        logger.info(f"AI Decision | {symbol} | {trade_signal} | confidence={confidence:.2f} | roi={roi}")
 
         results.append({
             "symbol": symbol,
