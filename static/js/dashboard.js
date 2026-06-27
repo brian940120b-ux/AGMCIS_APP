@@ -258,6 +258,7 @@ async function updateAIDecisionBox(){
             <span style="float:right">${d.action}</span><br>
             AI信心：${d.confidence}%｜ROI：${d.roi ?? "-"}%｜RSI：${d.indicators?.rsi ?? "-"}<br>
             EMA20：${d.indicators?.ema20 ?? "-"}｜EMA60：${d.indicators?.ema60 ?? "-"}<br>
+            MACD：${d.indicators?.macd ?? "-"}｜Signal：${d.indicators?.macd_signal ?? "-"}｜Hist：${d.indicators?.macd_hist ?? "-"}<br>
             趨勢：${d.indicators?.trend ?? "-"}｜停損距離：${d.distance_to_sl ?? "-"}%｜停利距離：${d.distance_to_tp ?? "-"}%
         </div>`).join("");
     }catch(e){
