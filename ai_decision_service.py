@@ -154,4 +154,14 @@ def get_ai_decisions():
             "indicators": indicators
         })
 
-    return rank_decisions(results)
+    ranked = rank_decisions(results)
+
+    top3 = ranked[:3]
+    summary = " | ".join([
+        f"{i+1}. {d.get('symbol')} {d.get('trade_signal')} {d.get('confidence')}%"
+        for i, d in enumerate(top3)
+    ])
+
+    logger.info(f"Top Opportunities | {summary}")
+
+    return ranked
