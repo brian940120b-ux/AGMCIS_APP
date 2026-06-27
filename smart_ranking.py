@@ -1,4 +1,5 @@
 from market_data import get_ohlcv
+from logger_service import logger
 from strategy import analyze_symbol
 from news_impact import get_news_impact
 from exchange_universe import get_top_volume_symbols
@@ -52,7 +53,7 @@ def get_smart_ranking():
             })
 
         except Exception as e:
-            print(f"{symbol} ranking error: {e}")
+            logger.exception(f"{symbol} ranking error: {e}")
 
     ranking.sort(
         key=lambda x: x["score"],

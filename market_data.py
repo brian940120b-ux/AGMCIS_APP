@@ -1,6 +1,7 @@
 import time
 import ccxt
 import pandas as pd
+from logger_service import logger
 
 EXCHANGES = {
     "okx": ccxt.okx(),
@@ -19,7 +20,7 @@ def get_exchange_for_symbol(symbol):
             if symbol in markets:
                 return name, exchange
         except Exception as e:
-            print(f"{name} load_markets error: {e}")
+            logger.error(f"{name} load_markets error: {e}")
     return None, None
 
 
@@ -27,7 +28,7 @@ def get_ohlcv(symbol="BTC/USDT", timeframe="1h", limit=150):
     name, exchange = get_exchange_for_symbol(symbol)
 
     if exchange is None:
-        print(f"{symbol} not found on OKX/BingX")
+        logger.warning(f"{symbol} not found on OKX/BingX")
         return None
 
     try:
@@ -53,7 +54,7 @@ def get_ohlcv(symbol="BTC/USDT", timeframe="1h", limit=150):
         return df
 
     except Exception as e:
-        print(f"{symbol} get_ohlcv error on {name}: {e}")
+        logger.error(f"{symbol} get_ohlcv error on {name}: {e}")
         return None
 
 

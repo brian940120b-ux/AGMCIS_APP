@@ -80,7 +80,7 @@ def create_paper_trade(
         from journal_service import log_open
         log_open(symbol, signal, float(entry_price), "Paper trade opened")
     except Exception as e:
-        print("Journal OPEN failed:", e)
+        logger.exception(f"Journal OPEN failed: {e}")
 
     return {
         "success": True,

@@ -1,5 +1,6 @@
 from paper_trading import get_all_open_trades, close_paper_trade
 from market_data import get_price
+from logger_service import logger
 from notifier import send_telegram
 
 
@@ -7,7 +8,7 @@ def manage_open_positions():
     open_trades = get_all_open_trades()
 
     if not open_trades:
-        print("目前沒有持倉需要管理")
+        logger.info("目前沒有持倉需要管理")
         return
 
     closed_count = 0
@@ -19,13 +20,13 @@ def manage_open_positions():
         takeprofit = trade.get("takeprofit")
 
         if stoploss is None or takeprofit is None:
-            print(f"{symbol} 缺少 TP/SL，略過")
+            logger.warning(f"{symbol} 缺少 TP/SL，略過")
             continue
 
         current_price = get_price(symbol)
 
         if current_price is None:
-            print(f"{symbol} 無法取得目前價格")
+            logger.warning(f"{symbol} 無法取得目前價格")
             continue
 
         should_close = False
@@ -76,4 +77,4 @@ def manage_open_positions():
 """
                 )
 
-    print(f"自動平倉檢查完成，平倉數：{closed_count}")
+    logger.info(f"自動平倉檢查完成，平倉數：{closed_count}")
