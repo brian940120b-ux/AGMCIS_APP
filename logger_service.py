@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 LOG_DIR = Path("logs")
@@ -12,7 +13,7 @@ if not logger.handlers:
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     )
 
-    file_handler = logging.FileHandler(LOG_DIR / "agmcis.log")
+    file_handler = RotatingFileHandler(LOG_DIR / "agmcis.log", maxBytes=5_000_000, backupCount=5)
     file_handler.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
