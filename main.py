@@ -291,3 +291,6 @@ def api_journal():
         for r in rows
     ]
 
+
+from api.logger_health import router as logger_health_router
+app.include_router(logger_health_router)
