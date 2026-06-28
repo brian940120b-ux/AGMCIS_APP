@@ -3,6 +3,7 @@ from technical_service import get_indicators
 from decision_engine import get_trade_signal
 from ranking_engine import rank_decisions
 from multi_timeframe_service import analyze_timeframes
+from mtf_engine import calculate_mtf_score
 
 def clamp(value, low=0, high=100):
     return max(low, min(high, value))
@@ -47,12 +48,9 @@ def scan_market():
 
         confidence = calculate_scanner_confidence(indicators)
 
-        mtf_score = 0
-        for tf_data in mtf.values():
-            if tf_data.get("trend") == "BULLISH":
-                mtf_score += 1
-            elif tf_data.get("trend") == "BEARISH":
-                mtf_score -= 1
+        mtf_result = calculate_mtf_score(mtf)
+        mtf_score = mtf_result["mtf_score"]
+        mtf_status = mtf_result["mtf_status"]
         action = "LONG" if confidence >= 65 and trend == "BULLISH" else "WATCH"
         trade_signal = get_trade_signal(confidence, action, indicators)
 
@@ -65,12 +63,13 @@ def scan_market():
             "trade_signal": trade_signal,
             "confidence": confidence,
             "mtf_score": mtf_score,
+            "mtf_status": mtf_status,
             "entry_price": indicators.get("price"),
             "stoploss": round(indicators.get("price") - indicators.get("atr") * 2, 6) if indicators.get("price") and indicators.get("atr") else None,
             "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
-            "blocked_reason": "MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None,
+            "blocked_reason": "多時間框架未同向" if mtf_score < 3 else ("MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None),
             "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
-            "blocked_reason": "MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None,
+            "blocked_reason": "多時間框架未同向" if mtf_score < 3 else ("MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None),
             "indicators": indicators,
             "timeframes": mtf
         })
