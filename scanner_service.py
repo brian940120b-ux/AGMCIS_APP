@@ -51,6 +51,7 @@ def scan_market():
         mtf_result = calculate_mtf_score(mtf)
         mtf_score = mtf_result["mtf_score"]
         mtf_status = mtf_result["mtf_status"]
+        mtf_blocked_reason = mtf_result.get("blocked_reason")
         action = "LONG" if confidence >= 65 and trend == "BULLISH" else "WATCH"
         trade_signal = get_trade_signal(confidence, action, indicators)
 
@@ -67,9 +68,9 @@ def scan_market():
             "entry_price": indicators.get("price"),
             "stoploss": round(indicators.get("price") - indicators.get("atr") * 2, 6) if indicators.get("price") and indicators.get("atr") else None,
             "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
-            "blocked_reason": "多時間框架未同向" if mtf_score < 3 else ("MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None),
+            "blocked_reason": mtf_blocked_reason or ("MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None),
             "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
-            "blocked_reason": "多時間框架未同向" if mtf_score < 3 else ("MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None),
+            "blocked_reason": mtf_blocked_reason or ("MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None),
             "indicators": indicators,
             "timeframes": mtf
         })

@@ -18,7 +18,12 @@ def calculate_mtf_score(timeframes):
     else:
         status = "BEARISH"
 
+    blocked_reason = None
+    if score < 3:
+        blocked_reason = "多時間框架未同向"
+
     return {
         "mtf_score": score,
-        "mtf_status": status
+        "mtf_status": status,
+        "blocked_reason": blocked_reason
     }
