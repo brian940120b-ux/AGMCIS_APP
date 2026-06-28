@@ -52,6 +52,10 @@ def scan_market():
             "action": action,
             "trade_signal": trade_signal,
             "confidence": confidence,
+            "entry_price": indicators.get("price"),
+            "stoploss": round(indicators.get("price") - indicators.get("atr") * 2, 6) if indicators.get("price") and indicators.get("atr") else None,
+            "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
+            "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
             "indicators": indicators
         })
 

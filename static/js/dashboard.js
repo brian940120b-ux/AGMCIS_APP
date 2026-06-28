@@ -320,3 +320,32 @@ async function updateTopOpportunitiesBox(){
 
 updateTopOpportunitiesBox();
 setInterval(updateTopOpportunitiesBox,10000);
+
+async function updateMarketScanner(){
+    try{
+        const res = await fetch("/api/market_scan");
+        const data = await res.json();
+
+        const el = document.getElementById("market_scan");
+        if(!el) return;
+
+        const top = (data.top || []).slice(0,10);
+
+        el.innerHTML = top.map((d,i)=>`
+            <div style="padding:8px 0;border-bottom:1px solid #333;">
+                <b>#${i+1} ${d.symbol}</b>
+                <span style="float:right">${d.trade_signal}</span><br>
+                信心：${d.confidence}%｜
+                趨勢：${d.indicators?.trend ?? "-"}｜
+                RSI：${Number(d.indicators?.rsi ?? 0).toFixed(1)}
+            </div>
+        `).join("");
+
+    }catch(e){
+        console.error("Market Scanner Error:",e);
+    }
+}
+
+updateMarketScanner();
+setInterval(updateMarketScanner,10000);
+
