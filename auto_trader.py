@@ -2,6 +2,7 @@ from scanner_service import scan_market
 from paper_trading import create_paper_trade
 from logger_service import logger
 from database_service import get_open_trades, get_open_trade
+from leverage_engine import calculate_leverage
 
 MAX_AUTO_POSITIONS = 3
 
@@ -34,13 +35,16 @@ def run_auto_trader():
             d["stoploss"] = sl
             d["takeprofit"] = tp
 
+            leverage = calculate_leverage(d.get("confidence",0), d.get("indicators",{}), d.get("mtf_score",0))
+
             result = create_paper_trade(
                 symbol=d.get("symbol"),
                 entry_price=d.get("entry_price"),
                 signal=order_signal,
                 stoploss=sl,
                 takeprofit=tp,
-                source="AUTO"
+                source="AUTO",
+                leverage=leverage
             )
             logger.info(f'Auto Trader | OPEN_ATTEMPT | {d.get("symbol")} | {result.get("message")}')
             return {"status":"OPEN_ATTEMPT","candidate":d,"result":result}
