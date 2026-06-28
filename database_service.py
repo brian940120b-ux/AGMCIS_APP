@@ -66,7 +66,8 @@ def get_trades():
             closed_at,
             stoploss,
             takeprofit,
-            close_reason
+            close_reason,
+            source
         FROM trades
         ORDER BY id ASC;
     """)
@@ -91,17 +92,23 @@ def get_trades():
             "closed_at": row[9].strftime("%Y-%m-%d %H:%M:%S") if row[9] else None,
             "stoploss": float(row[10]) if row[10] is not None else None,
             "takeprofit": float(row[11]) if row[11] is not None else None,
-            "close_reason": row[12]
+            "close_reason": row[12],
+            "source": row[13] if len(row) > 13 else "MANUAL"
         })
 
     return trades
 
 
-def get_open_trades():
-    return [
+def get_open_trades(source=None):
+    trades = [
         trade for trade in get_trades()
         if trade["status"] == "OPEN"
     ]
+
+    if source:
+        trades = [t for t in trades if t.get("source") == source]
+
+    return trades
 
 
 def get_closed_trades():
@@ -130,7 +137,7 @@ def get_open_trade(symbol):
     return row[0] if row else None
 
 
-def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None, leverage=3, position_value=3000):
+def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None, leverage=3, position_value=3000, source="MANUAL"):
     conn = get_connection()
     cur = conn.cursor()
 
@@ -145,9 +152,10 @@ def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprof
             takeprofit,
             leverage,
             position_value,
+            source,
             opened_at
         )
-        VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, CURRENT_TIMESTAMP);
+        VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, %s, CURRENT_TIMESTAMP);
     """, (
         symbol,
         signal,
@@ -156,7 +164,8 @@ def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprof
         stoploss,
         takeprofit,
         leverage,
-        position_value
+        position_value,
+        source
     ))
 
     conn.commit()

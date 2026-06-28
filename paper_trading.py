@@ -47,7 +47,8 @@ def create_paper_trade(
     stoploss=None,
     takeprofit=None,
     leverage=3,
-    position_value=3000
+    position_value=3000,
+    source="MANUAL"
 ):
     if has_open_trade(symbol):
         return {
@@ -73,7 +74,8 @@ def create_paper_trade(
         stoploss=None if stoploss == "-" else stoploss,
         takeprofit=None if takeprofit == "-" else takeprofit,
         leverage=leverage,
-        position_value=position_value
+        position_value=position_value,
+        source=source
     )
 
     try:
