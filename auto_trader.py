@@ -18,6 +18,8 @@ def run_auto_trader():
             continue
 
         if d.get("trade_signal") in ["🟢 Buy", "🟢 Strong Buy", "🔴 Sell", "🔴 Strong Sell"]:
+            if not d.get("entry_price") or not d.get("stoploss") or not d.get("takeprofit"):
+                continue
             order_signal = "做空" if d.get("trade_signal") in ["🔴 Sell", "🔴 Strong Sell"] else "做多"
             sl = d.get("stoploss")
             tp = d.get("takeprofit")
@@ -28,6 +30,9 @@ def run_auto_trader():
                 if price and atr:
                     sl = round(price + atr * 2, 6)
                     tp = round(price - atr * 3, 6)
+
+            d["stoploss"] = sl
+            d["takeprofit"] = tp
 
             result = create_paper_trade(
                 symbol=d.get("symbol"),
