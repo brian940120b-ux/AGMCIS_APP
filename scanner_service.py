@@ -4,6 +4,7 @@ from decision_engine import get_trade_signal
 from ranking_engine import rank_decisions
 from multi_timeframe_service import analyze_timeframes
 from mtf_engine import calculate_mtf_score
+from direction_engine import get_trade_direction
 
 def clamp(value, low=0, high=100):
     return max(low, min(high, value))
@@ -52,11 +53,14 @@ def scan_market():
         mtf_score = mtf_result["mtf_score"]
         mtf_status = mtf_result["mtf_status"]
         mtf_blocked_reason = mtf_result.get("blocked_reason")
-        action = "LONG" if confidence >= 65 and trend == "BULLISH" else "WATCH"
+        action = get_trade_direction(indicators)
         trade_signal = get_trade_signal(confidence, action, indicators)
 
         if trade_signal == "🟢 Strong Buy" and mtf_score < 3:
             trade_signal = "🟢 Buy" if mtf_score >= 2 else "🟡 Hold"
+
+        if trade_signal in ["🔴 Sell", "🔴 Strong Sell"]:
+            action = "SHORT"
 
         results.append({
             "symbol": symbol,
