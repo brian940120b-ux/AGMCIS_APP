@@ -17,17 +17,28 @@ def run_auto_trader():
         if get_open_trade(d.get("symbol")):
             continue
 
-        if d.get("trade_signal") in ["🟢 Buy", "🟢 Strong Buy"]:
+        if d.get("trade_signal") in ["🟢 Buy", "🟢 Strong Buy", "🔴 Sell", "🔴 Strong Sell"]:
+            order_signal = "做空" if d.get("trade_signal") in ["🔴 Sell", "🔴 Strong Sell"] else "做多"
+            sl = d.get("stoploss")
+            tp = d.get("takeprofit")
+
+            if order_signal == "做空":
+                price = d.get("entry_price")
+                atr = d.get("indicators", {}).get("atr")
+                if price and atr:
+                    sl = round(price + atr * 2, 6)
+                    tp = round(price - atr * 3, 6)
+
             result = create_paper_trade(
                 symbol=d.get("symbol"),
                 entry_price=d.get("entry_price"),
-                signal="做多",
-                stoploss=d.get("stoploss"),
-                takeprofit=d.get("takeprofit"),
+                signal=order_signal,
+                stoploss=sl,
+                takeprofit=tp,
                 source="AUTO"
             )
             logger.info(f'Auto Trader | OPEN_ATTEMPT | {d.get("symbol")} | {result.get("message")}')
             return {"status":"OPEN_ATTEMPT","candidate":d,"result":result}
 
-    logger.info("Auto Trader | NO_BUY_SIGNAL")
-    return {"status":"NO_BUY_SIGNAL","top_candidates":top}
+    logger.info("Auto Trader | NO_TRADE_SIGNAL")
+    return {"status":"NO_TRADE_SIGNAL","top_candidates":top}
