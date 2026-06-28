@@ -4,9 +4,18 @@ def get_trade_signal(confidence, action, indicators=None, roi=0, distance_to_sl=
     rsi = indicators.get("rsi")
     trend = indicators.get("trend")
     macd_hist = indicators.get("macd_hist")
+    atr = indicators.get("atr")
+    price = indicators.get("price")
 
     if distance_to_sl is not None and distance_to_sl <= 1:
         return "🔴 Stoploss Warning"
+
+    if atr is not None and price:
+        atr_ratio = atr / price
+        if atr_ratio >= 0.05:
+            return "🟠 Reduce Position"
+        elif atr_ratio >= 0.03 and confidence >= 65:
+            return "🟡 Hold"
 
     if rsi is not None and rsi >= 75:
         return "🟠 Reduce Position"
