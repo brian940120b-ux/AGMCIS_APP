@@ -3,7 +3,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import AverageTrueRange
 
-def get_indicators(symbol):
+def get_indicators(symbol, timeframe="1h"):
     """
     V77.3 第一版
     目前提供框架，之後會接 RSI、MACD、EMA 等真實計算。
@@ -19,7 +19,7 @@ def get_indicators(symbol):
     trend = "UNKNOWN"
 
     try:
-        df = get_ohlcv(symbol, "1h", 100)
+        df = get_ohlcv(symbol, timeframe, 100)
         rsi = round(float(RSIIndicator(df["close"], window=14).rsi().iloc[-1]), 2)
         ema20 = round(float(EMAIndicator(df["close"], window=20).ema_indicator().iloc[-1]), 4)
         ema60 = round(float(EMAIndicator(df["close"], window=60).ema_indicator().iloc[-1]), 4)

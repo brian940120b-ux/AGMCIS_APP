@@ -1,19 +1,18 @@
 from scanner_service import scan_market
-from paper_trading import create_paper_trade
+from logger_service import logger
 
 def run_auto_trader():
     data = scan_market()
-    for d in data:
-        if d["trade_signal"]=="🟢 Buy":
-            return create_paper_trade(
-                symbol=d["symbol"],
-                entry_price=d["entry_price"],
-                signal="LONG",
-                stoploss=d["stoploss"],
-                takeprofit=d["takeprofit"]
-            )
+    top = data[:3]
+
+    summary = " | ".join(
+        f'{d["symbol"]}:{d["trade_signal"]}:{d["confidence"]}%:{d.get("blocked_reason","OK")}'
+        for d in top
+    )
+
+    logger.info(f"Auto Trader | NO_BUY_SIGNAL | {summary}")
 
     return {
-        "status":"NO_BUY_SIGNAL",
-        "top_candidates": data[:3]
+        "status": "NO_BUY_SIGNAL",
+        "top_candidates": top
     }
