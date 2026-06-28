@@ -1,6 +1,7 @@
 import time
 import ccxt
 import pandas as pd
+from exchange_engine import get_price_safe, fetch_ohlcv_safe
 from logger_service import logger
 
 EXCHANGES = {
@@ -25,18 +26,15 @@ def get_exchange_for_symbol(symbol):
 
 
 def get_ohlcv(symbol="BTC/USDT", timeframe="1h", limit=150):
-    name, exchange = get_exchange_for_symbol(symbol)
+    result = fetch_ohlcv_safe(symbol, timeframe, limit)
 
-    if exchange is None:
-        logger.warning(f"{symbol} not found on OKX/BingX")
+    if result is None:
+        logger.warning(f"{symbol} OHLCV not found on OKX/BingX")
         return None
 
     try:
-        data = exchange.fetch_ohlcv(
-            symbol,
-            timeframe=timeframe,
-            limit=limit
-        )
+        name = result["exchange"]
+        data = result["ohlcv"]
 
         df = pd.DataFrame(
             data,
@@ -68,16 +66,15 @@ def get_price(symbol):
         if now - ts < PRICE_CACHE_TTL:
             return price
 
-    # 查最新價格
-    df = get_ohlcv(symbol, limit=1)
+    # 查最新價格（OKX→BingX 自動備援）
+    result = get_price_safe(symbol)
 
-    # 若查詢失敗，回傳舊快取
-    if df is None or len(df) == 0:
+    if result is None:
         if cached:
             return cached[0]
         return None
 
-    price = float(df["close"].iloc[-1])
+    price = float(result["price"])
 
     # 更新快取
     PRICE_CACHE[symbol] = (price, now)
