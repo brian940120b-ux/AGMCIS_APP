@@ -2,7 +2,6 @@ from market_universe import SCAN_SYMBOLS
 from technical_service import get_indicators
 from decision_engine import get_trade_signal
 from ranking_engine import rank_decisions
-from multi_timeframe_service import analyze_timeframes
 
 def clamp(value, low=0, high=100):
     return max(low, min(high, value))
@@ -42,37 +41,24 @@ def scan_market():
 
     for symbol in SCAN_SYMBOLS:
         indicators = get_indicators(symbol)
-        mtf = analyze_timeframes(symbol)
         trend = indicators.get("trend")
 
         confidence = calculate_scanner_confidence(indicators)
-
-        mtf_score = 0
-        for tf_data in mtf.values():
-            if tf_data.get("trend") == "BULLISH":
-                mtf_score += 1
-            elif tf_data.get("trend") == "BEARISH":
-                mtf_score -= 1
         action = "LONG" if confidence >= 65 and trend == "BULLISH" else "WATCH"
         trade_signal = get_trade_signal(confidence, action, indicators)
-
-        if trade_signal == "🟢 Strong Buy" and mtf_score < 3:
-            trade_signal = "🟢 Buy" if mtf_score >= 2 else "🟡 Hold"
 
         results.append({
             "symbol": symbol,
             "action": action,
             "trade_signal": trade_signal,
             "confidence": confidence,
-            "mtf_score": mtf_score,
             "entry_price": indicators.get("price"),
             "stoploss": round(indicators.get("price") - indicators.get("atr") * 2, 6) if indicators.get("price") and indicators.get("atr") else None,
             "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
             "blocked_reason": "MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None,
             "takeprofit": round(indicators.get("price") + indicators.get("atr") * 3, 6) if indicators.get("price") and indicators.get("atr") else None,
             "blocked_reason": "MACD 動能轉弱" if indicators.get("macd_hist") is not None and indicators.get("macd_hist") < 0 else None,
-            "indicators": indicators,
-            "timeframes": mtf
+            "indicators": indicators
         })
 
     return rank_decisions(results)
