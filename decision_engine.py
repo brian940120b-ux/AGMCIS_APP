@@ -15,6 +15,8 @@ def get_trade_signal(confidence, action, indicators=None, roi=0, distance_to_sl=
         return "🟢 Strong Buy"
 
     if confidence >= 65 and action == "LONG":
+        if macd_hist is not None and macd_hist < 0:
+            return "🟡 Hold"
         return "🟢 Buy"
 
     if confidence <= 35:

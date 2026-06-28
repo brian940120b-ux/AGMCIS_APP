@@ -294,3 +294,6 @@ def api_journal():
 
 from api.logger_health import router as logger_health_router
 app.include_router(logger_health_router)
+
+from api.market_scan import router as market_scan_router
+app.include_router(market_scan_router)

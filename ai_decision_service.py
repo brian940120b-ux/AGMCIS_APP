@@ -1,9 +1,12 @@
+import time
 from database_service import get_open_trades
 from market_data import get_price
 from technical_service import get_indicators
 from decision_engine import get_trade_signal
 from logger_service import logger
 from ranking_engine import rank_decisions
+
+LAST_TOP3_LOG = {"summary": None, "ts": 0}
 
 def clamp(v, low=0, high=100):
     return max(low, min(high, v))
@@ -162,6 +165,10 @@ def get_ai_decisions():
         for i, d in enumerate(top3)
     ])
 
-    logger.info(f"Top Opportunities | {summary}")
+    now = time.time()
+    if summary != LAST_TOP3_LOG["summary"] or now - LAST_TOP3_LOG["ts"] >= 60:
+        logger.info(f"Top Opportunities | {summary}")
+        LAST_TOP3_LOG["summary"] = summary
+        LAST_TOP3_LOG["ts"] = now
 
     return ranked
