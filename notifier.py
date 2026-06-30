@@ -47,3 +47,15 @@ def notify_open_trade(symbol, signal, entry, sl, tp, leverage=None, confidence=N
         f"🎯 止盈：{tp}"
     )
     return send_telegram(msg)
+
+def notify_close_trade(symbol, signal, exit_price, pnl_pct=None, pnl_usdt=None, reason=None):
+    msg = (
+        "🤖 <b>AGMCIS V87 平倉通知</b>\n\n"
+        f"📈 幣種：{symbol}\n"
+        f"📊 方向：{signal}\n"
+        f"💰 出場：{exit_price}\n"
+        f"📉 PnL：{pnl_pct if pnl_pct is not None else '-'}%\n"
+        f"💵 損益：{pnl_usdt if pnl_usdt is not None else '-'} USDT\n"
+        f"📌 原因：{reason if reason else '-'}"
+    )
+    return send_telegram(msg)
