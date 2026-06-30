@@ -11,6 +11,7 @@ EXCHANGES = {
 
 # 1 秒價格快取
 PRICE_CACHE = {}
+OHLCV_CACHE = {}
 PRICE_CACHE_TTL = 1
 
 
@@ -26,6 +27,14 @@ def get_exchange_for_symbol(symbol):
 
 
 def get_ohlcv(symbol="BTC/USDT", timeframe="1h", limit=150):
+    now = time.time()
+    cache_key = f"{symbol}:{timeframe}:{limit}"
+    cached = OHLCV_CACHE.get(cache_key)
+
+    if cached:
+        df, ts = cached
+        if now - ts < OHLCV_CACHE_TTL:
+            return df
     result = fetch_ohlcv_safe(symbol, timeframe, limit)
 
     if result is None:
@@ -49,6 +58,7 @@ def get_ohlcv(symbol="BTC/USDT", timeframe="1h", limit=150):
         )
 
         df["exchange"] = name
+        OHLCV_CACHE[cache_key] = (df, now)
         return df
 
     except Exception as e:
