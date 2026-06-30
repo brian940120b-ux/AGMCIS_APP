@@ -13,3 +13,14 @@ def run_once():
         "monitor": monitor_result,
         "trader": trader_result
     }
+
+def run_loop(interval=60):
+    logger.info(f"Scheduler | START | interval={interval}s")
+
+    while True:
+        try:
+            run_once()
+        except Exception as e:
+            logger.exception(f"Scheduler | ERROR | {e}")
+
+        time.sleep(interval)

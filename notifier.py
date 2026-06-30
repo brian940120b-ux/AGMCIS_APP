@@ -34,3 +34,16 @@ def send_telegram(message):
     except Exception as e:
         logger.exception(f"Telegram 發送錯誤： {e}")
         return False
+def notify_open_trade(symbol, signal, entry, sl, tp, leverage=None, confidence=None, mtf_status=None):
+    msg = (
+        "🤖 <b>AGMCIS V87 開倉通知</b>\n\n"
+        f"📈 幣種：{symbol}\n"
+        f"📊 方向：{signal}\n"
+        f"⚙️ 槓桿：{leverage if leverage is not None else '-'}x\n"
+        f"🧠 信心：{confidence if confidence is not None else '-'}%\n"
+        f"⏱ MTF：{mtf_status if mtf_status is not None else '-'}\n\n"
+        f"💰 進場：{entry}\n"
+        f"🛑 止損：{sl}\n"
+        f"🎯 止盈：{tp}"
+    )
+    return send_telegram(msg)
