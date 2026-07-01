@@ -349,3 +349,26 @@ async function updateMarketScanner(){
 updateMarketScanner();
 setInterval(updateMarketScanner,10000);
 
+
+async function loadSchedulerStatus(){
+  try{
+    const res = await fetch("/api/scheduler_status");
+    const d = await res.json();
+    const el = document.getElementById("scheduler_status");
+    if(!el) return;
+
+    el.innerHTML = `
+      狀態：${d.status ?? "-"}<br>
+      最後執行：${d.last_run ?? "-"}<br>
+      Trader：${d.trader_status ?? "-"}<br>
+      本輪平倉：${d.monitor_closed ?? 0}<br>
+      錯誤：${d.errors ?? 0}
+    `;
+  }catch(e){
+    const el = document.getElementById("scheduler_status");
+    if(el) el.innerHTML = "Scheduler API Error";
+  }
+}
+
+loadSchedulerStatus();
+setInterval(loadSchedulerStatus, 10000);

@@ -64,7 +64,7 @@ def api_dashboard():
 
     return {
         "balance": a.get("balance"),
-        "trades": a.get("trades"),
+        "trades": len(o) + len(c),
         "wins": a.get("wins"),
         "losses": a.get("losses"),
         "open_count": len(o),
