@@ -21,3 +21,14 @@ def health():
         "version": VERSION,
         "status": "running"
     }
+
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard.html",
+        context={}
+    )
