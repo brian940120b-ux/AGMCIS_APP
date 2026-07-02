@@ -357,12 +357,20 @@ async function loadSchedulerStatus(){
     const el = document.getElementById("scheduler_status");
     if(!el) return;
 
+    const color =
+      d.status==="running" ? "#28a745" :
+      d.status==="error" ? "#dc3545" :
+      "#ffc107";
+
     el.innerHTML = `
-      狀態：${d.status ?? "-"}<br>
-      最後執行：${d.last_run ?? "-"}<br>
-      Trader：${d.trader_status ?? "-"}<br>
-      本輪平倉：${d.monitor_closed ?? 0}<br>
-      錯誤：${d.errors ?? 0}
+      <div style="font-size:18px;font-weight:bold;color:${color}">
+      ● ${String(d.status ?? "-").toUpperCase()}
+      </div>
+      <hr>
+      🕒 Last Run：${d.last_run ?? "-"}<br>
+      🤖 Trader：${d.trader_status ?? "-"}<br>
+      📉 Closed：${d.monitor_closed ?? 0}<br>
+      ❗ Errors：${d.errors ?? 0}
     `;
   }catch(e){
     const el = document.getElementById("scheduler_status");
@@ -372,3 +380,25 @@ async function loadSchedulerStatus(){
 
 loadSchedulerStatus();
 setInterval(loadSchedulerStatus, 10000);
+
+async function loadPortfolioSummary(){
+  try{
+    const res = await fetch("/api/portfolio");
+    const d = await res.json();
+    const el = document.getElementById("portfolio_summary");
+    if(!el) return;
+
+    el.innerHTML = `
+      💰 Balance：${d.balance ?? "-"} USDT<br>
+      📦 Open Positions：${d.open_positions ?? 0}<br>
+      🔒 Margin Used：${d.margin_used ?? 0} USDT<br>
+      💵 Available：${d.available ?? 0} USDT
+    `;
+  }catch(e){
+    const el = document.getElementById("portfolio_summary");
+    if(el) el.innerHTML = "Portfolio API Error";
+  }
+}
+
+loadPortfolioSummary();
+setInterval(loadPortfolioSummary, 10000);
