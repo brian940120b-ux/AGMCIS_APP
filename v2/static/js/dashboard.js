@@ -1,19 +1,18 @@
-async function loadHealth(){
-  const el = document.getElementById("health");
-
-  try{
-    const res = await fetch("/health");
+async function loadSummary() {
+    const res = await fetch("/api/summary");
     const data = await res.json();
 
-    el.innerHTML = `
-      <h2>System Health</h2>
-      <p>App：${data.app}</p>
-      <p>Version：${data.version}</p>
-      <p>Status：${data.status}</p>
-    `;
-  }catch(e){
-    el.innerHTML = "Health API Error";
-  }
+    document.getElementById("balance").innerText =
+        "Balance： " + data.balance + " USDT";
+
+    document.getElementById("open_positions").innerText =
+        "Open Positions： " + data.open_positions;
+
+    document.getElementById("win_rate").innerText =
+        "Win Rate： " + data.win_rate + "%";
+
+    document.getElementById("today_pnl").innerText =
+        "Today PnL： " + data.today_pnl + " USDT";
 }
 
-loadHealth();
+loadSummary();

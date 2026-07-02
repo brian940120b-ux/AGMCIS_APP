@@ -32,3 +32,6 @@ def dashboard(request: Request):
         name="dashboard.html",
         context={}
     )
+
+from api.summary import router as summary_router
+app.include_router(summary_router)
