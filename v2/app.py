@@ -35,3 +35,10 @@ def dashboard(request: Request):
 
 from api.summary import router as summary_router
 app.include_router(summary_router)
+
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from api.system_health import router as system_health_router
+app.include_router(system_health_router)
