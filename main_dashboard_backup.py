@@ -1,4 +1,3 @@
-from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -10,8 +9,6 @@ import os
 from risk_control import get_risk_control_status
 START_TIME = time.time()
 app=FastAPI()
-
-templates = Jinja2Templates(directory="templates")
 from api.portfolio import router as portfolio_router
 app.include_router(portfolio_router)
 from api.performance import router as performance_router
@@ -326,17 +323,3 @@ app.include_router(scheduler_status_router)
 
 from api.system_health import router as system_health_router
 app.include_router(system_health_router)
-
-@app.get("/v1", response_class=HTMLResponse)
-def dashboard_v1(request: Request):
-    key = request.query_params.get("key")
-    expected = os.getenv("DASHBOARD_KEY", "agmcis2026")
-
-    if key != expected:
-        return "AGMCIS Protected"
-
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard.html",
-        context={}
-    )
