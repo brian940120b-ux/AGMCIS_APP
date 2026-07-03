@@ -1,0 +1,38 @@
+[
+    {
+        "symbol": "ETH/USDT",
+        "signal": "做多",
+        "entry_price": 2500,
+        "size_usdt": 1000,
+        "status": "CLOSED",
+        "opened_at": "2026-06-18 23:59:23",
+        "exit_price": 2600,
+        "pnl_pct": 4.0,
+        "pnl_usdt": 40.0,
+        "closed_at": "2026-06-18 23:59:23"
+    },
+    {
+        "symbol": "ETH/USDT",
+        "signal": "做多",
+        "entry_price": 2500.0,
+        "size_usdt": 1000.0,
+        "status": "CLOSED",
+        "opened_at": "2026-06-19 00:10:37",
+        "exit_price": 2600.0,
+        "pnl_pct": 4.0,
+        "pnl_usdt": 40.0,
+        "closed_at": "2026-06-19 00:12:06"
+    },
+    {
+        "symbol": "BTC/USDT",
+        "signal": "做多",
+        "entry_price": 2500.0,
+        "size_usdt": 1000.0,
+        "status": "CLOSED",
+        "opened_at": "2026-06-19 00:10:53",
+        "exit_price": 2600.0,
+        "pnl_pct": 4.0,
+        "pnl_usdt": 40.0,
+        "closed_at": "2026-06-19 00:12:15"
+    }
+]
