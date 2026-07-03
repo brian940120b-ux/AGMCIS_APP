@@ -42,3 +42,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from api.system_health import router as system_health_router
 app.include_router(system_health_router)
+
+from api.portfolio import router as portfolio_router
+app.include_router(portfolio_router)
