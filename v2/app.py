@@ -48,3 +48,6 @@ app.include_router(portfolio_router)
 
 from api.market_scan import router as market_scan_router
 app.include_router(market_scan_router)
+
+from api.ai_decisions import router as ai_decisions_router
+app.include_router(ai_decisions_router)
