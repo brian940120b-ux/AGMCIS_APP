@@ -45,3 +45,6 @@ app.include_router(system_health_router)
 
 from api.portfolio import router as portfolio_router
 app.include_router(portfolio_router)
+
+from api.market_scan import router as market_scan_router
+app.include_router(market_scan_router)
