@@ -21,8 +21,22 @@
   </div>
 </div>
 
+<div class="container">
+  <div class="layout">
+    <div class="card">
+      <h2>📈 BTC/USDT Live Chart</h2>
+      <div class="tradingview-widget-container"><div id="tradingview_btc"></div></div>
+    </div>
+    <div class="card">
+      <h2>🤖 AI Decision Center</h2>
+      <div id="ai_decision">Loading...</div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/js/websocket.js"></script>
-<div class="container"><div class="card"><h2>📈 BTC/USDT Live Chart</h2><div class="tradingview-widget-container"><div id="tradingview_btc"></div></div></div></div><script src="https://s3.tradingview.com/tv.js"></script><script src="/static/js/tradingview.js"></script>
-<div class="grid" style="margin-top:20px;"><div class="card"><h2>🤖 AI Decision Center</h2><div id="ai_decision">Loading...</div></div></div>
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script src="/static/js/tradingview.js"></script>
+<div class="container"><div class="card"><h2>📋 Open Positions</h2><div id="open_positions_list">Loading positions...</div></div></div><script src="/static/js/open_positions.js"></script>
 </body>
 </html>
