@@ -7,13 +7,22 @@
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-<h1>🚀 AGMCIS v3 Professional</h1>
-<p>Next Generation AI Trading Platform</p>
-
-<div id="app">
-    <h2>Dashboard Loading...</h2>
+<div class="header">
+  <h1>🚀 AGMCIS v3 Professional</h1>
+  <p class="muted">Live AI Trading Dashboard</p>
 </div>
 
-<script src="/static/js/app.js"></script>
+<div class="container">
+  <div class="grid">
+    <div class="card"><div class="muted">Balance</div><div id="balance" class="value">--</div></div>
+    <div class="card"><div class="muted">Open Positions</div><div id="open_positions" class="value">--</div></div>
+    <div class="card"><div class="muted">Risk</div><div id="risk" class="value">--</div></div>
+    <div class="card"><div class="muted">Floating PnL</div><div id="upnl" class="value">--</div></div>
+  </div>
+</div>
+
+<script src="/static/js/websocket.js"></script>
+<div class="container"><div class="card"><h2>📈 BTC/USDT Live Chart</h2><div class="tradingview-widget-container"><div id="tradingview_btc"></div></div></div></div><script src="https://s3.tradingview.com/tv.js"></script><script src="/static/js/tradingview.js"></script>
+<div class="grid" style="margin-top:20px;"><div class="card"><h2>🤖 AI Decision Center</h2><div id="ai_decision">Loading...</div></div></div>
 </body>
 </html>
