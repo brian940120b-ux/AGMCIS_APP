@@ -51,3 +51,6 @@ app.include_router(market_scan_router)
 
 from api.ai_decisions import router as ai_decisions_router
 app.include_router(ai_decisions_router)
+
+from api.equity import router as equity_router
+app.include_router(equity_router)
