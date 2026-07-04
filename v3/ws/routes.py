@@ -2,6 +2,7 @@ import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ws.manager import manager
 from config import WEBSOCKET_INTERVAL
+from services.dashboard import get_dashboard_payload
 
 router = APIRouter()
 
@@ -11,10 +12,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            await manager.broadcast({
-                "type": "heartbeat",
-                "status": "running"
-            })
+            await manager.broadcast(get_dashboard_payload())
             await asyncio.sleep(WEBSOCKET_INTERVAL)
 
     except WebSocketDisconnect:

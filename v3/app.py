@@ -39,16 +39,14 @@ app.include_router(websocket_router)
 # Direct WebSocket Route
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
+from services.dashboard import get_dashboard_payload
 
 @app.websocket("/ws")
 async def ws_direct(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            await websocket.send_json({
-                "type": "heartbeat",
-                "status": "running"
-            })
+            await websocket.send_json(get_dashboard_payload())
             await asyncio.sleep(5)
     except WebSocketDisconnect:
         pass
