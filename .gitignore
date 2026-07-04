@@ -25,3 +25,5 @@ Thumbs.db*.tar.gz
 *.zip
 *.tar.gz
 scheduler_status.json
+scheduler_status.json
+backups/
