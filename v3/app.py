@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 
 from config import APP_NAME, VERSION
 
+from ws.routes import router as websocket_router
 app = FastAPI(title=APP_NAME, version=VERSION)
 
 templates = Jinja2Templates(directory="templates")
@@ -28,3 +29,26 @@ def dashboard(request: Request):
         name="dashboard.html",
         context={}
     )
+
+app.include_router(websocket_router)
+
+# WebSocket Router
+from ws.routes import router as websocket_router
+app.include_router(websocket_router)
+
+# Direct WebSocket Route
+import asyncio
+from fastapi import WebSocket, WebSocketDisconnect
+
+@app.websocket("/ws")
+async def ws_direct(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json({
+                "type": "heartbeat",
+                "status": "running"
+            })
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        pass
