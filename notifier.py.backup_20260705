@@ -9,11 +9,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 
-DISABLE_TELEGRAM_PUSH = os.getenv("DISABLE_TELEGRAM_PUSH", "false").lower() == "true"
-
 def send_telegram(message):
-    if DISABLE_TELEGRAM_PUSH:
-        return False
     if not BOT_TOKEN or not CHAT_ID:
         logger.error("Telegram 設定不完整，請檢查 .env")
         return False
