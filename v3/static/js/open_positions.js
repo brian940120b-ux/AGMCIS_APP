@@ -1,19 +1,20 @@
-function renderPositions(data){
-  const el=document.getElementById("open_positions_list");
-  if(!el || !data.portfolio || !data.portfolio.open_trades){
+function renderPositions(data) {
+  const el = document.getElementById("open_positions_list");
+  if (!el || !data.portfolio) return;
+
+  const trades = data.portfolio.open_trades || [];
+
+  if (trades.length === 0) {
+    el.innerHTML = '<p class="muted">目前沒有持倉</p>';
     return;
   }
 
-  const trades=data.portfolio.open_trades;
-
-  if(trades.length===0){
-    el.innerHTML="<p>目前沒有持倉</p>";
-    return;
-  }
-
-  el.innerHTML=trades.map(t=>`
-    <div style="padding:10px;border-bottom:1px solid #1e293b">
-      <b>${t.symbol}</b> ｜ ${t.signal} ｜ ${t.size_usdt} USDT
+  el.innerHTML = trades.map(t => `
+    <div class="row">
+      <b>${t.symbol}</b>
+      <span>${t.signal ?? "--"}</span>
+      <span>${fmtUsdt(t.size_usdt)}</span>
+      <span class="muted">entry ${t.entry_price ?? "--"}</span>
     </div>
   `).join("");
 }

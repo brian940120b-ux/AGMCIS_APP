@@ -1,9 +1,20 @@
-function renderScanner(data){
-  const el=document.getElementById("scanner_top10");
-  if(!el || !data.market_scan) return;
-  el.innerHTML=data.market_scan.slice(0,10).map(x=>`
-    <div style="padding:8px;border-bottom:1px solid #1e293b">
-      <b>${x.symbol}</b> ｜ ${x.trade_signal||x.signal||"N/A"} ｜ ${x.confidence??"--"}%
+function renderScanner(data) {
+  const el = document.getElementById("scanner_top10");
+  if (!el) return;
+
+  const rows = data.market_scan || [];
+
+  if (rows.length === 0) {
+    el.innerHTML = '<p class="muted">掃描結果尚未產生</p>';
+    return;
+  }
+
+  el.innerHTML = rows.map(x => `
+    <div class="row">
+      <b>${x.symbol}</b>
+      <span>${x.trade_signal || x.signal || "N/A"}</span>
+      <span>${x.confidence ?? "--"}%</span>
+      <span class="muted">MTF ${x.mtf_score ?? "--"}</span>
     </div>
   `).join("");
 }

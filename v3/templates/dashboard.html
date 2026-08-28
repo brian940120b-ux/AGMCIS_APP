@@ -3,42 +3,39 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AGMCIS v3 Pro</title>
+<title>{{ app_name }}</title>
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
+
 <div class="header">
-  <h1>🚀 AGMCIS v3 Professional</h1>
-  <p class="muted">Live AI Trading Dashboard</p>
-</div>
-
-<div class="container">
-  <div class="grid">
-    <div class="card"><div class="muted">Balance</div><div id="balance" class="value">--</div></div>
-    <div class="card"><div class="muted">Open Positions</div><div id="open_positions" class="value">--</div></div>
-    <div class="card"><div class="muted">Risk</div><div id="risk" class="value">--</div></div>
-    <div class="card"><div class="muted">Floating PnL</div><div id="upnl" class="value">--</div></div>
-  </div>
-</div>
-
-<div class="container">
-  <div class="layout">
-    <div class="card">
-      <h2>📈 BTC/USDT Live Chart</h2>
-      <div class="tradingview-widget-container"><div id="tradingview_btc"></div></div>
+  <div class="header-row">
+    <div>
+      <h1>🚀 AGMCIS v3 Professional</h1>
+      <p class="muted">Live AI Trading Dashboard ｜ {{ version }}</p>
     </div>
-    <div class="card">
-      <h2>🤖 AI Decision Center</h2>
-      <div id="ai_decision">Loading...</div>
+    <div class="status" id="conn_status" data-state="connecting">
+      <span class="dot"></span><span id="conn_text">連線中…</span>
     </div>
   </div>
+  <div id="data_error" class="alert" hidden></div>
 </div>
 
-<script src="/static/js/websocket.js"></script>
+{% include "components/summary.html" %}
+{% include "components/chart_ai.html" %}
+{% include "components/open_positions.html" %}
+{% include "components/equity.html" %}
+{% include "components/scanner.html" %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://s3.tradingview.com/tv.js"></script>
+<script src="/static/js/summary.js"></script>
+<script src="/static/js/open_positions.js"></script>
+<script src="/static/js/equity.js"></script>
+<script src="/static/js/scanner.js"></script>
+<script src="/static/js/ai_decision.js"></script>
 <script src="/static/js/tradingview.js"></script>
-<div class="container"><div class="card"><h2>📋 Open Positions</h2><div id="open_positions_list">Loading positions...</div></div></div><script src="/static/js/open_positions.js"></script>
-<div class="container"><div class="card"><h2>📈 Equity Curve</h2><canvas id="equityChart" height="120"></canvas></div></div><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><script src="/static/js/equity.js"></script>
-<div class="container"><div class="card"><h2>🔍 Market Scanner Top 10</h2><div id="scanner_top10">Loading scanner...</div></div></div>
+<script src="/static/js/websocket.js"></script>
+
 </body>
 </html>

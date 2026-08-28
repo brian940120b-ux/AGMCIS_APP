@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+jinja2
+
+# 以下為 v3 重用的 v1 核心模組所需（portfolio / scanner / database）
+ccxt
+pandas
+numpy
+ta
+psycopg2-binary
+python-dotenv
