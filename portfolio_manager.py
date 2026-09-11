@@ -1,83 +1,72 @@
-from paper_trading import load_trades, load_account
+"""
+投資組合摘要。
+
+Phase 0.5 的修正:槓桿改用每筆交易的真實值。
+原本 get_trades() 的 SELECT 漏掉 leverage 欄位,所以 trade.get("leverage") 永遠是 None,
+`float(trade.get("leverage") or 3)` 讓每一筆都被當成 3x —— 不管實際是 2x 還是 8x。
+"""
+from database_service import get_account, get_open_trades
+from direction import is_long, is_short
+from logger_service import logger
 from market_data import get_price
+
+DEFAULT_START_BALANCE = 10000
 
 
 def get_portfolio_summary():
-    trades = load_trades()
-    account = load_account()
+    open_trades = get_open_trades()
+    account = get_account()
 
-    open_trades = [
-        trade for trade in trades
-        if trade["status"] == "OPEN"
-    ]
+    balance = account.get("balance", DEFAULT_START_BALANCE)
 
-    balance = account.get("balance", 10000)
+    total_exposure = sum(float(t.get("size_usdt") or 0) for t in open_trades)
+    exposure_ratio = (total_exposure / balance * 100) if balance > 0 else 0
 
-    total_exposure = sum(
-        float(trade.get("size_usdt", 0))
-        for trade in open_trades
-    )
-
-    exposure_ratio = (
-        total_exposure / balance * 100
-        if balance > 0
-        else 0
-    )
-    total_open_upnl = 0
+    total_open_upnl = 0.0
+    priced = 0
 
     for trade in open_trades:
         symbol = trade.get("symbol")
         signal = trade.get("signal")
         entry = float(trade.get("entry_price") or 0)
         size = float(trade.get("size_usdt") or 0)
-        leverage = float(trade.get("leverage") or 3)
+        leverage = float(trade.get("leverage") or 1)
 
         current = get_price(symbol)
 
-        if not current or entry <= 0:
+        if current is None or entry <= 0:
+            logger.warning(
+                "Portfolio | 無法計算浮動損益 | %s | price=%s entry=%s",
+                symbol, current, entry,
+            )
             continue
 
-        if signal == "做多":
-            raw = (float(current) - entry) / entry * 100
-        elif signal == "做空":
-            raw = (entry - float(current)) / entry * 100
+        if is_long(signal):
+            change = (float(current) - entry) / entry
+        elif is_short(signal):
+            change = (entry - float(current)) / entry
         else:
-            raw = 0
+            logger.error("Portfolio | 方向無法辨識 | %s | %r", symbol, signal)
+            continue
 
-        roi = raw * leverage
-        upnl = size * roi / 100
+        # 與已實現損益同一套算法:size_usdt 是保證金,名目 = size × leverage。
+        total_open_upnl += size * change * leverage
+        priced += 1
 
-        total_open_upnl += upnl
     allocation_map = {}
-
     for trade in open_trades:
         symbol = trade["symbol"]
-        size = float(trade.get("size_usdt", 0))
+        allocation_map[symbol] = allocation_map.get(symbol, 0) + float(trade.get("size_usdt") or 0)
 
-        if symbol not in allocation_map:
-            allocation_map[symbol] = 0
-
-        allocation_map[symbol] += size
-
-    allocation = []
-
-    for symbol, size in allocation_map.items():
-        percent = (
-            size / total_exposure * 100
-            if total_exposure > 0
-            else 0
-        )
-
-        allocation.append({
+    allocation = [
+        {
             "symbol": symbol,
             "size_usdt": round(size, 2),
-            "percent": round(percent, 2)
-        })
-
-    allocation.sort(
-        key=lambda x: x["size_usdt"],
-        reverse=True
-    )
+            "percent": round(size / total_exposure * 100, 2) if total_exposure > 0 else 0,
+        }
+        for symbol, size in allocation_map.items()
+    ]
+    allocation.sort(key=lambda x: x["size_usdt"], reverse=True)
 
     if exposure_ratio >= 80:
         risk_level = "高風險"
@@ -97,4 +86,6 @@ def get_portfolio_summary():
         "allocation": allocation,
         "open_trades": open_trades,
         "total_open_upnl": round(total_open_upnl, 2),
+        # 有幾筆倉位真的取到價格。小於 open_positions 代表浮動損益不完整。
+        "upnl_priced_positions": priced,
     }

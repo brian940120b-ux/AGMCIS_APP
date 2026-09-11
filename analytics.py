@@ -1,7 +1,7 @@
-from paper_trading import load_trades, load_account
+from config import PAPER_START_BALANCE
+from paper_trading import load_account, load_trades
 
-
-START_BALANCE = 10000
+START_BALANCE = float(PAPER_START_BALANCE)
 
 
 def build_equity_curve(closed_trades):

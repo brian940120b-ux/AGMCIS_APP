@@ -6,6 +6,7 @@ from database_service import get_account, get_open_trades, get_closed_trades
 from market_data import get_price
 from technical_service import get_indicators
 from risk_control import get_risk_control_status
+from direction import is_long, is_short
 
 
 START_TIME = time.time()
@@ -26,22 +27,24 @@ def api_dashboard():
 
         entry = float(t.get("entry_price") or 0)
         size = float(t.get("size_usdt") or 0)
-        leverage = float(t.get("leverage") or 3)
+        leverage = float(t.get("leverage") or 1)
         current = get_price(symbol)
         if current is None:
             current = get_indicators(symbol).get("price")
 
-        if current and entry:
-            if signal == "做多":
-                raw = (float(current) - entry) / entry * 100
-            else:
-                raw = (entry - float(current)) / entry * 100
+        change = None
+        if current and entry > 0:
+            if is_long(signal):
+                change = (float(current) - entry) / entry
+            elif is_short(signal):
+                change = (entry - float(current)) / entry
 
-            roi = round(raw * leverage, 2)
-            upnl = round(size * roi / 100, 2)
-        else:
+        if change is None:
             roi = 0
             upnl = 0
+        else:
+            roi = round(change * leverage * 100, 2)
+            upnl = round(size * change * leverage, 2)
 
         positions.append({
             "symbol": symbol,

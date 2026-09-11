@@ -5,6 +5,7 @@ from technical_service import get_indicators
 from decision_engine import get_trade_signal
 from logger_service import logger
 from ranking_engine import rank_decisions
+from direction import is_directional, is_long, is_short, price_change_pct
 
 LAST_TOP3_LOG = {"summary": None, "ts": 0}
 
@@ -91,16 +92,13 @@ def get_ai_decisions():
 
         entry = float(p.get("entry_price") or 0)
         current = float(get_price(symbol) or entry or 0)
-        leverage = float(p.get("leverage") or 3)
+        leverage = float(p.get("leverage") or 1)
 
         stoploss = float(p.get("stoploss") or 0)
         takeprofit = float(p.get("takeprofit") or 0)
 
-        if entry:
-            roi = ((current - entry) / entry) * 100
-            if signal == "做空":
-                roi = -roi
-            roi = round(roi * leverage, 2)
+        if entry > 0 and is_directional(signal):
+            roi = round(price_change_pct(signal, entry, current) * leverage * 100, 2)
         else:
             roi = 0
 
@@ -124,9 +122,9 @@ def get_ai_decisions():
             2
         )
 
-        if signal == "做多":
+        if is_long(signal):
             action = "LONG"
-        elif signal == "做空":
+        elif is_short(signal):
             action = "SHORT"
         else:
             action = "WATCH"

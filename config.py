@@ -47,8 +47,10 @@ EXCHANGE_MAX_RETRIES = int(os.getenv("EXCHANGE_MAX_RETRIES", "3"))
 EXCHANGE_RETRY_BACKOFF_SECONDS = float(os.getenv("EXCHANGE_RETRY_BACKOFF_SECONDS", "0.8"))
 
 # ---------------- Telegram ----------------
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# 實際設定與來源授權集中在 telegram_config.py(同時相容舊名 BOT_TOKEN / CHAT_ID)。
+# 這裡只保留轉發,避免同一份設定有兩個互相矛盾的來源。
+from telegram_config import BOT_TOKEN as TELEGRAM_BOT_TOKEN  # noqa: E402
+from telegram_config import CHAT_ID as TELEGRAM_CHAT_ID  # noqa: E402
 
 # ---------------- Paper Trading ----------------
 PAPER_START_BALANCE = float(os.getenv("PAPER_START_BALANCE", "10000"))

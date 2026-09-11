@@ -15,15 +15,24 @@ venv/
 
 # Logs
 *.log
+*.log.*
+logs/
 
 # Cache
 signal_cache.json
 
 # OS
 .DS_Store
-Thumbs.db*.tar.gz
-*.zip
+Thumbs.db
+
+# Archives
 *.tar.gz
+*.zip
+
+# Runtime state (不應進版控)
 scheduler_status.json
-scheduler_status.json
+emergency.stop
+trading_pause.flag
+system_mode.txt
+pending_close.json
 backups/

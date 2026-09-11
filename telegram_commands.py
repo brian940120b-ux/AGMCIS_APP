@@ -1,17 +1,13 @@
-import os
 import time
+
 import requests
-from dotenv import load_dotenv
+
 from database_service import get_account, get_open_trades
+from logger_service import logger
 from portfolio_manager import get_portfolio_summary
 from risk_control import get_risk_control_status
-
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = str(os.getenv("CHAT_ID")).strip()
-
-API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+from direction import is_long, is_short
+from telegram_config import API_BASE as API, BOT_TOKEN, CHAT_ID
 
 def send_message(text):
     requests.post(
@@ -40,10 +36,6 @@ Paper Trading
 """
     send_message(msg)
 
-if __name__ == "__main__":
-    handle_status()
-
-
 def handle_positions():
 
     from database_service import get_open_trades
@@ -70,14 +62,18 @@ def handle_positions():
             continue
 
         price = float(price)
+        leverage = float(t.get("leverage") or 1)
 
-        if signal == "做多":
-            roi = (price - entry) / entry * 100 * 3
+        if is_long(signal):
+            change = (price - entry) / entry
+        elif is_short(signal):
+            change = (entry - price) / entry
         else:
-            roi = (entry - price) / entry * 100 * 3
+            logger.error("Telegram /positions | 方向無法辨識 | %s | %r", symbol, signal)
+            continue
 
-        roi = round(roi, 2)
-        upnl = round(size * roi / 100, 2)
+        roi = round(change * leverage * 100, 2)
+        upnl = round(size * change * leverage, 2)
 
         if roi >= 20:
             trailing = "ON GAP 2%"
@@ -93,6 +89,7 @@ def handle_positions():
         lines.append(
             f"{icon} {symbol}\n"
             f"方向：{signal}\n"
+            f"槓桿：{leverage}x\n"
             f"ROI：{roi}%\n"
             f"UPNL：{upnl} USDT\n"
             f"Trailing：{trailing}\n"
@@ -205,7 +202,8 @@ def handle_health():
                 f"{icon} {svc} : {status}"
             )
 
-        except:
+        except Exception as exc:
+            logger.exception("Telegram command error: %s", exc)
             lines.append(
                 f"🔴 {svc} : error"
             )

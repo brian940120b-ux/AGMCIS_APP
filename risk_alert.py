@@ -1,84 +1,96 @@
+"""
+風險告警與 ROI 熔斷平倉。
+
+Phase 0.5 的修正:
+  1. ROI 改用每筆交易的真實槓桿(原本一律乘 3,槓桿是 8x 時 ROI 會被低估近三倍,
+     熔斷門檻等於形同失效)。
+  2. 取價失敗 / 方向無法辨識時明確記錄並跳過,不再靜默 continue。
+  3. 熔斷門檻可由環境變數調整。
+"""
+import os
+
 from database_service import get_open_trades
+from direction import is_long, is_short
+from logger_service import logger
 from market_data import get_price
 from notifier import send_telegram
 from paper_trading import close_paper_trade
 
-ALERT_PERCENT = 3
-EMERGENCY_ROI = -15
+ALERT_DISTANCE_PCT = float(os.getenv("RISK_ALERT_DISTANCE_PCT", "3"))
+EMERGENCY_ROI_PCT = float(os.getenv("RISK_EMERGENCY_ROI_PCT", "-15"))
+
 
 def check_risk_alerts():
-
-    trades = get_open_trades()
-
-    for t in trades:
-
-        symbol = t.get("symbol")
-
-        stoploss = t.get("stoploss")
-
-        if not stoploss:
-            continue
+    for trade in get_open_trades():
+        symbol = trade.get("symbol")
+        signal = trade.get("signal")
+        stoploss = trade.get("stoploss")
+        entry = float(trade.get("entry_price") or 0)
+        leverage = float(trade.get("leverage") or 1)
 
         price = get_price(symbol)
 
-        if not price:
+        if price is None:
+            logger.warning("Risk Alert | NO_PRICE | %s | 本輪跳過", symbol)
             continue
-        distance_sl = abs(
-        (float(price) - float(stoploss))
-        / float(price)
-        * 100
-        )
-        entry = float(t.get("entry_price") or 0)
-        signal = t.get("signal")
 
-        if entry > 0:
-            if signal == "做多":
-                roi = (float(price) - entry) / entry * 100
-            elif signal == "做空":
-                roi = (entry - float(price)) / entry * 100
-            else:
-                roi = 0
+        price = float(price)
 
-            roi = round(roi * 3, 2)
+        if entry <= 0:
+            logger.error("Risk Alert | BAD_ENTRY | %s | entry=%s", symbol, entry)
+            continue
 
-            if roi <= EMERGENCY_ROI:
-                result = close_paper_trade(
-                    symbol,
-                    price,
-                    "V34 緊急熔斷平倉"
-                )
+        if is_long(signal):
+            change = (price - entry) / entry
+        elif is_short(signal):
+            change = (entry - price) / entry
+        else:
+            logger.error("Risk Alert | UNKNOWN_DIRECTION | %s | %r", symbol, signal)
+            continue
 
-                send_telegram(
-                    f"""🛑 AGMCIS Emergency Close
+        roi = round(change * leverage * 100, 2)
+
+        if roi <= EMERGENCY_ROI_PCT:
+            result = close_paper_trade(symbol, price, "ROI 熔斷平倉")
+
+            logger.warning(
+                "Risk Alert | EMERGENCY_CLOSE | %s | roi=%s%% lev=%sx | %s",
+                symbol, roi, leverage, result.get("message"),
+            )
+
+            send_telegram(
+                f"""🛑 AGMCIS Emergency Close
 
 幣種：{symbol}
 方向：{signal}
+槓桿：{leverage}x
 
 進場：{entry}
 現價：{price}
-
 ROI：{roi}%
 
-觸發條件：ROI 小於等於 {EMERGENCY_ROI}%
-狀態：已送出強制平倉
-
+觸發條件：ROI ≤ {EMERGENCY_ROI_PCT}%
 結果：{result.get("message")}
 """
-                )
-        if distance_sl <= ALERT_PERCENT:
-
-            send_telegram(
-                f"""🚨 AGMCIS Risk Alert
-            幣種：{symbol}
-
-            現價：{price}
- 
-            停損：{stoploss}
-
-            距離停損：
-            {round(distance_sl,2)} %
-            """
             )
+            continue
+
+        if stoploss:
+            distance_sl = abs((price - float(stoploss)) / price * 100)
+
+            if distance_sl <= ALERT_DISTANCE_PCT:
+                send_telegram(
+                    f"""🚨 AGMCIS Risk Alert
+
+幣種：{symbol}
+現價：{price}
+停損：{stoploss}
+距離停損：{round(distance_sl, 2)}%
+ROI：{roi}%
+"""
+                )
+        else:
+            logger.warning("Risk Alert | NO_STOPLOSS | %s | 該倉位沒有停損保護", symbol)
 
 
 if __name__ == "__main__":

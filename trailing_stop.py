@@ -1,8 +1,14 @@
+"""
+Tier Trailing Stop。
+
+Phase 0.5 的修正:ROI 改用每筆交易的真實槓桿,不再一律當成 3x。
+槓桿算錯會直接讓 trailing 的觸發門檻整個偏掉。
+"""
 from database_service import get_open_trades, update_trade_stoploss
+from direction import is_long, is_short
+from logger_service import logger
 from market_data import get_price
 from notifier import send_telegram
-
-LEVERAGE = 3
 
 def get_gap_percent(roi):
     if roi >= 20:
@@ -31,20 +37,20 @@ def apply_trailing_stop():
 
         price = float(price)
 
-        if signal == "做多":
-            roi = (price - entry) / entry * 100 * LEVERAGE
+        leverage = float(t.get("leverage") or 1)
+
+        if is_long(signal):
+            roi = (price - entry) / entry * 100 * leverage
             gap = get_gap_percent(roi)
             if gap is None:
-                print(symbol, "ROI:", round(roi, 2), "no trailing")
                 continue
             new_stoploss = round(price * (1 - gap / 100), 6)
             should_update = new_stoploss > stoploss
 
-        elif signal == "做空":
-            roi = (entry - price) / entry * 100 * LEVERAGE
+        elif is_short(signal):
+            roi = (entry - price) / entry * 100 * leverage
             gap = get_gap_percent(roi)
             if gap is None:
-                print(symbol, "ROI:", round(roi, 2), "no trailing")
                 continue
             new_stoploss = round(price * (1 + gap / 100), 6)
             should_update = new_stoploss < stoploss
@@ -68,9 +74,7 @@ def apply_trailing_stop():
                 f"新停損：{new_stoploss}"
             )
 
-            print("UPDATED:", symbol, stoploss, "->", new_stoploss, "ROI:", roi, "GAP:", gap)
-        else:
-            print(symbol, "ROI:", roi, "SL unchanged")
+            logger.info("Trailing Stop | %s | SL %s -> %s | ROI=%s%% gap=%s%%", symbol, stoploss, new_stoploss, roi, gap)
 
 if __name__ == "__main__":
     apply_trailing_stop()

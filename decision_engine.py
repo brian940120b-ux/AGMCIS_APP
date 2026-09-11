@@ -1,6 +1,10 @@
 def get_trade_signal(confidence, action, indicators=None, roi=0, distance_to_sl=None):
     indicators = indicators or {}
 
+    # 資料異常或沒有信心分數時,不產生任何買賣訊號。
+    if confidence is None or indicators.get("data_ok") is False:
+        return "⚪ No Data"
+
     rsi = indicators.get("rsi")
     trend = indicators.get("trend")
     macd_hist = indicators.get("macd_hist")

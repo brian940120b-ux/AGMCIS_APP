@@ -17,6 +17,38 @@
 
 ---
 
+## ⚠️ Phase 0.5 之後的必要設定
+
+Phase 0.5 移除了硬編碼的資料庫密碼與 Dashboard 金鑰。
+`.env` 沒有補上以下變數,服務會以明確的錯誤訊息拒絕啟動:
+
+```
+DB_PASSWORD=<資料庫密碼>
+DASHBOARD_KEY=<自己設一把,不要用舊的 agmcis2026>
+TELEGRAM_ALLOWED_CHAT_IDS=<允許下指令的 chat id,逗號分隔>
+```
+
+套用 migration(idempotent,對既有資料庫不會改動資料):
+
+```
+/root/AGMCIS_APP/.venv/bin/python scripts/migrate.py
+/root/AGMCIS_APP/.venv/bin/python scripts/migrate.py --status
+```
+
+建議同時輪替資料庫密碼與 Dashboard 金鑰 —— 舊值曾以明文提交進 git。
+
+### 備份
+
+備份已改為 pg_dump 資料庫(原本備份的是已廢棄的 JSON 檔):
+
+```
+/root/AGMCIS_APP/.venv/bin/python backup_system.py
+/root/AGMCIS_APP/.venv/bin/python restore_system.py            # 列出備份
+/root/AGMCIS_APP/.venv/bin/python restore_system.py <檔名>     # 還原(需確認)
+```
+
+---
+
 ## Python Environment
 
 Virtual Environment:
@@ -75,9 +107,13 @@ Compile Python Files:
 /root/AGMCIS_APP/.venv/bin/python -m py_compile telegram_commands.py
 /root/AGMCIS_APP/.venv/bin/python -m py_compile telegram_listener.py
 
-API Test:
+Run Tests:
 
-curl -s http://127.0.0.1:8000/api/dashboard | python3 -m json.tool
+/root/AGMCIS_APP/.venv/bin/python -m pytest tests/ -q
+
+API Test(所有 /api/* 現在都需要金鑰):
+
+curl -s -H "X-AGMCIS-KEY: $DASHBOARD_KEY" http://127.0.0.1:8000/api/dashboard | python3 -m json.tool
 
 ---
 

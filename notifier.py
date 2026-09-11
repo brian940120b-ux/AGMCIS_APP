@@ -1,24 +1,32 @@
-import os
+"""
+Telegram 推播。
+
+設定一律由 telegram_config 提供 —— 原本這裡讀 BOT_TOKEN / CHAT_ID,
+而 config.py 讀 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID,.env.example 只寫後者,
+造成依 .env 內容不同,通知可能靜默失效。
+"""
 import requests
+
 from logger_service import logger
-from dotenv import load_dotenv
+from telegram_config import (
+    API_BASE,
+    BOT_TOKEN,
+    CHAT_ID,
+    DISABLE_TELEGRAM_PUSH,
+    is_configured,
+)
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-
-
-DISABLE_TELEGRAM_PUSH = os.getenv("DISABLE_TELEGRAM_PUSH", "false").lower() == "true"
 
 def send_telegram(message):
     if DISABLE_TELEGRAM_PUSH:
         return False
-    if not BOT_TOKEN or not CHAT_ID:
-        logger.error("Telegram 設定不完整，請檢查 .env")
+    if not is_configured():
+        logger.error(
+            "Telegram 設定不完整。請在 .env 設定 TELEGRAM_BOT_TOKEN 與 TELEGRAM_CHAT_ID。"
+        )
         return False
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"{API_BASE}/sendMessage"
 
     data = {
         "chat_id": CHAT_ID,

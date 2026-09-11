@@ -9,9 +9,10 @@ if ROOT not in sys.path:
 
 from portfolio_manager import get_portfolio_summary
 from scanner_service import scan_market
+from config import PAPER_START_BALANCE
 from database_service import get_closed_trades
 
-START_BALANCE = 10000
+START_BALANCE = float(PAPER_START_BALANCE)
 
 
 def build_equity_curve():

@@ -1,5 +1,5 @@
 from smart_ranking import get_smart_ranking
-from risk_control import get_risk_control_status
+from risk_control import assert_can_open, cap_leverage
 from notifier import send_telegram
 from paper_trading import create_paper_trade, get_paper_summary
 import os
@@ -19,31 +19,20 @@ def get_leverage(score):
 
 
 def scan_opportunities():
-    ranking = get_smart_ranking()
-    risk = get_risk_control_status()
+    # 風控 gate 與 auto_trader 共用同一個入口,兩條路徑不再各自判斷。
+    # trading_pause.flag 與 emergency.stop 的檢查也已收進 Risk Engine。
+    allowed, reason, risk = assert_can_open()
 
-    if risk["emergency_stop"]:
-        send_telegram(
-            "🚨 AGMCIS 風控警報\n\n"
-            "系統目前為 EMERGENCY_STOP\n"
-            "暫停所有新機會推送。"
-        )
-        return
-
-    if not risk["allow_new_trade"]:
+    if not allowed:
         send_telegram(
             "⚠️ AGMCIS 風控限制\n\n"
             "目前風控不允許新開倉。\n"
-            f"System Status: {risk['system_status']}"
+            f"System Status: {risk['system_status']}\n"
+            f"Blockers: {reason}"
         )
         return
-    if os.path.exists("trading_pause.flag"):
-        send_telegram(
-            "⛔ AGMCIS Trading Paused\n\n"
-            "偵測到 trading_pause.flag\n"
-            "目前暫停新開倉。"
-        )
-        return
+
+    ranking = get_smart_ranking()
     summary = get_paper_summary()
     open_trades = summary.get("open_trades", [])
 
@@ -74,7 +63,7 @@ def scan_opportunities():
         else:
             continue
 
-        leverage = get_leverage(score)
+        leverage = cap_leverage(get_leverage(score))
         position_value = POSITION_SIZE_USDT * leverage
 
         result = create_paper_trade(symbol=symbol, entry_price=price, signal=signal, size_usdt=POSITION_SIZE_USDT, stoploss=stoploss, takeprofit=takeprofit, leverage=leverage, position_value=position_value)
@@ -88,7 +77,7 @@ def scan_opportunities():
         message = f"""
 AGMCIS AUTO PAPER TRADE OPENED
 
-Exchange Data: OKX + BingX
+Exchange: BingX
 Rank Scope: Top {TOP_N}
 
 Symbol: {symbol}
