@@ -11,6 +11,7 @@ from unittest.mock import patch
 import decision_engine
 import direction_engine
 import scanner_service
+from agmcis.core.enums import Direction
 import technical_service
 from agmcis.data import quality
 
@@ -84,70 +85,125 @@ class TestIndicatorFailuresAreVisible(unittest.TestCase):
 
 
 class TestBadDataNeverBecomesASignal(unittest.TestCase):
+    """
+    Phase 6 之後訊號由統一管線產生,所以這裡驗的是管線的行為。
+    要求不變:資料壞掉絕不可以被當成中性訊號。
+    """
 
     BAD = {"data_ok": False, "data_error": "ohlcv_fetch_failed: boom",
            "trend": "UNKNOWN", "rsi": None, "macd": None, "macd_signal": None,
            "ema20": None, "ema60": None, "atr": None, "price": 100.0}
 
-    def test_confidence_is_none_not_fifty(self):
-        self.assertIsNone(scanner_service.calculate_scanner_confidence(self.BAD))
-
-    def test_direction_is_wait(self):
+    def test_direction_engine_returns_wait(self):
         self.assertEqual(direction_engine.get_trade_direction(self.BAD), "WAIT")
 
-    def test_trade_signal_is_no_data(self):
+    def test_decision_engine_returns_no_data(self):
         self.assertEqual(
             decision_engine.get_trade_signal(None, "WAIT", self.BAD), "⚪ No Data"
         )
 
-    def test_scan_market_emits_no_data_row_and_skips_scoring(self):
-        with patch.object(scanner_service, "SCAN_SYMBOLS", ["BTC/USDT"]), \
-             patch.object(scanner_service, "get_indicators", return_value=dict(self.BAD)), \
-             patch.object(scanner_service, "analyze_timeframes") as mtf:
-            rows = scanner_service.scan_market()
+    def test_pipeline_emits_a_wait_signal_when_data_is_bad(self):
+        """資料品質不合格時,管線回傳帶原因的 WAIT Signal,而不是 None 或例外。"""
+        from agmcis.data import quality
+        from agmcis.signal import pipeline
 
-        self.assertEqual(len(rows), 1)
-        self.assertFalse(rows[0]["data_ok"])
+        report = quality.QualityReport(symbol="BTC/USDT", timeframe="1h")
+        report.add("STALE_DATA", quality.SEVERITY_ERROR, "資料過期")
+
+        with patch("agmcis.data.market_data.get_ohlcv_checked",
+                   return_value=(None, report)), \
+             patch("agmcis.data.market_data.get_price", return_value=100.0):
+            signal = pipeline.analyse_symbol("BTC/USDT")
+
+        self.assertFalse(signal.data_ok)
+        self.assertFalse(signal.is_tradable)
+        self.assertIs(signal.direction, Direction.WAIT)
+        self.assertIn("STALE_DATA", signal.data_error)
+
+    def test_bad_data_signal_cannot_become_a_trade_intent(self):
+        """最終防線:不可交易的 Signal 轉不成 TradeIntent。"""
+        from agmcis.core.errors import TradingRuleViolation
+        from agmcis.core.models import Signal, TradeIntent
+
+        signal = Signal(
+            symbol="BTC/USDT", market_type="perpetual", direction=Direction.WAIT,
+            timeframe="1h", strategy="pipeline", data_ok=False,
+        )
+        with self.assertRaises(TradingRuleViolation):
+            TradeIntent.from_signal(signal)
+
+    def test_scan_market_shim_reports_no_data(self):
+        from agmcis.core.models import Signal
+
+        bad = Signal(
+            symbol="BTC/USDT", market_type="perpetual", direction=Direction.WAIT,
+            timeframe="1h", strategy="pipeline", data_ok=False,
+            data_error="stale", reasons=["資料品質不合格"],
+        )
+        with patch("scanner_service._scan", return_value=[bad]):
+            rows = scanner_service.scan_market(["BTC/USDT"])
+
         self.assertEqual(rows[0]["trade_signal"], "⚪ No Data")
+        self.assertFalse(rows[0]["data_ok"])
         self.assertIsNone(rows[0]["stoploss"])
-        self.assertIn("資料異常", rows[0]["blocked_reason"])
-        mtf.assert_not_called()
 
 
 class TestStopLossSideMatchesDirection(unittest.TestCase):
+    """
+    做空的停損必須在進場價**上方**。
 
-    GOOD = {"data_ok": True, "trend": "BEARISH", "rsi": 30, "macd": -1,
-            "macd_signal": 0, "ema20": 90, "ema60": 100, "atr": 2.0, "price": 100.0,
-            "macd_hist": -0.5}
+    舊 scanner 一律用 price - atr*2,做空時停損會被放在進場價下方 ——
+    那在開倉的瞬間就會觸發。現在停損由策略的 atr_levels() 依方向計算。
+    """
 
-    def test_short_stop_loss_is_above_entry(self):
-        """做空的停損必須在進場價上方。原本一律用 price - atr*2,做空會立刻停損。"""
-        with patch.object(scanner_service, "SCAN_SYMBOLS", ["BTC/USDT"]), \
-             patch.object(scanner_service, "get_indicators", return_value=dict(self.GOOD)), \
-             patch.object(scanner_service, "analyze_timeframes", return_value={}), \
-             patch.object(scanner_service, "calculate_mtf_score",
-                          return_value={"mtf_score": -3, "mtf_status": "BEARISH",
-                                        "blocked_reason": None}), \
-             patch.object(scanner_service, "get_trade_direction", return_value="SHORT"), \
-             patch.object(scanner_service, "get_trade_signal", return_value="🔴 Sell"):
-            rows = scanner_service.scan_market()
+    def _indicators(self, **overrides):
+        from agmcis.analysis.indicators import Indicators
 
-        row = rows[0]
-        self.assertEqual(row["action"], "SHORT")
-        self.assertGreater(row["stoploss"], row["entry_price"])
-        self.assertLess(row["takeprofit"], row["entry_price"])
+        base = dict(
+            symbol="BTC/USDT", timeframe="1h", price=65000.0,
+            ema20=66000.0, ema50=64000.0, ema60=64000.0,
+            rsi=60.0, macd=10.0, macd_signal=5.0, macd_hist=5.0,
+            adx=30.0, atr=1000.0, bb_upper=67000.0, bb_lower=63000.0,
+            volume=150.0, volume_ma20=100.0,
+        )
+        base.update(overrides)
+        return Indicators(**base)
 
-    def test_long_stop_loss_is_below_entry(self):
-        with patch.object(scanner_service, "SCAN_SYMBOLS", ["BTC/USDT"]), \
-             patch.object(scanner_service, "get_indicators", return_value=dict(self.GOOD)), \
-             patch.object(scanner_service, "analyze_timeframes", return_value={}), \
-             patch.object(scanner_service, "calculate_mtf_score",
-                          return_value={"mtf_score": 3, "mtf_status": "STRONG_BULLISH",
-                                        "blocked_reason": None}), \
-             patch.object(scanner_service, "get_trade_direction", return_value="LONG"), \
-             patch.object(scanner_service, "get_trade_signal", return_value="🟢 Strong Buy"):
-            rows = scanner_service.scan_market()
+    def test_long_stop_is_below_entry_and_target_above(self):
+        from agmcis.analysis.regime import detect
+        from agmcis.strategy.registry import StrategyRegistry
 
-        row = rows[0]
-        self.assertLess(row["stoploss"], row["entry_price"])
-        self.assertGreater(row["takeprofit"], row["entry_price"])
+        indicators = self._indicators()
+        consensus = StrategyRegistry().consensus(indicators, detect(indicators))
+
+        self.assertIs(consensus.direction, Direction.LONG, consensus.blocked_reason)
+        self.assertLess(consensus.stop_loss, indicators.price)
+        self.assertGreater(consensus.take_profit, indicators.price)
+
+    def test_short_stop_is_above_entry_and_target_below(self):
+        from agmcis.analysis.regime import detect
+        from agmcis.strategy.registry import StrategyRegistry
+
+        indicators = self._indicators(
+            ema20=64000.0, ema50=66000.0, ema60=66000.0,
+            rsi=40.0, macd=-10.0, macd_signal=-5.0, macd_hist=-5.0,
+        )
+        consensus = StrategyRegistry().consensus(indicators, detect(indicators))
+
+        self.assertIs(consensus.direction, Direction.SHORT, consensus.blocked_reason)
+        self.assertGreater(consensus.stop_loss, indicators.price)
+        self.assertLess(consensus.take_profit, indicators.price)
+
+    def test_atr_levels_never_put_a_stop_on_the_wrong_side(self):
+        """跨方向的不變量。"""
+        from agmcis.strategy.base import Strategy
+
+        indicators = self._indicators()
+        for direction in [Direction.LONG, Direction.SHORT]:
+            stop, target = Strategy.atr_levels(indicators, direction)
+            if direction is Direction.LONG:
+                self.assertLess(stop, indicators.price)
+                self.assertGreater(target, indicators.price)
+            else:
+                self.assertGreater(stop, indicators.price)
+                self.assertLess(target, indicators.price)

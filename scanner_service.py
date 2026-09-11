@@ -1,122 +1,90 @@
-from market_universe import SCAN_SYMBOLS
-from technical_service import get_indicators
-from decision_engine import get_trade_signal
-from ranking_engine import rank_decisions
-from multi_timeframe_service import analyze_timeframes
-from mtf_engine import calculate_mtf_score
-from direction_engine import get_trade_direction
+"""
+向下相容 shim。
 
-def clamp(value, low=0, high=100):
-    return max(low, min(high, value))
+Phase 6 把兩條互相矛盾的訊號管線合併成一條
+(`agmcis/signal/pipeline.py`)。這裡把統一管線的 `Signal` 物件
+轉回舊的 dict 格式,讓既有呼叫端(api/market_scan.py、v2、v3、
+auto_trader)完全不用改。
+
+⚠️ 重點:**Dashboard 現在看到的訊號,就是實際下單依據的訊號。**
+在 Phase 6 之前這兩者是不同的東西。
+
+新程式碼請直接用:
+    from agmcis.signal.pipeline import scan, top_opportunities
+"""
+from agmcis.config import settings
+from agmcis.core.enums import Direction
+from agmcis.signal.pipeline import scan as _scan
+
+# 舊介面用 emoji 字串當訊號值。保留是為了不破壞前端,
+# 但內部一律用 Direction enum。
+SIGNAL_STRONG_BUY = "🟢 Strong Buy"
+SIGNAL_BUY = "🟢 Buy"
+SIGNAL_HOLD = "🟡 Hold"
+SIGNAL_SELL = "🔴 Sell"
+SIGNAL_STRONG_SELL = "🔴 Strong Sell"
+SIGNAL_NO_DATA = "⚪ No Data"
+
+STRONG_SCORE = 80
+
+
+def _legacy_signal(signal):
+    """把 Signal 轉成舊的 emoji 字串。"""
+    if not signal.data_ok:
+        return SIGNAL_NO_DATA
+    if signal.direction is Direction.LONG:
+        return SIGNAL_STRONG_BUY if (signal.score or 0) >= STRONG_SCORE else SIGNAL_BUY
+    if signal.direction is Direction.SHORT:
+        return SIGNAL_STRONG_SELL if (signal.score or 0) >= STRONG_SCORE else SIGNAL_SELL
+    return SIGNAL_HOLD
+
+
+def _to_legacy_dict(signal):
+    indicators = getattr(signal, "indicators", {}) or {}
+    consensus = getattr(signal, "consensus", {}) or {}
+
+    return {
+        "symbol": signal.symbol,
+        "action": signal.direction.name if signal.direction.is_directional else "WAIT",
+        "trade_signal": _legacy_signal(signal),
+        "confidence": signal.score,
+        "score": signal.score,
+        "strategy_confidence": signal.confidence,
+        "entry_price": signal.entry,
+        "stoploss": signal.stop_loss,
+        "takeprofit": signal.take_profit,
+        "risk_reward": signal.risk_reward,
+        "market_regime": signal.market_regime,
+        "data_ok": signal.data_ok,
+        "blocked_reason": (
+            signal.reasons[0] if signal.reasons and not signal.is_tradable else None
+        ),
+        "reasons": list(signal.reasons),
+        "agreeing_strategies": consensus.get("agreeing", []),
+        "score_breakdown": getattr(signal, "score_breakdown", None),
+        "regime_detail": getattr(signal, "regime_detail", None),
+        "indicators": indicators,
+        # 舊欄位:前端還在用。MTF 已由市況與策略集成取代。
+        "mtf_score": len(consensus.get("agreeing", [])),
+        "mtf_status": signal.market_regime or "UNKNOWN",
+        "timeframes": {},
+    }
+
+
+def scan_market(symbols=None, timeframe="1h"):
+    """統一管線的結果,轉成舊格式。"""
+    symbols = symbols if symbols is not None else settings.WATCHLIST_SYMBOLS
+    return [_to_legacy_dict(s) for s in _scan(symbols, timeframe=timeframe)]
+
 
 def calculate_scanner_confidence(indicators):
-    # 資料壞掉時回傳 None,而不是 50 分的「中性」—— 讓下游可以區分中性與無資料。
-    if indicators.get("data_ok") is False:
+    """
+    向下相容。
+
+    ⚠️ 這個函式已被 agmcis/signal/scorer.py 取代。
+    它原本與 strategy.analyze_symbol() 是兩套互相矛盾的評分公式。
+    保留只是為了不讓舊測試與舊呼叫端壞掉。
+    """
+    if isinstance(indicators, dict) and indicators.get("data_ok") is False:
         return None
-
-    trend = indicators.get("trend")
-    rsi = indicators.get("rsi")
-    macd_hist = indicators.get("macd_hist")
-
-    score = 50
-
-    if trend == "BULLISH":
-        score += 25
-    elif trend == "BEARISH":
-        score -= 25
-
-    if macd_hist is not None:
-        if macd_hist > 0:
-            score += 20
-        elif macd_hist < 0:
-            score -= 15
-
-    if rsi is not None:
-        if 45 <= rsi <= 60:
-            score += 15
-        elif 60 < rsi <= 70:
-            score += 5
-        elif rsi < 35:
-            score += 10
-        elif rsi > 70:
-            score -= 20
-
-    return round(clamp(score), 2)
-
-def scan_market():
-    results = []
-
-    for symbol in SCAN_SYMBOLS:
-        indicators = get_indicators(symbol)
-        price = indicators.get("price")
-        atr = indicators.get("atr")
-
-        # 資料品質 gate:指標算不出來就不產生任何交易訊號。
-        if indicators.get("data_ok") is False:
-            results.append({
-                "symbol": symbol,
-                "action": "WAIT",
-                "trade_signal": "⚪ No Data",
-                "confidence": None,
-                "mtf_score": 0,
-                "mtf_status": "UNKNOWN",
-                "entry_price": price,
-                "stoploss": None,
-                "takeprofit": None,
-                "blocked_reason": f"資料異常:{indicators.get('data_error')}",
-                "data_ok": False,
-                "indicators": indicators,
-                "timeframes": {},
-            })
-            continue
-
-        mtf = analyze_timeframes(symbol)
-        confidence = calculate_scanner_confidence(indicators)
-
-        mtf_result = calculate_mtf_score(mtf)
-        mtf_score = mtf_result["mtf_score"]
-        mtf_status = mtf_result["mtf_status"]
-        mtf_blocked_reason = mtf_result.get("blocked_reason")
-
-        action = get_trade_direction(indicators)
-        trade_signal = get_trade_signal(confidence, action, indicators)
-
-        if trade_signal == "🟢 Strong Buy" and mtf_score < 3:
-            trade_signal = "🟢 Buy" if mtf_score >= 2 else "🟡 Hold"
-
-        if trade_signal in ["🔴 Sell", "🔴 Strong Sell"]:
-            action = "SHORT"
-
-        # 停損停利依方向計算。原本只算做多方向(price - atr),
-        # 做空時會把停損放在進場價下方 —— 方向錯的停損會立刻觸發。
-        stoploss = takeprofit = None
-        if price and atr:
-            if action == "SHORT":
-                stoploss = round(price + atr * 2, 6)
-                takeprofit = round(price - atr * 3, 6)
-            else:
-                stoploss = round(price - atr * 2, 6)
-                takeprofit = round(price + atr * 3, 6)
-
-        macd_hist = indicators.get("macd_hist")
-        blocked_reason = mtf_blocked_reason or (
-            "MACD 動能轉弱" if macd_hist is not None and macd_hist < 0 else None
-        )
-
-        results.append({
-            "symbol": symbol,
-            "action": action,
-            "trade_signal": trade_signal,
-            "confidence": confidence,
-            "mtf_score": mtf_score,
-            "mtf_status": mtf_status,
-            "entry_price": price,
-            "stoploss": stoploss,
-            "takeprofit": takeprofit,
-            "blocked_reason": blocked_reason,
-            "data_ok": True,
-            "indicators": indicators,
-            "timeframes": mtf,
-        })
-
-    return rank_decisions(results)
+    return None
