@@ -1,0 +1,7 @@
+# v3 Web 層依賴，核心引擎仍沿用專案根目錄的 requirements.txt
+-r ../requirements.txt
+
+fastapi
+uvicorn[standard]
+jinja2
+websockets

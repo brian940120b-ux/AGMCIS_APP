@@ -1,11 +1,25 @@
-from fastapi import FastAPI
+import asyncio
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from config import APP_NAME, VERSION
+from ws.routes import router as websocket_router, broadcast_loop
 
-from ws.routes import router as websocket_router
-app = FastAPI(title=APP_NAME, version=VERSION)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 單一推播任務，所有 websocket 連線共用同一份 payload
+    task = asyncio.create_task(broadcast_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+app = FastAPI(title=APP_NAME, version=VERSION, lifespan=lifespan)
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -19,8 +33,6 @@ def health():
         "status": "running"
     }
 
-from fastapi import Request
-from fastapi.responses import HTMLResponse
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
@@ -30,23 +42,5 @@ def dashboard(request: Request):
         context={}
     )
 
+
 app.include_router(websocket_router)
-
-# WebSocket Router
-from ws.routes import router as websocket_router
-app.include_router(websocket_router)
-
-# Direct WebSocket Route
-import asyncio
-from fastapi import WebSocket, WebSocketDisconnect
-from services.dashboard import get_dashboard_payload
-
-@app.websocket("/ws")
-async def ws_direct(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            await websocket.send_json(get_dashboard_payload())
-            await asyncio.sleep(5)
-    except WebSocketDisconnect:
-        pass
