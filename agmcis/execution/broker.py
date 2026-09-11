@@ -78,6 +78,26 @@ class Broker:
         """這個部位現在有沒有停損保護。"""
         raise NotImplementedError
 
+    def ensure_stop_loss(self, symbol, stop_price) -> bool:
+        """
+        (重新)建立這個部位的停損。第十八節緊急保護的第 1 步。
+
+        回傳值只代表「請求送出去而且沒有被拒絕」,**不代表停損已經存在** ——
+        呼叫端必須再用 has_protection() 確認一次。這兩件事在實盤是分開的:
+        送單成功、交易所回 200、停損單卻因為觸發價越過現價而被撤掉,
+        是真的會發生的。
+        """
+        raise NotImplementedError
+
+    def reduce_position(self, symbol, fraction, reason="") -> bool:
+        """
+        把部位縮掉 fraction 比例。第十八節緊急保護的第 3 步。
+
+        沒有實作時緊急流程會直接跳到平倉 —— 這是刻意的:
+        縮不了就砍掉,不要留一個沒有停損的完整部位。
+        """
+        raise NotImplementedError
+
     def close_position(self, symbol, price=None, reason="") -> FillResult:
         raise NotImplementedError
 
@@ -195,6 +215,37 @@ class PaperBroker(Broker):
         if not position:
             return False
         return position.get("stoploss") is not None
+
+    def ensure_stop_loss(self, symbol, stop_price):
+        """
+        模擬盤的停損是交易列上的一個欄位,所以「掛停損」就是寫回那個欄位。
+
+        這代表模擬盤**幾乎不可能**走到緊急保護的重試以後的步驟 ——
+        寫一個欄位不會像送單那樣失敗。緊急流程的後半段是實盤才驗得出來的,
+        模擬盤跑得過不代表實盤跑得過。
+        """
+        if stop_price is None:
+            return False
+
+        position = self._get_position(symbol)
+        if not position:
+            return False
+
+        from database_service import update_trade_stoploss
+        return bool(update_trade_stoploss(symbol, stop_price))
+
+    def reduce_position(self, symbol, fraction, reason=""):
+        """
+        模擬盤**不支援**縮倉。
+
+        close_paper_trade() 只能整筆平掉,硬要在這裡改小 size_usdt 會讓
+        已實現損益的計算基準對不起來 —— 縮掉的那一半要用什麼價格結算、
+        算不算一筆交易、要不要進勝率,全都沒有答案。
+
+        與其發明一套沒有任何真實行為可以對照的模擬,不如明說不支援:
+        緊急流程遇到 NotImplementedError 會直接進平倉,那是安全的方向。
+        """
+        raise NotImplementedError
 
     def close_position(self, symbol, price=None, reason=""):
         if price is None:

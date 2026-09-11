@@ -34,6 +34,7 @@ from agmcis.core.enums import OrderState, OrderType
 from agmcis.core.errors import TradingRuleViolation
 from agmcis.core.models import Order
 from agmcis.execution import state_machine as sm
+from agmcis.execution import emergency
 from agmcis.execution.broker import PaperBroker
 from agmcis.execution.rules_engine import TradingContext, get_engine as get_rules_engine
 from agmcis.execution import order_store as order_store_module
@@ -54,6 +55,7 @@ class ExecutionResult:
     fill_price: Optional[float] = None
     partial: bool = False
     unfilled_quantity: float = 0.0
+    protection: Optional[object] = None
 
     def to_dict(self):
         return {
@@ -69,6 +71,7 @@ class ExecutionResult:
             "fill_price": self.fill_price,
             "partial": self.partial,
             "unfilled_quantity": self.unfilled_quantity,
+            "protection": self.protection.to_dict() if self.protection else None,
         }
 
 
@@ -88,7 +91,7 @@ CLOSE_FAILED = "CLOSE_FAILED"
 class ExecutionEngine:
 
     def __init__(self, broker=None, rules_engine=None, store=None,
-                 persist=True):
+                 persist=True, pause_file=None):
         self._broker = broker
         self._rules_engine = rules_engine
         self._store = store
@@ -96,6 +99,9 @@ class ExecutionEngine:
         # 生產環境**必須**持久化 —— 沒有持久化就沒有對帳,
         # 沒有對帳就不能重試,而不能重試的執行層遇到逾時只能放著。
         self._persist = persist
+        # 緊急保護停新單時要寫的旗標檔。None = 用全域設定。
+        # 測試必須注入,否則會在專案根目錄留下一個真的會擋交易的檔案。
+        self._pause_file = pause_file
 
     @property
     def broker(self):
@@ -303,69 +309,85 @@ class ExecutionEngine:
             return False
 
     def _ensure_protected(self, order, intent, validation):
+        """
+        成交之後確認停損存在。沒有就跑第十八節的六步驟緊急保護。
+
+        在 Phase 18 以前這裡是「檢查一次、沒有就立刻平倉」。那是安全的,
+        但把一次網路抖動和「這個部位不可能有停損」當成同一件事 ——
+        重試一次就能救回來的部位被平掉,每次都要付一趟手續費與滑點。
+
+        現在由 emergency.protect() 決定結局。這一層只負責把結局
+        翻譯成狀態機轉移與 ExecutionResult。
+        """
         symbol = intent.symbol
 
-        try:
-            protected = self.broker.has_protection(symbol)
-        except Exception as exc:
-            logger.exception("Execution | PROTECTION_CHECK_FAILED | %s", symbol)
-            protected = False
+        outcome = emergency.protect(
+            self.broker, symbol, intent.stop_loss,
+            close_position=lambda sym, reason: self._emergency_close(
+                order, sym, reason,
+            ),
+            pause_file=self._pause_file,
+        )
 
-        if protected:
+        if outcome.protected:
             self._move(order, OrderState.PROTECTED)
             logger.info(
-                "Execution | OPENED | %s | %s | qty=%s @ %s | 停損 %s",
+                "Execution | OPENED | %s | %s | qty=%s @ %s | 停損 %s | %s",
                 symbol, order.side.value, order.filled_quantity,
-                order.average_fill_price, intent.stop_loss,
+                order.average_fill_price, intent.stop_loss, outcome.status,
             )
+            adjustments = list(validation.adjustments)
+            if outcome.status != emergency.PROTECTED:
+                adjustments.append(f"緊急保護:{outcome.status}")
+            if outcome.reduced_fraction:
+                adjustments.append(f"緊急縮倉 {outcome.reduced_fraction:.0%}")
             return ExecutionResult(
                 ok=True, order=order, symbol=symbol, status=OPENED,
-                adjustments=list(validation.adjustments),
+                adjustments=adjustments,
                 fill_price=order.average_fill_price,
+                protection=outcome,
             )
 
-        # ---- 裸倉 ----
-        logger.error(
-            "Execution | NAKED_POSITION | %s | 已成交但沒有停損保護,立即平倉", symbol,
-        )
-        return self._close_naked(order, symbol)
+        if outcome.status == emergency.CLOSED:
+            # CLOSING 已經在 _emergency_close() 裡推過了
+            self._move(order, OrderState.CLOSED, reason="裸倉緊急平倉")
+            return ExecutionResult(
+                ok=False, order=order, symbol=symbol,
+                status=NAKED_POSITION_CLOSED,
+                reason="開倉後掛不上停損,已緊急平倉",
+                naked_position_closed=True,
+                protection=outcome,
+            )
 
-    def _close_naked(self, order, symbol):
+        # 最糟的情況:有裸倉、救不回來、又平不掉。這必須大聲喊。
+        logger.critical(
+            "Execution | NAKED_POSITION_STUCK | %s | %s | 需要人工介入",
+            symbol, outcome.reason,
+        )
+        self._move(order, OrderState.FAILED, reason=outcome.reason or "裸倉平倉失敗")
+        return ExecutionResult(
+            ok=False, order=order, symbol=symbol, status=NAKED_POSITION_STUCK,
+            reason=f"裸倉且平倉失敗,需要人工處理:{outcome.reason}",
+            protection=outcome,
+        )
+
+    def _emergency_close(self, order, symbol, reason):
         """
-        裸倉處理。寧可平掉一個可能會賺的倉位,也不要留一個沒有停損的倉位。
+        給緊急保護用的平倉。回傳 bool —— 那一層只需要知道成不成功。
+
+        先推 CLOSING 再送單:FILLED 不能直接跳到 CLOSED,而且
+        「已經開始平了」這件事必須在送單**之前**就留下紀錄 ——
+        送單當下斷線的話,CLOSING 是唯一能讓對帳知道要去查什麼的線索。
         """
-        self._move(order, OrderState.CLOSING, reason="裸倉:沒有停損保護")
+        if order.state is not OrderState.CLOSING:
+            self._move(order, OrderState.CLOSING, reason=reason)
 
         try:
-            result = self.broker.close_position(
-                symbol, reason="裸倉緊急平倉(開倉後沒有停損保護)",
-            )
-        except Exception as exc:
+            result = self.broker.close_position(symbol, reason=reason)
+        except Exception:
             logger.exception("Execution | NAKED_CLOSE_EXCEPTION | %s", symbol)
-            self._move(order, OrderState.UNKNOWN, reason=str(exc))
-            return ExecutionResult(
-                ok=False, order=order, symbol=symbol, status=NAKED_POSITION_STUCK,
-                reason=f"裸倉且平倉失敗,需要人工處理:{type(exc).__name__}: {exc}",
-            )
-
-        if not result.ok:
-            # 最糟的情況:有裸倉、又平不掉。這必須大聲喊。
-            logger.critical(
-                "Execution | NAKED_POSITION_STUCK | %s | 平倉失敗:%s | 需要人工介入",
-                symbol, result.reason,
-            )
-            self._move(order, OrderState.FAILED, reason=result.reason)
-            return ExecutionResult(
-                ok=False, order=order, symbol=symbol, status=NAKED_POSITION_STUCK,
-                reason=f"裸倉且平倉失敗,需要人工處理:{result.reason}",
-            )
-
-        self._move(order, OrderState.CLOSED)
-        return ExecutionResult(
-            ok=False, order=order, symbol=symbol, status=NAKED_POSITION_CLOSED,
-            reason="開倉後沒有停損保護,已緊急平倉",
-            naked_position_closed=True,
-        )
+            return False
+        return bool(result.ok)
 
     # ---------------- 平倉 ----------------
 

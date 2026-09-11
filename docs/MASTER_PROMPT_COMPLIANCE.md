@@ -41,7 +41,7 @@
 | 十五 | Order State Machine | ✅ | `agmcis/execution/state_machine.py`,含 UNKNOWN 不得重下單的規則;`test_execution_engine.py` 釘住 |
 | 十六 | Client Order ID | ✅ | `agmcis/execution/client_order_id.py` |
 | 十七 | Position Reconciliation | ✅ | `agmcis/execution/reconciliation.py` + `orders` / `order_events` 表 |
-| 十八 | TP / SL 保護 | ⚠️ | 「不得有無停損部位」有做到,但六步驟只做到第 4 與第 6 的一部分:**沒有 Retry SL、沒有 Verify、沒有 Reduce Position、失敗後沒有 Disable New Orders** |
+| 十八 | TP / SL 保護 | ✅ | `agmcis/execution/emergency.py` 完整六步驟:Retry → Verify → Reduce → Close → Disable New Orders → Notify。每一步之間重新 Verify;查不到 / 不支援 / 拋例外一律當成沒有保護 |
 | 十九 | Risk Engine 是 HARD GATE | ✅ | `agmcis/risk/engine.py`;`test_risk_gate.py` 用 AST 檢查沒有旁路 |
 | 二十 | Risk Parameters | ⚠️ | 10 個參數裡有 7 個。**缺 MAX_WEEKLY_LOSS、MAX_SYMBOL_EXPOSURE、MAX_CORRELATED_EXPOSURE** |
 
@@ -177,15 +177,15 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 50 |
-| ⚠️ 部分做到 | 44 |
+| ✅ 已做到 | 51 |
+| ⚠️ 部分做到 | 43 |
 | ❌ 沒做 | 12 |
 
 ## 缺口排序(由大到小)
 
 排序依據是「對真實資金的風險」,不是實作難度。
 
-1. **十八 — SL 失敗六步驟**(安全)目前只會直接平倉,不會先重試。單次 API 抖動就會白白平掉一個合法部位。
+1. ~~**十八 — SL 失敗六步驟**~~ ✅ 已補(`agmcis/execution/emergency.py`,27 個測試)。
 2. **五十九 + 六十 + 二十 — 組合風險與相關性**(安全)同時開三個高相關多單,目前風控看不見。
 3. **四十六 — SAFE LIVE MODE**(安全)第一次實單沒有獨立於 paper 的更嚴格上限。
 4. **五十一 — News Risk 封鎖窗口**(安全)FOMC/CPI 當下系統會照常開單。

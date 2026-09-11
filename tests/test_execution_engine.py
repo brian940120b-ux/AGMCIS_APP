@@ -9,6 +9,7 @@ Execution Engine(Phase 12)。
 """
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -77,7 +78,17 @@ class FakeBroker(Broker):
 
     def __init__(self, fill=None, protected=True, close_result=None,
                  submit_error=None, close_error=None,
-                 cancel_result=True, cancel_error=None):
+                 cancel_result=True, cancel_error=None,
+                 protected_after_retries=None, reduce_result=None,
+                 protected_after_reduce=False, stop_error=None):
+        # protected_after_retries=N 代表第 N 次重試掛停損之後才會有保護。
+        # None 代表重試不會改變任何事(最常見的測試情境)。
+        self.protected_after_retries = protected_after_retries
+        self.reduce_result = reduce_result
+        self.protected_after_reduce = protected_after_reduce
+        self.stop_error = stop_error
+        self.stop_attempts = []
+        self.reduced = []
         self.fill = fill or FillResult(
             ok=True, filled_quantity=6.0, requested_quantity=6.0,
             average_price=100.05, exchange_order_id="X1",
@@ -102,6 +113,23 @@ class FakeBroker(Broker):
 
     def has_protection(self, symbol):
         return self.protected
+
+    def ensure_stop_loss(self, symbol, stop_price):
+        if self.stop_error:
+            raise self.stop_error
+        self.stop_attempts.append((symbol, stop_price))
+        if (self.protected_after_retries is not None
+                and len(self.stop_attempts) >= self.protected_after_retries):
+            self.protected = True
+        return True
+
+    def reduce_position(self, symbol, fraction, reason=""):
+        if self.reduce_result is None:
+            raise NotImplementedError
+        self.reduced.append((symbol, fraction, reason))
+        if self.reduce_result and self.protected_after_reduce:
+            self.protected = True
+        return self.reduce_result
 
     def close_position(self, symbol, price=None, reason=""):
         if self.close_error:
@@ -142,11 +170,21 @@ class FakeStore:
         pass
 
 
-def build(broker=None, rules=None, store=None):
+# 緊急保護會寫「停止新單」旗標。測試一律寫到暫存目錄 ——
+# 寫到專案根目錄的話,跑完測試會留下一個真的會擋住交易的檔案。
+_PAUSE_DIR = tempfile.mkdtemp(prefix="agmcis-test-pause-")
+
+
+def pause_path(name="trading_pause.flag"):
+    return os.path.join(_PAUSE_DIR, name)
+
+
+def build(broker=None, rules=None, store=None, pause_file=None):
     return ExecutionEngine(
         broker=broker or FakeBroker(),
         rules_engine=rules or FakeRules(),
         store=store if store is not None else FakeStore(),
+        pause_file=pause_file or pause_path(),
     )
 
 
@@ -194,9 +232,13 @@ class TestNakedPositions(unittest.TestCase):
     """
     開倉成功但沒有停損 = 部位存在但沒有虧損上限。
     這不是待辦事項,是必須立刻處理的狀態。
+
+    處理方式是 Master Prompt 第十八節的六步驟(見 agmcis/execution/emergency.py):
+    先重試、再縮倉、最後才平倉。這裡測的是 Execution Engine 有沒有正確地
+    把那個結局翻譯成狀態機轉移與 ExecutionResult。
     """
 
-    def test_a_position_without_protection_is_closed_immediately(self):
+    def test_a_position_that_cannot_be_protected_is_closed(self):
         broker = FakeBroker(protected=False)
 
         with patch.object(engine_module, "logger"):
@@ -206,6 +248,118 @@ class TestNakedPositions(unittest.TestCase):
         self.assertEqual(result.status, engine_module.NAKED_POSITION_CLOSED)
         self.assertTrue(result.naked_position_closed)
         self.assertEqual(len(broker.closed), 1)
+
+    def test_the_stop_loss_is_retried_before_giving_up(self):
+        """
+        掛停損失敗最常見的原因是一次網路抖動,不是「這個部位不可能有停損」。
+        直接平倉會白白付一趟手續費與滑點。
+        """
+        broker = FakeBroker(protected=False, protected_after_retries=1)
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, engine_module.OPENED)
+        self.assertEqual(broker.closed, [], "重試成功之後不該平倉")
+        self.assertEqual(len(broker.stop_attempts), 1)
+
+    def test_a_retry_that_reports_success_is_still_verified(self):
+        """
+        ensure_stop_loss() 回 True 只代表請求沒被拒絕,不代表停損存在。
+        沒有再 verify 一次的話,這個部位會被當成有保護而留下來。
+        """
+        broker = FakeBroker(protected=False)   # 重試永遠回 True,但保護永遠不存在
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertEqual(result.status, engine_module.NAKED_POSITION_CLOSED)
+
+    def test_the_position_is_reduced_before_it_is_closed(self):
+        broker = FakeBroker(
+            protected=False, reduce_result=True, protected_after_reduce=True,
+        )
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertTrue(result.ok)
+        self.assertEqual(len(broker.reduced), 1)
+        self.assertEqual(broker.closed, [], "縮倉後掛上停損就不該平倉")
+        self.assertIn("緊急縮倉 50%", result.adjustments)
+
+    def test_a_broker_that_cannot_reduce_goes_straight_to_closing(self):
+        """
+        縮不了就砍掉。把 NotImplementedError 當成「縮成功了」會留下
+        一個完整的、沒有停損的部位。
+        """
+        broker = FakeBroker(protected=False)   # reduce_position 會拋 NotImplementedError
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertEqual(result.status, engine_module.NAKED_POSITION_CLOSED)
+        self.assertEqual(len(broker.closed), 1)
+
+    def test_new_orders_are_disabled_when_retries_fail(self):
+        """
+        第 5 步。會掛不上停損的環境,下一單一樣會掛不上 ——
+        繼續開新倉是在一個已知會失敗的通道上重複同一個賭注。
+        """
+        flag = pause_path("disabled-on-failure.flag")
+        broker = FakeBroker(protected=False)
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker, pause_file=flag).execute(decision())
+
+        self.assertTrue(os.path.exists(flag))
+        self.assertTrue(result.protection.new_orders_disabled)
+        os.remove(flag)
+
+    def test_new_orders_are_not_disabled_when_the_retry_works(self):
+        """重試就救回來的情況不該把整個系統停下來。"""
+        flag = pause_path("not-disabled.flag")
+        broker = FakeBroker(protected=False, protected_after_retries=1)
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker, pause_file=flag).execute(decision())
+
+        self.assertFalse(os.path.exists(flag))
+        self.assertFalse(result.protection.new_orders_disabled)
+
+    def test_new_orders_stay_disabled_even_if_the_position_is_saved_later(self):
+        """
+        縮倉之後救回來了,新單還是要停 —— 停的理由是「這個通道掛不上停損」,
+        不是「這一個部位有沒有活下來」。
+        """
+        flag = pause_path("disabled-after-reduce.flag")
+        broker = FakeBroker(
+            protected=False, reduce_result=True, protected_after_reduce=True,
+        )
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker, pause_file=flag).execute(decision())
+
+        self.assertTrue(result.ok)
+        self.assertTrue(os.path.exists(flag))
+        self.assertTrue(result.protection.new_orders_disabled)
+        os.remove(flag)
+
+    def test_the_order_passes_through_closing_before_closed(self):
+        """
+        FILLED 不能直接跳到 CLOSED。CLOSING 是送單當下斷線時
+        唯一能讓對帳知道要去查什麼的線索。
+        """
+        broker = FakeBroker(protected=False)
+        store = FakeStore()
+
+        with patch.object(engine_module, "logger"):
+            build(broker, store=store).execute(decision())
+
+        transitions = [(event[1], event[2]) for event in store.events]
+        self.assertIn(("filled", "closing"), transitions)
+        self.assertIn(("closing", "closed"), transitions)
 
     def test_the_close_reason_says_why(self):
         broker = FakeBroker(protected=False)
