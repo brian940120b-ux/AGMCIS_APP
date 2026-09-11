@@ -71,6 +71,24 @@ class TestApiSurface(unittest.TestCase):
         response = self.client().get("/", follow_redirects=False)
         self.assertEqual(response.status_code, 401)
 
+    def test_every_html_page_requires_a_key(self):
+        """
+        新增頁面時很容易只記得保護 /api/,忘了頁面本身。
+        頁面上的資料跟 API 是同一份。
+        """
+        pages = [
+            path for path in self._paths()
+            if not path.startswith("/api/") and "{" not in path
+        ]
+
+        unprotected = []
+        for path in pages:
+            response = self.client().get(path, follow_redirects=False)
+            if response.status_code not in (401, 503):
+                unprotected.append(f"{path} -> {response.status_code}")
+
+        self.assertEqual(unprotected, [], f"以下頁面沒有要求金鑰:{unprotected}")
+
     def test_dashboard_key_in_query_sets_cookie_and_redirects(self):
         """金鑰不該留在網址列 —— 驗證後換成 HttpOnly cookie 並導回乾淨路徑。"""
         from web_auth import COOKIE_NAME

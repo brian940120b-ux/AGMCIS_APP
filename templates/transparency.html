@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGMCIS 透明度面板</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/css/transparency.css">
+</head>
+<body>
+
+<h1>AGMCIS 透明度面板</h1>
+<p class="muted">
+  Agent 為什麼沒有交易、訂單走到哪一步、對帳有沒有差異、成本吃掉多少。
+  這一頁全部唯讀,不會下單也不會改設定。
+</p>
+
+<div id="alerts" class="alerts">載入中…</div>
+
+<h2>🤖 Agent 投票</h2>
+<p class="muted">
+  大多數時候「為什麼沒有交易」的答案是某個環境型 Agent 投了觀望。
+  棄權不是反對票 —— 那代表這個 Agent 不負責判斷這件事。
+</p>
+<div class="card"><div id="agent_votes">載入中…</div></div>
+
+<h2>📦 訂單狀態</h2>
+<p class="muted">
+  <b>狀態不明</b>的訂單代表系統不知道交易所收到了什麼,這些單不可以重送,
+  只能等對帳。<b>裸倉</b>是已成交但沒有停損保護的部位,這個數字不該大於 0。
+</p>
+<div class="grid">
+  <div class="card">狀態不明<br><b id="unresolved_count">-</b></div>
+  <div class="card">未平倉訂單<br><b id="open_orders_count">-</b></div>
+  <div class="card">裸倉<br><b id="naked_count">-</b></div>
+</div>
+<div class="card"><div id="orders">載入中…</div></div>
+
+<h2>🔍 對帳</h2>
+<p class="muted">
+  對帳只更正本地紀錄,<b>絕不下單</b>。差異一律回報給人處理。
+</p>
+<div class="card"><div id="reconciliation">載入中…</div></div>
+
+<h2>💸 成本</h2>
+<p class="muted">
+  只統計含成本的交易。Phase 10 之前的資料完全不含成本,
+  混在一起平均會讓「扣掉成本還剩多少」永遠問不出答案。
+</p>
+<div class="card"><div id="costs">載入中…</div></div>
+
+<h2>📐 規格校準</h2>
+<p class="muted">
+  打勾的是交易所給的值,問號的是保守猜測值。
+  全部都是猜測值時,強平價與成本都只是估計。
+</p>
+<div class="card"><div id="calibration">載入中…</div></div>
+
+<script src="/static/js/transparency.js?v=1"></script>
+</body>
+</html>

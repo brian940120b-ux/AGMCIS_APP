@@ -1,0 +1,69 @@
+/* 透明度面板。沿用 dashboard.css 的底色,只加這一頁需要的東西。 */
+
+.alerts {
+    margin: 18px 0;
+}
+
+.alert {
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    border-left: 4px solid;
+}
+
+.alert-critical {
+    background: #2a1215;
+    border-color: #f87171;
+    color: #fca5a5;
+}
+
+.alert-warning {
+    background: #2a2312;
+    border-color: #fbbf24;
+    color: #fcd34d;
+}
+
+.alert-ok {
+    background: #12251a;
+    border-color: #34d399;
+    color: #6ee7b7;
+}
+
+table.tp {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+table.tp th,
+table.tp td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #1e293b;
+    text-align: left;
+    vertical-align: top;
+}
+
+table.tp th {
+    color: #94a3b8;
+    font-weight: normal;
+}
+
+/* 投票標記。顏色只是輔助 —— 每一個都有文字,不能只靠顏色分辨。 */
+.vote {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin: 1px 3px 1px 0;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.vote-long    { background: #12251a; color: #6ee7b7; }
+.vote-short   { background: #2a1215; color: #fca5a5; }
+.vote-wait    { background: #2a2312; color: #fcd34d; }
+.vote-abstain { background: #1e293b; color: #94a3b8; }
+
+.tag-guess    { color: #fbbf24; }
+.tag-exchange { color: #34d399; }
+
+.nowrap { white-space: nowrap; }
