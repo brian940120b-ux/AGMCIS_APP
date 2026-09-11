@@ -85,15 +85,35 @@ class TestCapLeverage(unittest.TestCase):
 
 
 class TestAutoTraderRespectsRiskGate(unittest.TestCase):
+    """
+    Phase 5 之後 auto_trader 走完整鏈路:
+        scan -> TradeIntent -> Risk Engine(閘門 + 槓桿 + 倉位)-> 開倉
+
+    倉位不再是固定 1000 USDT,由風控依停損距離反推。
+    這裡 patch 的是新的接縫(evaluate_intent),但要求不變:
+    風控擋下就不開,而且槓桿不得超過上限。
+    """
 
     def setUp(self):
         patch.object(auto_trader, "logger").start()
         patch.object(auto_trader, "notify_open_trade").start()
         self.addCleanup(patch.stopall)
 
-    def test_does_not_scan_or_open_when_risk_blocks(self):
+    def _decision(self, intent, approved=True, size=500.0, leverage=3.0,
+                  reason=None, blockers=None):
+        from agmcis.core.models import RiskDecision
+        return RiskDecision(
+            intent=intent, approved=approved,
+            size_usdt=size if approved else None,
+            leverage=leverage if approved else None,
+            reason=reason, blockers=blockers or [],
+        )
+
+    def test_does_not_scan_or_open_when_account_gate_blocks(self):
+        """帳戶層級被擋時連掃描都不該做 —— 掃描要打交易所 API。"""
         with patch.object(auto_trader, "assert_can_open",
-                          return_value=(False, "MAX_DAILY_LOSS", blocked_status("MAX_DAILY_LOSS"))), \
+                          return_value=(False, "MAX_DAILY_LOSS",
+                                        blocked_status("MAX_DAILY_LOSS"))), \
              patch.object(auto_trader, "scan_market") as scan, \
              patch.object(auto_trader, "create_paper_trade") as create:
             result = auto_trader.run_auto_trader()
@@ -104,10 +124,12 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
         create.assert_not_called()
 
     def test_opens_when_risk_allows(self):
-        with patch.object(auto_trader, "assert_can_open", return_value=(True, None, open_status())), \
-             patch.object(auto_trader, "get_open_trades", return_value=[]), \
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[candidate()]), \
+             patch.object(auto_trader, "evaluate_intent",
+                          side_effect=lambda i, **k: self._decision(i)), \
              patch.object(auto_trader, "create_paper_trade",
                           return_value={"success": True, "message": "ok"}) as create:
             result = auto_trader.run_auto_trader()
@@ -115,54 +137,119 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
         self.assertEqual(result["status"], "OPENED")
         create.assert_called_once()
 
-    def test_leverage_passed_to_order_never_exceeds_cap(self):
-        with patch.object(auto_trader, "assert_can_open", return_value=(True, None, open_status())), \
-             patch.object(auto_trader, "get_open_trades", return_value=[]), \
+    def test_position_size_comes_from_risk_engine_not_a_fixed_number(self):
+        """這是 Phase 5 的重點:倉位由風控算,不再是寫死的 1000 USDT。"""
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[candidate()]), \
-             patch.object(auto_trader, "calculate_leverage", return_value=25), \
+             patch.object(auto_trader, "evaluate_intent",
+                          side_effect=lambda i, **k: self._decision(i, size=137.5, leverage=4.0)), \
              patch.object(auto_trader, "create_paper_trade",
                           return_value={"success": True, "message": "ok"}) as create:
             auto_trader.run_auto_trader()
 
-        self.assertLessEqual(create.call_args.kwargs["leverage"], risk_limits.MAX_LEVERAGE)
+        kwargs = create.call_args.kwargs
+        self.assertEqual(kwargs["size_usdt"], 137.5)
+        self.assertEqual(kwargs["leverage"], 4.0)
+
+    def test_per_intent_rejection_tries_the_next_candidate(self):
+        """單一標的被拒(例如名目太小)不該讓整輪停下來。"""
+        first, second = candidate(symbol="AAA/USDT"), candidate(symbol="BBB/USDT")
+
+        def evaluate(intent, **kwargs):
+            if intent.symbol == "AAA/USDT":
+                return self._decision(intent, approved=False,
+                                      reason="名目太小", blockers=["SIZING_REJECTED"])
+            return self._decision(intent)
+
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
+             patch.object(auto_trader, "get_open_trade", return_value=None), \
+             patch.object(auto_trader, "scan_market", return_value=[first, second]), \
+             patch.object(auto_trader, "evaluate_intent", side_effect=evaluate), \
+             patch.object(auto_trader, "create_paper_trade",
+                          return_value={"success": True, "message": "ok"}) as create:
+            result = auto_trader.run_auto_trader()
+
+        self.assertEqual(result["status"], "OPENED")
+        self.assertEqual(result["symbol"], "BBB/USDT")
+
+    def test_account_level_block_mid_loop_stops_everything(self):
+        """帳戶層級的封鎖對所有標的都一樣,不該繼續試下一檔。"""
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
+             patch.object(auto_trader, "get_open_trade", return_value=None), \
+             patch.object(auto_trader, "scan_market",
+                          return_value=[candidate("🟢 Buy", "AAA/USDT"),
+                                        candidate("🟢 Buy", "BBB/USDT")]), \
+             patch.object(auto_trader, "evaluate_intent",
+                          side_effect=lambda i, **k: self._decision(
+                              i, approved=False, reason="MAX_DRAWDOWN",
+                              blockers=["MAX_DRAWDOWN"])), \
+             patch.object(auto_trader, "create_paper_trade") as create:
+            result = auto_trader.run_auto_trader()
+
+        self.assertEqual(result["status"], "BLOCKED_BY_RISK")
+        create.assert_not_called()
 
     def test_skips_candidates_with_bad_data(self):
         bad = candidate()
         bad["data_ok"] = False
 
-        with patch.object(auto_trader, "assert_can_open", return_value=(True, None, open_status())), \
-             patch.object(auto_trader, "get_open_trades", return_value=[]), \
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
              patch.object(auto_trader, "scan_market", return_value=[bad]), \
+             patch.object(auto_trader, "evaluate_intent") as evaluate, \
              patch.object(auto_trader, "create_paper_trade") as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
+        evaluate.assert_not_called()
         create.assert_not_called()
 
-    def test_skips_candidates_without_stop_loss(self):
+    def test_candidate_without_stop_loss_never_becomes_an_intent(self):
+        """TradeIntent 建構時就強制停損,所以這種候選根本進不到風控。"""
         no_sl = candidate()
         no_sl["stoploss"] = None
 
-        with patch.object(auto_trader, "assert_can_open", return_value=(True, None, open_status())), \
-             patch.object(auto_trader, "get_open_trades", return_value=[]), \
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[no_sl]), \
+             patch.object(auto_trader, "evaluate_intent") as evaluate, \
              patch.object(auto_trader, "create_paper_trade") as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
+        evaluate.assert_not_called()
         create.assert_not_called()
+
+    def test_stop_loss_on_the_wrong_side_is_rejected_at_construction(self):
+        wrong = candidate()
+        wrong["stoploss"] = 103.0      # 做多的停損卻高於進場價
+
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
+             patch.object(auto_trader, "get_open_trade", return_value=None), \
+             patch.object(auto_trader, "scan_market", return_value=[wrong]), \
+             patch.object(auto_trader, "evaluate_intent") as evaluate:
+            result = auto_trader.run_auto_trader()
+
+        self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
+        evaluate.assert_not_called()
 
     def test_short_signal_becomes_short_order(self):
         short = candidate(signal="🔴 Sell")
         short["stoploss"] = 103.0
         short["takeprofit"] = 94.0
 
-        with patch.object(auto_trader, "assert_can_open", return_value=(True, None, open_status())), \
-             patch.object(auto_trader, "get_open_trades", return_value=[]), \
+        with patch.object(auto_trader, "assert_can_open",
+                          return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[short]), \
+             patch.object(auto_trader, "evaluate_intent",
+                          side_effect=lambda i, **k: self._decision(i)), \
              patch.object(auto_trader, "create_paper_trade",
                           return_value={"success": True, "message": "ok"}) as create:
             auto_trader.run_auto_trader()

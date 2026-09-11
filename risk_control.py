@@ -1,10 +1,17 @@
 """
-Risk Engine。
+向下相容 shim。
 
-Phase 0.5 起,這是唯一的風控判斷入口,且所有開倉路徑都必須先問過它。
-`assert_can_open()` 是給自動交易用的 hard gate —— 它不回傳建議,而是直接決定放行或擋下。
+實作已移到 agmcis/risk/(Phase 5):
+    engine.py           RiskEngine:閘門 + 倉位 + 槓桿的完整裁決
+    position_sizing.py  由 權益 × 風險% ÷ 停損距離 反推倉位
+    leverage.py         由停損距離與波動度決定槓桿(不是信心分數)
+    kill_switch.py      停新單 / 撤單 / 平倉 / 稽核
 
-參數全部來自 risk_limits(環境變數),不再硬編碼。
+這裡保留原本的函式名稱,讓既有呼叫端不用改。
+
+新程式碼請直接用:
+    from agmcis.risk.engine import get_engine
+    decision = get_engine().evaluate(intent, state)
 """
 from pathlib import Path
 
@@ -156,8 +163,10 @@ def assert_can_open(symbol=None):
     自動開倉前的 hard gate。
 
     回傳 (allowed: bool, reason: str|None, status: dict)。
-    任何自動交易路徑都必須先呼叫這個函式並尊重結果 —— 這是 Phase 0.5 修掉的
-    「auto_trader 完全不查風控」問題的補丁。
+    任何自動交易路徑都必須先呼叫這個函式並尊重結果。
+
+    ⚠️ 這只是帳戶層級的閘門,**不決定倉位大小**。
+    需要完整裁決(含 sizing 與槓桿)請用 evaluate_intent()。
     """
     status = get_risk_control_status()
 
@@ -171,3 +180,26 @@ def assert_can_open(symbol=None):
 
     logger.info("Risk gate PASSED | symbol=%s | status=%s", symbol, status["system_status"])
     return True, None, status
+
+
+def evaluate_intent(intent, atr=None, mtf_score=None,
+                    contract_max_leverage=None, min_notional=None):
+    """
+    完整風險裁決:閘門 + 槓桿 + 倉位大小。
+
+    這是 Phase 5 之後的正式入口。回傳 RiskDecision ——
+    approved=False 時 size_usdt 與 leverage 沒有意義。
+
+    倉位由 `權益 × MAX_RISK_PER_TRADE_PCT ÷ 停損距離` 決定,
+    不再是固定的 1000 USDT。
+    """
+    from agmcis.risk.account_state import build_account_state
+    from agmcis.risk.engine import get_engine
+
+    state = build_account_state()
+    return get_engine().evaluate(
+        intent, state,
+        atr=atr, mtf_score=mtf_score,
+        contract_max_leverage=contract_max_leverage,
+        min_notional=min_notional,
+    )

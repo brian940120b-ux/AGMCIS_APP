@@ -1,104 +1,160 @@
 """
 自動交易。
 
-Phase 0.5 的關鍵修正:這條路徑原本完全沒有呼叫風控。
-它被 scheduler 每 60 秒觸發、也被 HTTP 端點觸發,等於風控可以被整條繞過。
-現在 run_auto_trader() 的第一件事就是問 Risk Engine,被擋下就直接結束。
+Phase 5 之後的完整鏈路:
 
-其他修正:
-  - 槓桿一律經過 risk_control.cap_leverage(),策略不能自行突破上限。
-  - 停損停利由 scanner 依方向算好,這裡只驗證不再重算,避免兩處邏輯漂移。
-  - 資料品質不合格(data_ok=False)的標的直接略過。
+    scan_market()            訊號
+        -> TradeIntent       Agent/策略唯一能產出的東西(建構時強制驗證停損)
+        -> Risk Engine       要不要開?幾倍槓桿?押多少保證金?
+        -> create_paper_trade
+
+倉位大小不再是固定的 1000 USDT。現在由
+`權益 × MAX_RISK_PER_TRADE_PCT ÷ 停損距離` 反推 ——
+停損放得越遠,倉位越小,每一筆承擔的風險金額才會一致。
+
+槓桿也不再由信心分數決定,改由停損距離與波動度決定,
+而且保證強平價永遠比停損遠。
 """
+from agmcis.core.errors import TradingRuleViolation
+from agmcis.core.models import TradeIntent
+from agmcis.config import settings
 from database_service import get_open_trade, get_open_trades
 from direction import LONG, SHORT
-from leverage_engine import calculate_leverage
 from logger_service import logger
 from notifier import notify_open_trade
 from paper_trading import create_paper_trade
-from risk_control import assert_can_open, cap_leverage
+from risk_control import assert_can_open, evaluate_intent
 from scanner_service import scan_market
-
-MAX_AUTO_POSITIONS = 3
 
 LONG_SIGNALS = {"🟢 Buy", "🟢 Strong Buy"}
 SHORT_SIGNALS = {"🔴 Sell", "🔴 Strong Sell"}
 
 
-def run_auto_trader(position_size_usdt=1000):
-    # ---------- HARD GATE:任何開倉之前都必須先過風控 ----------
-    allowed, reason, risk_status = assert_can_open()
+def _build_intent(candidate):
+    """
+    把掃描結果轉成 TradeIntent。
+
+    TradeIntent 在建構時就會驗證停損存在且方向正確,
+    所以不合格的候選在這裡就會被擋下,不會進到風控。
+    """
+    signal = candidate.get("trade_signal")
+
+    if signal in SHORT_SIGNALS:
+        direction = SHORT
+    elif signal in LONG_SIGNALS:
+        direction = LONG
+    else:
+        return None, "訊號不是明確的買賣"
+
+    try:
+        intent = TradeIntent(
+            symbol=candidate.get("symbol"),
+            market_type="perpetual",
+            direction=direction,
+            entry=candidate.get("entry_price"),
+            stop_loss=candidate.get("stoploss"),
+            take_profit=candidate.get("takeprofit"),
+            confidence=candidate.get("confidence"),
+            strategy="scanner",
+            reasons=[candidate.get("blocked_reason")] if candidate.get("blocked_reason") else [],
+        )
+    except (TradingRuleViolation, ValueError, TypeError) as exc:
+        return None, str(exc)
+
+    return intent, None
+
+
+def run_auto_trader(max_candidates=10):
+    # 帳戶層級的閘門先跑 —— 它很便宜(只查資料庫),
+    # 而掃描要打交易所 API。被擋下時沒必要浪費那些請求。
+    allowed, reason, status = assert_can_open()
     if not allowed:
         return {
             "status": "BLOCKED_BY_RISK",
             "reason": reason,
-            "system_status": risk_status["system_status"],
+            "blockers": status.get("blockers", []),
         }
 
-    open_trades = get_open_trades(source="AUTO")
-    if len(open_trades) >= MAX_AUTO_POSITIONS:
-        logger.info("Auto Trader | BLOCKED_MAX_POSITIONS | %d 筆", len(open_trades))
-        return {"status": "BLOCKED_MAX_POSITIONS", "open_positions": len(open_trades)}
-
     data = scan_market()
-    top = data[:3]
+    considered = []
 
-    for candidate in data:
+    for candidate in data[:max_candidates]:
         symbol = candidate.get("symbol")
 
         if candidate.get("data_ok") is False:
             continue
 
-        signal = candidate.get("trade_signal")
-        if signal not in LONG_SIGNALS and signal not in SHORT_SIGNALS:
+        intent, problem = _build_intent(candidate)
+        if intent is None:
+            if problem and "訊號不是" not in problem:
+                logger.info("Auto Trader | SKIP | %s | %s", symbol, problem)
             continue
 
         if get_open_trade(symbol):
             continue
 
-        entry = candidate.get("entry_price")
-        stoploss = candidate.get("stoploss")
-        takeprofit = candidate.get("takeprofit")
+        considered.append(symbol)
 
-        if not entry or stoploss is None or takeprofit is None:
-            logger.info("Auto Trader | SKIP_INCOMPLETE | %s", symbol)
+        # ---------- HARD GATE:風控決定要不要開、開多大、幾倍 ----------
+        decision = evaluate_intent(
+            intent,
+            atr=candidate.get("indicators", {}).get("atr"),
+            mtf_score=candidate.get("mtf_score"),
+        )
+
+        if not decision.approved:
+            # 帳戶層級的封鎖對所有標的都一樣,沒必要再試下一檔
+            if decision.blockers and decision.blockers[0] not in (
+                "DUPLICATE_POSITION", "SIZING_REJECTED", "LIQUIDATION_BEFORE_STOP"
+            ):
+                logger.warning(
+                    "Auto Trader | BLOCKED_BY_RISK | %s", decision.reason,
+                )
+                return {
+                    "status": "BLOCKED_BY_RISK",
+                    "reason": decision.reason,
+                    "blockers": decision.blockers,
+                }
+
+            logger.info(
+                "Auto Trader | REJECTED | %s | %s", symbol, decision.reason,
+            )
             continue
-
-        order_signal = SHORT if signal in SHORT_SIGNALS else LONG
-
-        leverage = cap_leverage(calculate_leverage(
-            candidate.get("confidence") or 0,
-            candidate.get("indicators", {}),
-            candidate.get("mtf_score", 0),
-        ))
 
         result = create_paper_trade(
             symbol=symbol,
-            entry_price=entry,
-            signal=order_signal,
-            size_usdt=position_size_usdt,
-            stoploss=stoploss,
-            takeprofit=takeprofit,
-            leverage=leverage,
+            entry_price=intent.entry,
+            signal=intent.direction.value,
+            size_usdt=decision.size_usdt,
+            stoploss=intent.stop_loss,
+            takeprofit=intent.take_profit,
+            leverage=decision.leverage,
             source="AUTO",
         )
 
         logger.info(
-            "Auto Trader | OPEN_ATTEMPT | %s | %s | lev=%sx | %s",
-            symbol, order_signal, leverage, result.get("message"),
+            "Auto Trader | OPEN_ATTEMPT | %s | %s | size=%.2f lev=%gx 風險=%.2f | %s",
+            symbol, intent.direction.value, decision.size_usdt,
+            decision.leverage, decision.risk_usdt or 0, result.get("message"),
         )
 
         if result.get("success"):
             notify_open_trade(
-                symbol, order_signal, entry, stoploss, takeprofit,
-                leverage=leverage,
-                confidence=candidate.get("confidence"),
+                symbol, intent.direction.value, intent.entry,
+                intent.stop_loss, intent.take_profit,
+                leverage=decision.leverage,
+                confidence=intent.confidence,
                 mtf_status=candidate.get("mtf_status"),
             )
-            return {"status": "OPENED", "candidate": candidate, "result": result}
+            return {
+                "status": "OPENED",
+                "symbol": symbol,
+                "decision": decision.to_dict(),
+                "result": result,
+            }
 
-        # 開倉被拒(停損無效、已有持倉等)不算致命,換下一個候選。
+        # 開倉被拒(停損無效、已有持倉等)不算致命,換下一個候選
         continue
 
-    logger.info("Auto Trader | NO_TRADE_SIGNAL")
-    return {"status": "NO_TRADE_SIGNAL", "top_candidates": top}
+    logger.info("Auto Trader | NO_TRADE_SIGNAL | 評估過 %d 檔", len(considered))
+    return {"status": "NO_TRADE_SIGNAL", "considered": considered}
