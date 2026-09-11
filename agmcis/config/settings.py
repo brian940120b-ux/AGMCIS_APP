@@ -225,6 +225,15 @@ MAX_CONSECUTIVE_LOSSES = env_int("MAX_CONSECUTIVE_LOSSES", 4)
 MAX_TRADES_PER_DAY = env_int("MAX_TRADES_PER_DAY", 10)
 MIN_PROFIT_FACTOR = env_float("MIN_PROFIT_FACTOR", 0.8)
 
+# ---- SAFE LIVE MODE(Master Prompt 第四十六節)----
+# 實單專屬上限。與一般上限取**較嚴格的那一個** —— 這一層只能收緊。
+# 預設值刻意很小:第一次實單的目標是驗證整條路徑會不會動,不是賺錢。
+SAFE_LIVE_MODE = env_bool("SAFE_LIVE_MODE", True)
+MAX_LIVE_POSITION_SIZE_USDT = env_float("MAX_LIVE_POSITION_SIZE_USDT", 50)
+MAX_LIVE_DAILY_LOSS_USDT = env_float("MAX_LIVE_DAILY_LOSS_USDT", 20)
+MAX_LIVE_TRADES_PER_DAY = env_int("MAX_LIVE_TRADES_PER_DAY", 3)
+MAX_LIVE_LEVERAGE = env_float("MAX_LIVE_LEVERAGE", 2)
+
 MIN_SIGNAL_SCORE = env_float("MIN_SIGNAL_SCORE", 70)
 MIN_CONFIDENCE = env_float("MIN_CONFIDENCE", 60)
 
@@ -248,6 +257,11 @@ def risk_limits_dict():
         "max_symbol_exposure_pct": MAX_SYMBOL_EXPOSURE_PCT,
         "max_correlated_risk_pct": MAX_CORRELATED_RISK_PCT,
         "correlation_threshold": CORRELATION_THRESHOLD,
+        "safe_live_mode": SAFE_LIVE_MODE,
+        "max_live_position_size_usdt": MAX_LIVE_POSITION_SIZE_USDT,
+        "max_live_daily_loss_usdt": MAX_LIVE_DAILY_LOSS_USDT,
+        "max_live_trades_per_day": MAX_LIVE_TRADES_PER_DAY,
+        "max_live_leverage": MAX_LIVE_LEVERAGE,
         "max_total_open_loss_usdt": MAX_TOTAL_OPEN_LOSS_USDT,
         "max_consecutive_losses": MAX_CONSECUTIVE_LOSSES,
         "max_trades_per_day": MAX_TRADES_PER_DAY,

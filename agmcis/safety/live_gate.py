@@ -437,6 +437,42 @@ class LiveGate:
 
         return GateCheck("Kill Switch", True, "可平倉,且未啟動")
 
+    def check_safe_live_limits(self):
+        """
+        SAFE LIVE MODE(第四十六節)必須是啟用的,而且四個實單上限
+        都要有值。
+
+        開了實單卻沒有任何實單專屬上限,等於第一天就用模擬盤的額度
+        去驗一條從來沒被真錢走過的路徑。實單會遇到部分成交、掛單被拒、
+        停損掛不上、真實滑點 —— 那些模擬盤驗不到,而且會在第一天就遇到。
+        """
+        from agmcis.config import settings
+        from agmcis.safety import safe_live
+
+        if not getattr(settings, "SAFE_LIVE_MODE", True):
+            return GateCheck(
+                "SAFE LIVE MODE", False,
+                "SAFE_LIVE_MODE 被關掉了。第一次實單不該從最寬鬆的設定開始。",
+            )
+
+        missing = safe_live.missing_settings()
+        if missing:
+            return GateCheck(
+                "SAFE LIVE MODE", False,
+                f"以下實單上限沒有設定:{', '.join(missing)}",
+            )
+
+        snapshot = safe_live.snapshot(mode="live")
+        effective = snapshot["effective"]
+
+        return GateCheck(
+            "SAFE LIVE MODE", True,
+            f"單筆名目 ≤ {snapshot['max_notional_usdt']} USDT、"
+            f"槓桿 ≤ {effective.get('MAX_LEVERAGE')}x、"
+            f"當日虧損 ≤ {abs(float(effective.get('MAX_DAILY_LOSS_USDT') or 0)):.0f} USDT、"
+            f"當日 ≤ {effective.get('MAX_TRADES_PER_DAY')} 筆",
+        )
+
     def check_live_broker_absent(self):
         """
         即使全部通過,系統仍然無法下實單 —— LiveBroker 不存在。
@@ -472,6 +508,7 @@ class LiveGate:
         "check_self_review",
         "check_reconciliation",
         "check_kill_switch",
+        "check_safe_live_limits",
         "check_live_broker_absent",
         "check_confirmation",
     )

@@ -22,6 +22,7 @@ from agmcis.config import settings
 from agmcis.core.models import RiskDecision, TradeIntent
 from agmcis.risk import leverage as leverage_module
 from agmcis.risk import portfolio
+from agmcis.safety import safe_live
 from agmcis.risk import position_sizing
 
 logger = logging.getLogger("agmcis.risk_engine")
@@ -71,14 +72,27 @@ class GateResult:
 
 
 class RiskEngine:
-    def __init__(self, limits=None):
+    def __init__(self, limits=None, mode=None):
         # limits 預設用全域設定;測試可以注入自己的
         self._limits = limits
+        # mode 預設用全域 TRADING_MODE。指定它可以在測試裡驗證
+        # 「切到實單之後額度會變小」而不用改全域設定。
+        self._mode = mode
 
     def _limit(self, name, default=None):
+        """
+        取一個風控參數,然後套用 SAFE LIVE 上限。
+
+        SAFE LIVE 只會讓數字更嚴格,不會放寬 —— 注入的 limits
+        (測試用)也一樣要經過那一層,否則測試驗到的是一條
+        生產環境不會走的路徑。
+        """
         if self._limits is not None and name in self._limits:
-            return self._limits[name]
-        return getattr(settings, name, default)
+            base = self._limits[name]
+        else:
+            base = getattr(settings, name, default)
+
+        return safe_live.tighten(name, base, mode=self._mode)
 
     # ---------------- 1. 帳戶層級閘門 ----------------
 
@@ -194,6 +208,9 @@ class RiskEngine:
             current_exposure_usdt=state.current_exposure_usdt,
             max_exposure_pct=self._limit("MAX_EXPOSURE_PCT", 80),
             min_notional=min_notional,
+            # 實單的單筆名目硬上限。非實單模式是 None(不限制)——
+            # 名目本來就由「風險 ÷ 停損距離」自然決定。
+            max_notional=safe_live.max_notional(mode=self._mode),
         )
 
         if not sizing.approved:

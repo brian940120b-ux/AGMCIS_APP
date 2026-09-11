@@ -84,7 +84,7 @@
 | 四十三 | Paper Trading | ✅ | `agmcis/execution/paper_costs.py` 含手續費/滑點/資金費用/強平 |
 | 四十四 | Trading Modes | ✅ | `TradingMode` MANUAL/PAPER/TEST/LIVE |
 | 四十五 | LIVE SAFETY GATE | ✅ | `agmcis/safety/live_gate.py` 13 項檢查,任何檢查不到都算「未通過」而非「略過」 |
-| 四十六 | Live 初期限制 | ❌ | **沒有 MAX_LIVE_POSITION_SIZE / MAX_LIVE_DAILY_LOSS / MAX_LIVE_TRADES_PER_DAY / MAX_LIVE_LEVERAGE,也沒有 SAFE LIVE MODE** |
+| 四十六 | Live 初期限制 | ✅ | `agmcis/safety/safe_live.py`。四個實單上限 + SAFE LIVE MODE(預設開啟)。與一般上限取較嚴格的那一個 —— 這一層只能收緊,不能放寬。LIVE GATE 多一項檢查 |
 | 四十七 | Emergency Kill Switch | ✅ | `agmcis/risk/kill_switch.py` 含 audit log |
 | 四十八 | API Rate Limit | ✅ | `agmcis/exchange/rate_limiter.py` + 跨行程 `shared_rate_limit.py`,有限次重試 |
 | 四十九 | WebSocket | ⚠️ | `v3/ws/` 是 Dashboard 推播,**不是 BingX 行情 WebSocket**。行情/訂單/持倉仍全部走 REST 輪詢 |
@@ -177,9 +177,9 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 54 |
+| ✅ 已做到 | 55 |
 | ⚠️ 部分做到 | 42 |
-| ❌ 沒做 | 10 |
+| ❌ 沒做 | 9 |
 
 ## 缺口排序(由大到小)
 
@@ -187,7 +187,7 @@
 
 1. ~~**十八 — SL 失敗六步驟**~~ ✅ 已補(`agmcis/execution/emergency.py`,27 個測試)。
 2. ~~**五十九 + 六十 + 二十 — 組合風險與相關性**~~ ✅ 已補(`agmcis/risk/{correlation,portfolio}.py`,41 個測試)。
-3. **四十六 — SAFE LIVE MODE**(安全)第一次實單沒有獨立於 paper 的更嚴格上限。
+3. ~~**四十六 — SAFE LIVE MODE**~~ ✅ 已補(`agmcis/safety/safe_live.py`,22 個測試)。
 4. **五十一 — News Risk 封鎖窗口**(安全)FOMC/CPI 當下系統會照常開單。
 5. **七十四 + 七十五 + 七十六 — 策略退化偵測**(安全)策略壞掉不會自己停。
 6. **五十七 + 五十八 — Partial TP 與 ATR/結構型移動停損**(績效)
