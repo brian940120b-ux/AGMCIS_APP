@@ -54,8 +54,11 @@ def build_context(symbol, timeframe=DEFAULT_TIMEFRAME, limit=DEFAULT_LIMIT,
     indicators = indicators_module.compute(df, symbol, timeframe, price=price)
     regime = regime_module.detect(indicators, btc_indicators=btc_indicators)
 
+    # ⚠️ 欄位名是 adapter 定的:funding_rate,不是 rate。
+    # 我第一版寫成 funding.get("rate"),那會永遠拿到 None ——
+    # FundingAgent 就永遠棄權,而且完全不會報錯。有測試把這個名字釘住。
     funding = get_funding_rate(symbol)
-    funding_rate = funding.get("rate") if isinstance(funding, dict) else None
+    funding_rate = funding.get("funding_rate") if isinstance(funding, dict) else None
 
     return AgentContext(
         symbol=symbol,

@@ -6,6 +6,9 @@ BingX 連線唯讀驗證。
 
     /root/AGMCIS_APP/.venv/bin/python scripts/verify_bingx.py
 
+    # 順便把合約規格寫成快照,讓系統用真實規格取代保守猜測值
+    /root/AGMCIS_APP/.venv/bin/python scripts/verify_bingx.py --write-specs
+
 ⚠️ 這支腳本**全程唯讀**:
     不下單、不撤單、不改槓桿、不改保證金模式、不轉帳。
     它只呼叫 fetch_* 系列。
@@ -17,12 +20,17 @@ BingX 連線唯讀驗證。
   4. 私有端點:餘額、持倉、槓桿、持倉模式(需要金鑰)
   5. 提款權限檢查 —— API Key 不該開提款
   6. Standard Futures 支援狀況
+  7. 限流器狀態
+  8. (--write-specs)擷取合約規格快照
+
+⚠️ --write-specs 一樣是唯讀操作:它只是把已經抓到的 fetch_* 結果寫成 JSON。
 
 離開碼 0 代表全部通過,1 代表有項目失敗。
 """
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,10 +38,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agmcis.config import settings  # noqa: E402
 from agmcis.core.enums import MarketType  # noqa: E402
 from agmcis.core.errors import ExchangeUnavailableError  # noqa: E402
+from agmcis.exchange import specs as specs_module  # noqa: E402
 from agmcis.exchange import trading_rules as tr  # noqa: E402
 from agmcis.exchange.bingx.adapter import BingXAdapter, STANDARD_UNSUPPORTED_REASON  # noqa: E402
 
 SYMBOL = os.getenv("VERIFY_SYMBOL", "BTC/USDT")
+
+# --write-specs 時要擷取哪些標的。預設抓 watchlist,可用環境變數覆蓋。
+SPEC_SYMBOLS = [
+    s.strip() for s in os.getenv(
+        "VERIFY_SPEC_SYMBOLS", ",".join(settings.WATCHLIST_SYMBOLS),
+    ).split(",") if s.strip()
+]
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
 results = []
@@ -51,6 +67,94 @@ def record(name, status, detail=""):
 def section(title):
     print(f"\n{title}")
     print("-" * len(title))
+
+
+def _write_specs(adapter):
+    """
+    把交易所實際回應寫成規格快照。
+
+    **全程唯讀**:只呼叫 fetch_* 系列,不下單、不改槓桿。
+
+    維持保證金率不是每個交易所都從 API 給得出來。拿不到就**留空**,
+    讓系統知道那一項仍然是猜的 —— 填一個看起來合理的數字進去,
+    會讓「已校準」這件事變成謊話。
+    """
+    snapshot = specs_module.SpecSnapshot(
+        exchange="bingx",
+        testnet=bool(settings.EXCHANGE_USE_TESTNET),
+        captured_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    for symbol in SPEC_SYMBOLS:
+        try:
+            rules = adapter.get_trading_rules(symbol, MarketType.PERPETUAL)
+        except Exception as exc:
+            record(f"規格 {symbol}", FAIL, f"取不到合約規則:{exc}")
+            continue
+
+        spec = specs_module.ContractSpec(
+            symbol=symbol,
+            market_type=MarketType.PERPETUAL.value,
+            tick_size=rules.tick_size,
+            step_size=rules.step_size,
+            min_qty=rules.min_qty,
+            max_qty=rules.max_qty,
+            min_notional=rules.min_notional,
+            contract_size=rules.contract_size,
+            max_leverage=rules.max_leverage,
+        )
+
+        # 費率:ccxt 的 market 結構通常帶 taker / maker
+        market = _market_of(adapter, symbol)
+        if market:
+            if market.get("taker") is not None:
+                spec.taker_fee = float(market["taker"])
+            if market.get("maker") is not None:
+                spec.maker_fee = float(market["maker"])
+
+        # 資金費率:當下的實際值,不是平均值
+        try:
+            funding = adapter.get_funding_rate(symbol)
+            if funding and funding.get("funding_rate") is not None:
+                spec.funding_rate_8h = float(funding["funding_rate"])
+        except Exception as exc:
+            record(f"資金費率 {symbol}", WARN, f"取不到:{exc}")
+
+        snapshot.contracts[symbol] = spec
+
+        missing = [
+            name for name in ("maintenance_margin_ratio", "taker_fee",
+                              "maker_fee", "funding_rate_8h")
+            if getattr(spec, name) is None
+        ]
+        status = WARN if missing else PASS
+        record(f"規格 {symbol}", status,
+               f"tick={spec.tick_size} step={spec.step_size} "
+               f"最小量={spec.min_qty} 槓桿上限={spec.max_leverage}\n"
+               f"taker={spec.taker_fee} maker={spec.maker_fee} "
+               f"funding={spec.funding_rate_8h}"
+               + (f"\n仍缺(系統會繼續用猜測值):{', '.join(missing)}" if missing else ""))
+
+    snapshot.notes.append(
+        "維持保證金率 BingX API 未提供,需依官方合約分層文件手動補入 "
+        "contracts[symbol].maintenance_margin_ratio。在補上之前,"
+        "強平價是用保守預設值估算的。"
+    )
+
+    path = specs_module.write_snapshot(snapshot)
+    record("寫入快照", PASS, f"{path}(共 {len(snapshot.contracts)} 個合約)")
+    print("\n        這份快照不進版控 —— 不同帳戶的費率不同,VIP 等級也會變。")
+    print("        費率或分層變動後請重新執行。")
+
+
+def _market_of(adapter, symbol):
+    """從 ccxt 的 markets 取這個合約的原始結構。取不到就回 None。"""
+    try:
+        exchange = adapter._instance(MarketType.PERPETUAL)
+        market_symbol = adapter.to_market_symbol(symbol, MarketType.PERPETUAL)
+        return exchange.market(market_symbol)
+    except Exception:
+        return None
 
 
 def main():
@@ -212,6 +316,16 @@ def main():
     record("限流器", PASS,
            f"額度 {status['used']}/{status['max_calls']} 每 {status['period_seconds']}s  "
            f"節流次數 {status['throttled_count']}  冷卻次數 {status['cooldown_count']}")
+
+    # ---------------- 8. 合約規格快照 ----------------
+    if "--write-specs" in sys.argv:
+        section("8. 合約規格快照(唯讀擷取)")
+        _write_specs(adapter)
+    else:
+        section("8. 合約規格快照")
+        record("快照", SKIP,
+               "未指定 --write-specs。系統目前用的是保守猜測值 ——\n"
+               "維持保證金率、費率、資金費率都不是 BingX 的實際規格。")
 
     # ---------------- 總結 ----------------
     print("\n" + "=" * 64)

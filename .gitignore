@@ -36,3 +36,8 @@ trading_pause.flag
 system_mode.txt
 pending_close.json
 backups/
+
+# 合約規格快照(Phase 11)
+# 不進版控:不同帳戶的費率不同,VIP 等級也會變,而且它是可重新產生的資料。
+# 在 VPS 上用 scripts/verify_bingx.py --write-specs 產生。
+data/bingx_specs.json

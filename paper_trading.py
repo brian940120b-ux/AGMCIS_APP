@@ -117,7 +117,8 @@ def create_paper_trade(
 
     # ---- Phase 10:成交價含成本 ----
     long_side = is_long(signal)
-    costs = paper_costs.get_cost_model()
+    # 費率依合約而異 —— 有校準過的規格就用那個標的的實際費率
+    costs = paper_costs.get_cost_model(symbol)
 
     requested_entry_price = entry_price
     entry_price = paper_costs.fill_price(entry_price, long_side, is_entry=True,
@@ -128,7 +129,7 @@ def create_paper_trade(
 
     entry_fee = costs.fee(position_value)
     liquidation_price = paper_costs.liquidation_price(
-        entry_price, leverage, long_side,
+        entry_price, leverage, long_side, symbol=symbol,
     )
 
     # 滑價之後停損可能已經在錯邊了 —— 那張單一開就會被停掉。
@@ -228,7 +229,7 @@ def close_paper_trade(symbol, exit_price, close_reason="手動平倉",
     try:
         closed = close_trade_atomic(
             symbol, exit_price, close_reason,
-            costs=paper_costs.get_cost_model(),
+            costs=paper_costs.get_cost_model(symbol),
             liquidated=liquidated,
             apply_slippage=apply_slippage,
         )
