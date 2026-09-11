@@ -182,6 +182,16 @@ def _job_naked_position_sweep():
     )
 
 
+def _job_reconciliation():
+    from agmcis.execution.reconciliation import run_reconciliation
+    return Job(
+        name="reconciliation",
+        run=run_reconciliation,
+        interval_seconds=settings.SCHEDULER_RECONCILE_INTERVAL,
+        tags=["risk"],
+    )
+
+
 def _job_risk_alert():
     from risk_alert import check_risk_alerts
     return Job(
@@ -228,12 +238,12 @@ def _job_daily_report():
 JOB_SETS = {
     JOB_SET_ALL: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
-        _job_naked_position_sweep, _job_risk_alert,
+        _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
-        _job_naked_position_sweep, _job_risk_alert,
+        _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
     ],
     JOB_SET_OPPORTUNITY: [_job_opportunity_scanner],
     JOB_SET_TRADER: [_job_auto_trader, _job_daily_report],

@@ -109,9 +109,35 @@ class FakeBroker(Broker):
         return None
 
 
-def build(broker=None, rules=None):
-    return ExecutionEngine(broker=broker or FakeBroker(),
-                           rules_engine=rules or FakeRules())
+class FakeStore:
+    """記在記憶體裡的訂單儲存,讓測試不需要資料庫。"""
+
+    def __init__(self):
+        self.saved = []
+        self.events = []
+
+    def save(self, order, trade_id=None, source="EXEC"):
+        self.saved.append((order.client_order_id, order.state.value))
+        return len(self.saved)
+
+    def record_event(self, client_order_id, from_state, to_state, reason=None):
+        self.events.append((
+            client_order_id,
+            from_state.value if hasattr(from_state, "value") else from_state,
+            to_state.value if hasattr(to_state, "value") else to_state,
+            reason,
+        ))
+
+    def mark_reconciled(self, client_order_id):
+        pass
+
+
+def build(broker=None, rules=None, store=None):
+    return ExecutionEngine(
+        broker=broker or FakeBroker(),
+        rules_engine=rules or FakeRules(),
+        store=store if store is not None else FakeStore(),
+    )
 
 
 class TestTheEngineMakesNoDecisions(unittest.TestCase):
@@ -383,6 +409,65 @@ class TestNoLiveBrokerExists(unittest.TestCase):
         from agmcis.execution.broker import PaperBroker
 
         self.assertFalse(PaperBroker.is_live)
+
+
+class TestOrdersArePersisted(unittest.TestCase):
+    """
+    Phase 12 的 Order 只活在記憶體裡。程式重啟時 UNKNOWN 狀態的訂單就消失了 ——
+    而那正是最需要被記住的狀態。
+    """
+
+    def test_every_transition_is_written_down(self):
+        store = FakeStore()
+        build(store=store).execute(decision())
+
+        states = [state for _, state in store.saved]
+        self.assertEqual(
+            states,
+            ["validating", "risk_check", "submitting", "accepted",
+             "filled", "protected"],
+        )
+
+    def test_the_event_trail_records_where_it_came_from(self):
+        """
+        只有最終狀態是不夠的。一張最後變成 CLOSED 的單,
+        是「正常成交後平倉」還是「裸倉被緊急平掉」,差別很大。
+        """
+        store = FakeStore()
+        broker = FakeBroker(protected=False)
+
+        with patch.object(engine_module, "logger"):
+            build(broker, store=store).execute(decision())
+
+        closing = [e for e in store.events if e[2] == "closing"]
+        self.assertTrue(closing)
+        self.assertIn("裸倉", closing[0][3])
+
+    def test_an_unknown_order_is_persisted_before_the_caller_sees_it(self):
+        """
+        最需要被記住的就是這個狀態。沒寫下來就等於放棄對帳。
+        """
+        store = FakeStore()
+        broker = FakeBroker(submit_error=TimeoutError("逾時"))
+
+        with patch.object(engine_module, "logger"):
+            build(broker, store=store).execute(decision())
+
+        self.assertEqual(store.saved[-1][1], "unknown")
+
+    def test_a_persistence_failure_is_loud_but_does_not_lose_the_order(self):
+        """
+        寫不進資料庫時,已經送出去的單不能消失,但必須大聲說 ——
+        這時資料庫的狀態已經落後於真實狀態了。
+        """
+        store = FakeStore()
+        store.save = MagicMock(side_effect=RuntimeError("資料庫掛了"))
+
+        with patch.object(engine_module, "logger") as logger:
+            result = build(store=store).execute(decision())
+
+        self.assertTrue(result.ok)
+        logger.critical.assert_called()
 
 
 if __name__ == "__main__":

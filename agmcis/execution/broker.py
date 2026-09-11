@@ -49,6 +49,22 @@ class Broker:
     def get_position(self, symbol):
         raise NotImplementedError
 
+    # ---- 對帳用 ----
+
+    def fetch_order(self, client_order_id, symbol):
+        """
+        查一張單現在到底怎麼了。回傳 dict 或 None(交易所查無此單)。
+
+        回傳 None 與「查詢失敗」是**不同**的兩件事:
+        None 代表可以確定沒有這張單,查詢失敗要拋例外。
+        把查詢失敗當成 None,會讓一張其實已經成交的單被標成 REJECTED。
+        """
+        raise NotImplementedError
+
+    def fetch_positions(self):
+        """交易所那邊現在有哪些部位。拿不到就拋例外,不要回空清單。"""
+        raise NotImplementedError
+
 
 class PaperBroker(Broker):
     """
@@ -133,3 +149,42 @@ class PaperBroker(Broker):
 
     def get_position(self, symbol):
         return self._get_position(symbol)
+
+    # ---- 對帳用 ----
+
+    def fetch_order(self, client_order_id, symbol):
+        """
+        模擬盤沒有訂單簿,只有交易列。所以「這張單怎麼了」要用
+        「這個標的現在有沒有倉位」來回答。
+
+        這在模擬盤是夠的:create_paper_trade 要嘛寫入一列、要嘛沒寫,
+        沒有部分成交。實盤必須改成真的查交易所訂單。
+        """
+        position = self._get_position(symbol)
+
+        if position is None:
+            return None
+
+        return {
+            "state": "protected" if position.get("stoploss") is not None
+                     else "filled",
+            "filled_quantity": (
+                position["position_value"] / position["entry_price"]
+                if position.get("position_value") and position.get("entry_price")
+                else None
+            ),
+            "average_price": position.get("entry_price"),
+            "exchange_order_id": str(position.get("id")) if position.get("id") else None,
+        }
+
+    def fetch_positions(self):
+        """
+        模擬盤的「交易所部位」就是交易表本身。
+
+        ⚠️ 這代表模擬盤的部位對帳是**拿同一份資料跟自己比**,
+        永遠不會發現差異。真正的部位漂移只有實盤才驗得出來。
+        這裡回傳它是為了讓對帳流程本身在模擬盤也能跑得通,
+        而不是假裝這樣就驗證過了。
+        """
+        from database_service import get_open_trades
+        return get_open_trades()

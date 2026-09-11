@@ -36,6 +36,7 @@ from agmcis.core.models import Order
 from agmcis.execution import state_machine as sm
 from agmcis.execution.broker import PaperBroker
 from agmcis.execution.rules_engine import TradingContext, get_engine as get_rules_engine
+from agmcis.execution import order_store as order_store_module
 
 logger = logging.getLogger("agmcis.execution.engine")
 
@@ -80,9 +81,15 @@ CLOSE_FAILED = "CLOSE_FAILED"
 
 class ExecutionEngine:
 
-    def __init__(self, broker=None, rules_engine=None):
+    def __init__(self, broker=None, rules_engine=None, store=None,
+                 persist=True):
         self._broker = broker
         self._rules_engine = rules_engine
+        self._store = store
+        # persist=False 只給不需要資料庫的測試用。
+        # 生產環境**必須**持久化 —— 沒有持久化就沒有對帳,
+        # 沒有對帳就不能重試,而不能重試的執行層遇到逾時只能放著。
+        self._persist = persist
 
     @property
     def broker(self):
@@ -95,6 +102,43 @@ class ExecutionEngine:
         if self._rules_engine is None:
             self._rules_engine = get_rules_engine()
         return self._rules_engine
+
+    @property
+    def store(self):
+        if self._store is None:
+            self._store = order_store_module.get_store()
+        return self._store
+
+    # ---------------- 狀態轉移 + 持久化 ----------------
+
+    def _move(self, order, target, reason=None):
+        """
+        狀態轉移一律走這裡,這樣每一步都會落地。
+
+        寫不進資料庫時**不會**把狀態改掉 —— 記憶體說 FILLED、
+        資料庫說 SUBMITTING,對帳就會拿到互相矛盾的兩份事實。
+        """
+        previous = order.state
+        sm.transition(order, target, reason=reason)
+
+        if not self._persist:
+            return order
+
+        try:
+            self.store.save(order)
+            self.store.record_event(
+                order.client_order_id, previous, order.state, reason,
+            )
+        except Exception as exc:
+            # 記錄失敗不該讓已經送出去的單消失,但必須大聲說 ——
+            # 這時資料庫的狀態已經落後於真實狀態了。
+            logger.critical(
+                "Execution | ORDER_PERSIST_FAILED | %s | %s -> %s | %s | "
+                "資料庫狀態已落後,對帳時會需要處理",
+                order.client_order_id, previous.value, order.state.value, exc,
+            )
+
+        return order
 
     # ---------------- 開倉 ----------------
 
@@ -150,9 +194,9 @@ class ExecutionEngine:
             price=request.price,
         )
 
-        sm.transition(order, OrderState.VALIDATING)
-        sm.transition(order, OrderState.RISK_CHECK)
-        sm.transition(order, OrderState.SUBMITTING)
+        self._move(order, OrderState.VALIDATING)
+        self._move(order, OrderState.RISK_CHECK)
+        self._move(order, OrderState.SUBMITTING)
 
         # ---- 2. 送單 ----
         try:
@@ -163,14 +207,14 @@ class ExecutionEngine:
             # 送單過程炸掉時,系統**不知道**交易所收到了什麼。
             # 標記成 UNKNOWN 等對帳,不可以直接重送。
             logger.exception("Execution | SUBMIT_EXCEPTION | %s", symbol)
-            sm.transition(order, OrderState.UNKNOWN, reason=str(exc))
+            self._move(order, OrderState.UNKNOWN, reason=str(exc))
             return ExecutionResult(
                 ok=False, order=order, symbol=symbol, status=SUBMIT_FAILED,
                 reason=f"送單例外,狀態未知,需對帳:{type(exc).__name__}: {exc}",
             )
 
         if not fill.is_filled:
-            sm.transition(order, OrderState.REJECTED, reason=fill.reason)
+            self._move(order, OrderState.REJECTED, reason=fill.reason)
             logger.info("Execution | SUBMIT_REJECTED | %s | %s", symbol, fill.reason)
             return ExecutionResult(
                 ok=False, order=order, symbol=symbol, status=SUBMIT_FAILED,
@@ -181,8 +225,8 @@ class ExecutionEngine:
         order.filled_quantity = fill.filled_quantity
         order.average_fill_price = fill.average_price
 
-        sm.transition(order, OrderState.ACCEPTED)
-        sm.transition(order, OrderState.FILLED)
+        self._move(order, OrderState.ACCEPTED)
+        self._move(order, OrderState.FILLED)
 
         # ---- 3. 保護性停損:這一步不成立就不准留著這個部位 ----
         return self._ensure_protected(order, intent, validation)
@@ -197,7 +241,7 @@ class ExecutionEngine:
             protected = False
 
         if protected:
-            sm.transition(order, OrderState.PROTECTED)
+            self._move(order, OrderState.PROTECTED)
             logger.info(
                 "Execution | OPENED | %s | %s | qty=%s @ %s | 停損 %s",
                 symbol, order.side.value, order.filled_quantity,
@@ -219,7 +263,7 @@ class ExecutionEngine:
         """
         裸倉處理。寧可平掉一個可能會賺的倉位,也不要留一個沒有停損的倉位。
         """
-        sm.transition(order, OrderState.CLOSING, reason="裸倉:沒有停損保護")
+        self._move(order, OrderState.CLOSING, reason="裸倉:沒有停損保護")
 
         try:
             result = self.broker.close_position(
@@ -227,7 +271,7 @@ class ExecutionEngine:
             )
         except Exception as exc:
             logger.exception("Execution | NAKED_CLOSE_EXCEPTION | %s", symbol)
-            sm.transition(order, OrderState.UNKNOWN, reason=str(exc))
+            self._move(order, OrderState.UNKNOWN, reason=str(exc))
             return ExecutionResult(
                 ok=False, order=order, symbol=symbol, status=NAKED_POSITION_STUCK,
                 reason=f"裸倉且平倉失敗,需要人工處理:{type(exc).__name__}: {exc}",
@@ -239,13 +283,13 @@ class ExecutionEngine:
                 "Execution | NAKED_POSITION_STUCK | %s | 平倉失敗:%s | 需要人工介入",
                 symbol, result.reason,
             )
-            sm.transition(order, OrderState.FAILED, reason=result.reason)
+            self._move(order, OrderState.FAILED, reason=result.reason)
             return ExecutionResult(
                 ok=False, order=order, symbol=symbol, status=NAKED_POSITION_STUCK,
                 reason=f"裸倉且平倉失敗,需要人工處理:{result.reason}",
             )
 
-        sm.transition(order, OrderState.CLOSED)
+        self._move(order, OrderState.CLOSED)
         return ExecutionResult(
             ok=False, order=order, symbol=symbol, status=NAKED_POSITION_CLOSED,
             reason="開倉後沒有停損保護,已緊急平倉",
