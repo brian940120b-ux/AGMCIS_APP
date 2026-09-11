@@ -136,14 +136,38 @@ class PaperBroker(Broker):
         self._get_position = positions
 
     def submit_entry(self, order_request, intent, size_usdt, leverage):
+        """
+        用 **order_request.quantity** 建倉,不是用 size_usdt × leverage。
+
+        Trading Rules Engine 會把數量往下對齊到 step size ——
+        29.5135 變成 29.531。忽略那個調整,模擬盤開出來的倉位會比
+        「實際送得出去的訂單」略大,兩邊就對不起來了。
+
+        (整條鏈路的接線測試抓到這個:它把每一筆都判定成部分成交,
+         因為成交量算出來跟送出的數量對不上。)
+
+        名目價值由對齊後的數量反推,保證金再由名目價值反推 ——
+        調整只會讓倉位變小,不會變大,這條規則從 Phase 4 一路守到這裡。
+        """
+        quantity = float(order_request.quantity)
+        reference_price = (
+            order_request.price
+            if order_request.price is not None
+            else order_request.reference_price or intent.entry
+        )
+
+        position_value = quantity * float(reference_price)
+        adjusted_size = position_value / float(leverage) if leverage else size_usdt
+
         result = self._trading.create_paper_trade(
             symbol=intent.symbol,
             entry_price=intent.entry,
             signal=intent.direction.value,
-            size_usdt=size_usdt,
+            size_usdt=adjusted_size,
             stoploss=intent.stop_loss,
             takeprofit=intent.take_profit,
             leverage=leverage,
+            position_value=position_value,
             source="EXEC",
             # 歸因資料只有這一刻拿得到 —— 事後推不回來
             agent_votes=dict(intent.agent_votes) if intent.agent_votes else None,
@@ -156,16 +180,11 @@ class PaperBroker(Broker):
             return FillResult(ok=False, reason=result.get("message"), raw=result)
 
         trade = result["trade"]
-        quantity = (
-            trade["position_value"] / trade["entry_price"]
-            if trade.get("position_value") and trade.get("entry_price")
-            else order_request.quantity
-        )
 
         return FillResult(
             ok=True,
             filled_quantity=quantity,
-            requested_quantity=order_request.quantity,
+            requested_quantity=quantity,
             average_price=trade["entry_price"],
             exchange_order_id=str(trade.get("id")),
             raw=result,
