@@ -22,14 +22,23 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import ccxt
 
-os.environ.setdefault("EXCHANGE_MAX_RETRIES", "2")
-os.environ.setdefault("EXCHANGE_RETRY_BACKOFF_SECONDS", "0")  # 測試不用真的等待
-
 from exchange_engine import ExchangeEngine, ExchangeUnavailableError  # noqa: E402
+
+# 重試次數與退避時間**明確傳進 engine**,不靠環境變數。
+#
+# 原本這裡寫 os.environ.setdefault(...) 再 import,但 settings 是在
+# 模組載入時就把環境變數讀成常數的。整包測試一起跑時,別的測試模組
+# 可能先載入了 settings,setdefault 就完全沒有作用 ——
+# 這個測試會依 discovery 順序而時好時壞。
+TEST_MAX_RETRIES = 2
 
 
 def make_engine(mock_exchange):
-    return ExchangeEngine(exchange_factory=lambda: mock_exchange)
+    return ExchangeEngine(
+        exchange_factory=lambda: mock_exchange,
+        max_retries=TEST_MAX_RETRIES,
+        backoff_seconds=0,            # 測試不用真的等待
+    )
 
 
 class TestExchangeEngine(unittest.TestCase):
@@ -65,7 +74,7 @@ class TestExchangeEngine(unittest.TestCase):
         with self.assertRaises(ExchangeUnavailableError):
             engine.get_ticker("BTC/USDT:USDT")
 
-        self.assertEqual(mock.fetch_ticker.call_count, 2)  # EXCHANGE_MAX_RETRIES=2
+        self.assertEqual(mock.fetch_ticker.call_count, TEST_MAX_RETRIES)
 
     def test_non_retryable_error_fails_immediately(self):
         mock = MagicMock()

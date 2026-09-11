@@ -1,118 +1,24 @@
-import ccxt
-import pandas as pd
+"""
+相容層。真正的實作在 agmcis/backtest/。
 
-from ta.trend import EMAIndicator, MACD, ADXIndicator
-from ta.momentum import RSIIndicator
-from ta.volatility import AverageTrueRange
+Phase 7 之前這個檔案自己跑回測:資料抓 Binance、訊號與成交在同一根 K 棒、
+沒有停損、沒有成本、每筆押上 100% 資金。那套數字不能用來決定上線與否。
 
-exchange = ccxt.binance()
+現在 load_data() 與 run_strategy() 都轉接到新引擎,
+strategy_lab.py / strategy_optimizer.py 的 import 路徑不需要改。
+"""
+from agmcis.backtest.legacy import (  # noqa: F401
+    add_indicators,
+    build_signal_fns,
+    load_data,
+    run_strategy,
+    run_strategy_detailed,
+)
 
-
-def load_data(symbol):
-    data = exchange.fetch_ohlcv(
-        symbol,
-        timeframe="1h",
-        limit=1500
-    )
-
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume"
-        ]
-    )
-
-    close = df["close"]
-
-    df["ema20"] = EMAIndicator(close=close, window=20).ema_indicator()
-    df["ema50"] = EMAIndicator(close=close, window=50).ema_indicator()
-    df["rsi"] = RSIIndicator(close=close, window=14).rsi()
-
-    macd = MACD(close=close)
-    df["macd"] = macd.macd()
-    df["macd_signal"] = macd.macd_signal()
-
-    adx = ADXIndicator(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        window=14
-    )
-    df["adx"] = adx.adx()
-
-    atr = AverageTrueRange(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        window=14
-    )
-    df["atr"] = atr.average_true_range()
-
-    df["vol_ma20"] = df["volume"].rolling(20).mean()
-
-    return df
-
-
-def run_strategy(df, strategy_module):
-    capital = 10000
-
-    in_position = False
-    entry_price = 0
-
-    for i in range(60, len(df)):
-        price = float(df["close"].iloc[i])
-        ema20 = float(df["ema20"].iloc[i])
-        ema50 = float(df["ema50"].iloc[i])
-        rsi = float(df["rsi"].iloc[i])
-        macd = float(df["macd"].iloc[i])
-        macd_signal = float(df["macd_signal"].iloc[i])
-        volume = float(df["volume"].iloc[i])
-        vol_ma = float(df["vol_ma20"].iloc[i])
-        atr = float(df["atr"].iloc[i])
-        adx = float(df["adx"].iloc[i])
-
-        if (
-            not in_position
-            and strategy_module.buy_signal(
-                price,
-                ema20,
-                ema50,
-                rsi,
-                macd,
-                macd_signal,
-                volume,
-                vol_ma,
-                atr,
-                adx
-            )
-        ):
-            in_position = True
-            entry_price = price
-
-        elif (
-            in_position
-            and strategy_module.sell_signal(
-                price,
-                ema20,
-                ema50,
-                rsi,
-                macd,
-                macd_signal,
-                volume,
-                vol_ma,
-                atr,
-                adx
-            )
-        ):
-            pnl = (price - entry_price) / entry_price
-
-            capital *= (1 + pnl)
-
-            in_position = False
-
-    return capital
+__all__ = [
+    "add_indicators",
+    "build_signal_fns",
+    "load_data",
+    "run_strategy",
+    "run_strategy_detailed",
+]

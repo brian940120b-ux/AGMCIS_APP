@@ -25,8 +25,12 @@ strategies = [
 
 def run_lab():
     """
-    ⚠️ 這個回測沒有停損、停利、手續費、滑點、Funding 或槓桿,
-    而且每筆押上 100% 資金完全複利 —— 報酬率數字不可作為決策依據。Phase 7 會重寫。
+    Phase 7 起改用 agmcis.backtest 引擎:BingX 資料、下一根開盤成交、
+    ATR 停損、手續費滑點資金費用、固定風險部位大小。
+
+    報酬率會比舊版低很多。那不是策略變差,是舊版的數字本來就是假的。
+    只看報酬率排名仍然不夠 —— 要看 Expectancy 與交易筆數,
+    詳細指標請用 backtest.py 或 run_strategy_detailed()。
     """
     print()
     print("========== AGMCIS V9.5 PRO 多幣種回測 ==========")

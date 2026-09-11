@@ -1,0 +1,6 @@
+# 測試用相依。生產環境不需要安裝。
+-r requirements.txt
+
+# starlette.testclient 需要 httpx,沒有它 tests/test_api_surface.py
+# 會直接以 RuntimeError 失敗(而不是測試不通過),很容易被誤判成程式壞掉。
+httpx

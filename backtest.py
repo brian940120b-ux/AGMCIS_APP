@@ -1,203 +1,81 @@
-import ccxt
-import pandas as pd
-import numpy as np
+"""
+單一策略回測報表(命令列用)。
 
-from ta.trend import EMAIndicator, MACD
-from ta.momentum import RSIIndicator
+Phase 7 重寫。舊版有五個問題,每一個都讓結果偏樂觀:
 
-# ⚠️ 資料來源是 Binance,不是實際交易的 BingX。價格與流動性都不符成交環境。
-# 這個檔案的回測結果不可作為策略上線依據 —— 停損停利只比對 close、
-# 不看 high/low,盤中穿刺停損不計,勝率被系統性高估。Phase 7 會重寫。
-exchange = ccxt.binance()
+  * 資料抓 Binance,實際下單在 BingX —— 價格與流動性都不是成交環境。
+  * 訊號與成交在同一根 K 棒的收盤價 —— 偷看未來。
+  * 停損停利只比對 close,盤中穿刺不算 —— 系統性高估勝率。
+  * 只有固定 0.1% 手續費,沒有滑點、點差、資金費用、強平。
+  * 每筆押上 100% 資金完全複利。
+
+現在整段轉接到 agmcis.backtest,並且輸出完整指標而不只是勝率與報酬率。
+Expectancy 與 Profit Factor 才是判斷策略有沒有優勢的依據,
+勝率高但期望值為負的策略照樣會把帳戶打光。
+
+用法:
+    python backtest.py [SYMBOL] [TIMEFRAME]
+"""
+import sys
+
+from agmcis.backtest import metrics as metrics_module
+from agmcis.backtest.costs import DEFAULT_COSTS
+from agmcis.backtest.legacy import load_data, run_strategy_detailed
+import strategies.ema_strategy as ema_strategy
+
+START_CAPITAL = 10000.0
+RISK_PER_TRADE_PCT = 1.0
+MAX_LEVERAGE = 3.0
+
+TIMEFRAME_HOURS = {
+    "1m": 1 / 60, "5m": 5 / 60, "15m": 0.25, "30m": 0.5,
+    "1h": 1.0, "2h": 2.0, "4h": 4.0, "1d": 24.0,
+}
 
 
-START_CAPITAL = 10000
-RISK_PER_TRADE = 0.02
-TAKE_PROFIT = 0.04
-STOP_LOSS = 0.02
-FEE = 0.001
+def run_backtest(symbol="BTC/USDT", timeframe="1h", limit=1500,
+                 strategy_module=ema_strategy):
+    df = load_data(symbol, timeframe=timeframe, limit=limit)
+    candle_hours = TIMEFRAME_HOURS.get(timeframe, 1.0)
 
-
-def get_data(symbol="BTC/USDT", timeframe="1h", limit=1500):
-
-    data = exchange.fetch_ohlcv(
-        symbol,
-        timeframe=timeframe,
-        limit=limit
+    result = run_strategy_detailed(
+        df, strategy_module,
+        start_balance=START_CAPITAL,
+        costs=DEFAULT_COSTS,
+        risk_per_trade_pct=RISK_PER_TRADE_PCT,
+        max_leverage=MAX_LEVERAGE,
+        symbol=symbol,
+        candle_hours=candle_hours,
     )
-
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume"
-        ]
-    )
-
-    return df
+    stats = metrics_module.compute(result, candle_hours=candle_hours)
+    print_report(symbol, timeframe, result, stats)
+    return result, stats
 
 
-def run_backtest():
-
-    df = get_data()
-
-    close = df["close"]
-
-    df["ema20"] = EMAIndicator(
-        close=close,
-        window=20
-    ).ema_indicator()
-
-    df["ema50"] = EMAIndicator(
-        close=close,
-        window=50
-    ).ema_indicator()
-
-    df["rsi"] = RSIIndicator(
-        close=close,
-        window=14
-    ).rsi()
-
-    macd = MACD(close=close)
-
-    df["macd"] = macd.macd()
-    df["macd_signal"] = macd.macd_signal()
-
-    capital = START_CAPITAL
-
-    equity_curve = [capital]
-
-    trades = []
-
-    in_position = False
-
-    entry_price = 0
-
-    for i in range(60, len(df)):
-
-        price = float(df["close"].iloc[i])
-
-        ema20 = float(df["ema20"].iloc[i])
-        ema50 = float(df["ema50"].iloc[i])
-
-        rsi = float(df["rsi"].iloc[i])
-
-        macd_now = float(df["macd"].iloc[i])
-        macd_sig = float(df["macd_signal"].iloc[i])
-
-        buy_signal = (
-            price > ema20
-            and ema20 > ema50
-            and 45 <= rsi <= 70
-            and macd_now > macd_sig
-        )
-
-        if not in_position and buy_signal:
-
-            in_position = True
-
-            entry_price = price
-
-            stop_price = entry_price * (1 - STOP_LOSS)
-
-            take_price = entry_price * (1 + TAKE_PROFIT)
-
-        elif in_position:
-
-            exit_trade = False
-
-            if price <= stop_price:
-                exit_trade = True
-
-            elif price >= take_price:
-                exit_trade = True
-
-            elif macd_now < macd_sig:
-                exit_trade = True
-
-            if exit_trade:
-
-                pnl_pct = (
-                    (price - entry_price)
-                    / entry_price
-                )
-
-                pnl_pct -= FEE * 2
-
-                capital *= (1 + pnl_pct)
-
-                trades.append(pnl_pct * 100)
-
-                equity_curve.append(capital)
-
-                in_position = False
-
-    total_trades = len(trades)
-
-    wins = len([t for t in trades if t > 0])
-
-    losses = len([t for t in trades if t <= 0])
-
-    win_rate = (
-        wins / total_trades * 100
-        if total_trades > 0
-        else 0
-    )
-
-    total_return = (
-        (capital - START_CAPITAL)
-        / START_CAPITAL
-        * 100
-    )
-
-    peak = equity_curve[0]
-
-    max_drawdown = 0
-
-    for value in equity_curve:
-
-        if value > peak:
-            peak = value
-
-        dd = (peak - value) / peak * 100
-
-        if dd > max_drawdown:
-            max_drawdown = dd
-
-    gross_profit = sum(
-        [t for t in trades if t > 0]
-    )
-
-    gross_loss = abs(
-        sum([t for t in trades if t < 0])
-    )
-
-    profit_factor = (
-        gross_profit / gross_loss
-        if gross_loss > 0
-        else 0
-    )
-
+def print_report(symbol, timeframe, result, stats):
     print()
-    print("========== AGMCIS V8.5 ==========")
-    print(f"初始資金：{START_CAPITAL}")
-    print(f"最終資金：{capital:.2f}")
-    print("--------------------------------")
-    print(f"總交易數：{total_trades}")
-    print(f"獲利筆數：{wins}")
-    print(f"虧損筆數：{losses}")
-    print(f"勝率：{win_rate:.2f}%")
-    print("--------------------------------")
-    print(f"總報酬率：{total_return:.2f}%")
-    print(f"最大回撤：{max_drawdown:.2f}%")
-    print(f"Profit Factor：{profit_factor:.2f}")
-    print("================================")
+    print(f"========== AGMCIS 回測 | {symbol} {timeframe} ==========")
+    print(f"K 棒 {result.bars} 根   起始資金 {stats.start_balance:.2f}"
+          f"   期末資金 {stats.end_balance:.2f}")
+    print("-" * 52)
+
+    for line in stats.summary_lines():
+        print(line)
+
+    print("-" * 52)
+    print(f"出場原因     {stats.exit_reasons or '無'}")
+    print(f"訊號被拒     {result.skipped_signals} 次"
+          f"   持倉中略過 {result.signals_while_in_position} 根")
+
+    if stats.warnings:
+        print("-" * 52)
+        for warning in stats.warnings:
+            print(f"⚠️  {warning}")
+
+    print("=" * 52)
 
 
 if __name__ == "__main__":
-    # Phase 1:原本這行在模組層直接執行 —— import 這個檔案就會打網路並印報表。
-    run_backtest()
+    symbol = sys.argv[1] if len(sys.argv) > 1 else "BTC/USDT"
+    timeframe = sys.argv[2] if len(sys.argv) > 2 else "1h"
+    run_backtest(symbol, timeframe)
