@@ -70,16 +70,20 @@ def set_cost_model(model):
     _MODEL = model
 
 
-def maintenance_margin_ratio(symbol=None, store=None):
+def maintenance_margin_ratio(symbol=None, store=None, notional=None):
     """
     維持保證金率。快照裡有實際值就用實際值。
 
     這個數字直接決定強平價。用猜的值算出來的強平價,
     在真實行情裡不會準 —— 而它準不準決定的是「會不會爆倉」。
+
+    notional 給了而且有分層資料時,用**那一層**的比率。
+    倉位越大維持保證金率越高、強平價越近 ——
+    用單一數字會低估大倉位的強平風險。
     """
     if symbol:
         store = store or specs_module.get_store()
-        value, source = store.maintenance_margin_ratio(symbol)
+        value, source = store.maintenance_margin_ratio(symbol, notional=notional)
         if source == specs_module.SOURCE_EXCHANGE:
             return value
 
@@ -98,7 +102,8 @@ def fill_price(price, is_long, is_entry, model=None):
     return model.exit_price(price, is_long)
 
 
-def liquidation_price(entry_price, leverage, is_long, mmr=None, symbol=None):
+def liquidation_price(entry_price, leverage, is_long, mmr=None, symbol=None,
+                      notional=None):
     """
     約略的強平價。與回測引擎同一條公式:價格逆向走 (1 - mmr)/leverage。
 
@@ -108,7 +113,10 @@ def liquidation_price(entry_price, leverage, is_long, mmr=None, symbol=None):
     if not leverage or leverage <= 0:
         return None
 
-    mmr = maintenance_margin_ratio(symbol) if mmr is None else mmr
+    mmr = (
+        maintenance_margin_ratio(symbol, notional=notional)
+        if mmr is None else mmr
+    )
     move = (1 - mmr) / float(leverage)
 
     return (

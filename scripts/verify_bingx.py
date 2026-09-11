@@ -120,6 +120,21 @@ def _write_specs(adapter):
         except Exception as exc:
             record(f"資金費率 {symbol}", WARN, f"取不到:{exc}")
 
+        # 維持保證金分層。倉位越大維持保證金率越高、強平價越近 ——
+        # 用單一數字會低估大倉位的強平風險。
+        tiers = _leverage_tiers(adapter, symbol)
+        if tiers:
+            spec.maintenance_margin_tiers = tiers
+            spec.maintenance_margin_ratio = float(tiers[0]["mmr"])
+            record(f"維持保證金分層 {symbol}", PASS, f"{len(tiers)} 層")
+        else:
+            record(
+                f"維持保證金分層 {symbol}", WARN,
+                "API 沒有提供分層資料。系統會用保守預設值,\n"
+                "大倉位的強平價會被低估。可依官方合約分層文件手動補進\n"
+                "contracts[symbol].maintenance_margin_tiers。",
+            )
+
         snapshot.contracts[symbol] = spec
 
         missing = [
@@ -135,16 +150,55 @@ def _write_specs(adapter):
                f"funding={spec.funding_rate_8h}"
                + (f"\n仍缺(系統會繼續用猜測值):{', '.join(missing)}" if missing else ""))
 
-    snapshot.notes.append(
-        "維持保證金率 BingX API 未提供,需依官方合約分層文件手動補入 "
-        "contracts[symbol].maintenance_margin_ratio。在補上之前,"
-        "強平價是用保守預設值估算的。"
-    )
+    missing_tiers = [
+        symbol for symbol, spec in snapshot.contracts.items()
+        if not spec.maintenance_margin_tiers
+    ]
+    if missing_tiers:
+        snapshot.notes.append(
+            "以下標的取不到維持保證金分層:" + ", ".join(missing_tiers) + "。"
+            "需依官方合約分層文件手動補入 "
+            "contracts[symbol].maintenance_margin_tiers "
+            "(格式:[{notional_floor, mmr, max_leverage}, ...])。"
+            "在補上之前,大倉位的強平價會被低估。"
+        )
 
     path = specs_module.write_snapshot(snapshot)
     record("寫入快照", PASS, f"{path}(共 {len(snapshot.contracts)} 個合約)")
     print("\n        這份快照不進版控 —— 不同帳戶的費率不同,VIP 等級也會變。")
     print("        費率或分層變動後請重新執行。")
+
+
+def _leverage_tiers(adapter, symbol):
+    """
+    從 ccxt 取維持保證金分層。取不到就回 None ——
+    **不要自己編一組看起來合理的數字**,那會讓「已校準」變成謊話。
+    """
+    try:
+        exchange = adapter._instance(MarketType.PERPETUAL)
+        market_symbol = adapter.to_market_symbol(symbol, MarketType.PERPETUAL)
+
+        if not exchange.has.get("fetchMarketLeverageTiers"):
+            return None
+
+        raw = exchange.fetch_market_leverage_tiers(market_symbol)
+    except Exception:
+        return None
+
+    tiers = []
+    for item in raw or []:
+        mmr = item.get("maintenanceMarginRate")
+        if mmr is None:
+            continue
+        tiers.append({
+            "notional_floor": float(item.get("minNotional") or 0),
+            "mmr": float(mmr),
+            "max_leverage": (
+                float(item["maxLeverage"]) if item.get("maxLeverage") else None
+            ),
+        })
+
+    return sorted(tiers, key=lambda t: t["notional_floor"]) or None
 
 
 def _market_of(adapter, symbol):

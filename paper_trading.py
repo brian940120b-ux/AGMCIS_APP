@@ -138,8 +138,11 @@ def create_paper_trade(
         position_value = size_usdt * leverage
 
     entry_fee = costs.fee(position_value)
+    # 名目價值要帶進去 —— 維持保證金率依倉位大小分層,
+    # 用單一數字會低估大倉位的強平風險。
     liquidation_price = paper_costs.liquidation_price(
         entry_price, leverage, long_side, symbol=symbol,
+        notional=position_value,
     )
 
     # 滑價之後停損可能已經在錯邊了 —— 那張單一開就會被停掉。

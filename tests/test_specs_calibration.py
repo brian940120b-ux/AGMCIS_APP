@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -292,6 +293,138 @@ class TestFundingRateFieldName(unittest.TestCase):
         )
 
         self.assertIs(FundingAgent().analyse(context).vote, Vote.SHORT)
+
+
+class TestMaintenanceMarginTiers(unittest.TestCase):
+    """
+    BingX 依倉位大小分層:倉位越大維持保證金率越高、強平價越近。
+    用單一數字會**低估大倉位的強平風險** —— 而那決定的是會不會爆倉。
+    """
+
+    TIERS = [
+        {"notional_floor": 0, "mmr": 0.004, "max_leverage": 125},
+        {"notional_floor": 50000, "mmr": 0.005, "max_leverage": 100},
+        {"notional_floor": 250000, "mmr": 0.01, "max_leverage": 50},
+    ]
+
+    def setUp(self):
+        self.path = snapshot_file({
+            "BTC/USDT": {
+                "maintenance_margin_ratio": 0.004,
+                "maintenance_margin_tiers": self.TIERS,
+            },
+            "ETH/USDT": {"maintenance_margin_ratio": 0.005},
+        })
+        self.addCleanup(os.unlink, self.path)
+        self.store = specs.SpecStore(path=self.path)
+
+    def test_a_small_position_uses_the_first_tier(self):
+        value, source = self.store.maintenance_margin_ratio(
+            "BTC/USDT", notional=1000,
+        )
+
+        self.assertEqual(value, 0.004)
+        self.assertEqual(source, specs.SOURCE_EXCHANGE)
+
+    def test_a_large_position_uses_a_higher_ratio(self):
+        small, _ = self.store.maintenance_margin_ratio("BTC/USDT", notional=1000)
+        large, _ = self.store.maintenance_margin_ratio("BTC/USDT", notional=300000)
+
+        self.assertGreater(large, small)
+
+    def test_the_boundary_belongs_to_the_higher_tier(self):
+        """floor 剛好等於名目價值時屬於那一層,不是前一層。"""
+        value, _ = self.store.maintenance_margin_ratio("BTC/USDT", notional=50000)
+
+        self.assertEqual(value, 0.005)
+
+    def test_tiers_are_sorted_even_if_the_data_is_not(self):
+        path = snapshot_file({"X/USDT": {"maintenance_margin_tiers": [
+            {"notional_floor": 250000, "mmr": 0.01},
+            {"notional_floor": 0, "mmr": 0.004},
+            {"notional_floor": 50000, "mmr": 0.005},
+        ]}})
+        self.addCleanup(os.unlink, path)
+
+        value, _ = specs.SpecStore(path=path).maintenance_margin_ratio(
+            "X/USDT", notional=1000,
+        )
+
+        self.assertEqual(value, 0.004)
+
+    def test_a_symbol_without_tiers_falls_back_to_the_single_number(self):
+        value, source = self.store.maintenance_margin_ratio(
+            "ETH/USDT", notional=999999,
+        )
+
+        self.assertEqual(value, 0.005)
+        self.assertEqual(source, specs.SOURCE_EXCHANGE)
+
+    def test_malformed_tier_data_is_ignored_not_guessed(self):
+        path = snapshot_file({"X/USDT": {
+            "maintenance_margin_ratio": 0.006,
+            "maintenance_margin_tiers": [{"notional_floor": "不是數字", "mmr": 0.01}],
+        }})
+        self.addCleanup(os.unlink, path)
+
+        store = specs.SpecStore(path=path)
+
+        with patch.object(specs, "logger"):
+            value, _ = store.maintenance_margin_ratio("X/USDT", notional=1000)
+
+        self.assertEqual(value, 0.006)
+
+    def test_max_leverage_comes_from_the_tier(self):
+        self.assertEqual(
+            self.store.max_leverage_for_notional("BTC/USDT", 300000), 50.0,
+        )
+
+    def test_missing_tiers_are_named_in_the_calibration_report(self):
+        report = self.store.calibration_report(["BTC/USDT", "ETH/USDT"])
+
+        self.assertTrue(any(
+            "ETH/USDT" in w and "分層" in w for w in report["warnings"]
+        ))
+        self.assertFalse(any(
+            "BTC/USDT" in w and "分層" in w for w in report["warnings"]
+        ))
+
+
+class TestLiquidationPriceUsesTheTier(unittest.TestCase):
+
+    def setUp(self):
+        from agmcis.execution import paper_costs
+        self.paper_costs = paper_costs
+
+        self.path = snapshot_file({"BTC/USDT": {
+            "maintenance_margin_ratio": 0.004,
+            "maintenance_margin_tiers": TestMaintenanceMarginTiers.TIERS,
+        }})
+        self.addCleanup(os.unlink, self.path)
+
+        specs.set_store(specs.SpecStore(path=self.path))
+        self.addCleanup(specs.set_store, None)
+        self.addCleanup(paper_costs.set_cost_model, None)
+
+    def test_a_bigger_position_liquidates_sooner(self):
+        """
+        同樣的槓桿,倉位越大強平價越接近進場價。
+        忽略這件事等於低估大倉位的風險。
+        """
+        small = self.paper_costs.liquidation_price(
+            100, 10, True, symbol="BTC/USDT", notional=1000,
+        )
+        large = self.paper_costs.liquidation_price(
+            100, 10, True, symbol="BTC/USDT", notional=300000,
+        )
+
+        self.assertGreater(large, small)
+
+    def test_without_a_notional_it_uses_the_flat_ratio(self):
+        """沒帶名目價值時行為不變 —— 舊呼叫端不會壞掉。"""
+        price = self.paper_costs.liquidation_price(100, 10, True, symbol="BTC/USDT")
+
+        self.assertAlmostEqual(price, 100 * (1 - (1 - 0.004) / 10), places=6)
 
 
 if __name__ == "__main__":

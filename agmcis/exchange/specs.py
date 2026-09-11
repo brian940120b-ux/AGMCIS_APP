@@ -58,6 +58,13 @@ class ContractSpec:
     contract_size: Optional[float] = None
     max_leverage: Optional[float] = None
     maintenance_margin_ratio: Optional[float] = None
+    # 維持保證金分層。BingX 依倉位大小分層,倉位越大維持保證金率越高、
+    # 強平價越近。單一數字會**低估大倉位的強平風險**。
+    #
+    # 格式:[{"notional_floor": 0, "mmr": 0.004, "max_leverage": 125}, ...]
+    # 依 notional_floor 由小到大。某個名目價值適用的是
+    # 「floor <= notional 的最後一層」。
+    maintenance_margin_tiers: Optional[list] = None
     taker_fee: Optional[float] = None
     maker_fee: Optional[float] = None
     funding_rate_8h: Optional[float] = None
@@ -199,9 +206,62 @@ class SpecStore:
                 return float(value), SOURCE_EXCHANGE
         return default, SOURCE_DEFAULT
 
-    def maintenance_margin_ratio(self, symbol):
+    def maintenance_margin_ratio(self, symbol, notional=None):
+        """
+        維持保證金率。
+
+        notional 給了而且這個標的有分層資料時,回傳**那一層**的比率。
+        沒有分層資料時退回單一數字 —— 那會低估大倉位的風險,
+        但至少來源標記說得出它是哪裡來的。
+        """
+        if notional is not None:
+            tier = self.tier_for(symbol, notional)
+            if tier is not None and tier.get("mmr") is not None:
+                return float(tier["mmr"]), SOURCE_EXCHANGE
+
         return self._value(symbol, "maintenance_margin_ratio",
                            DEFAULT_MAINTENANCE_MARGIN_RATIO)
+
+    def tier_for(self, symbol, notional):
+        """
+        這個名目價值適用哪一層。沒有分層資料就回 None。
+
+        規則:floor <= notional 的**最後一層**。
+        名目價值小於第一層的 floor 時用第一層 ——
+        第一層的 floor 通常是 0,但資料不一定乾淨。
+        """
+        spec = self.get(symbol)
+        tiers = getattr(spec, "maintenance_margin_tiers", None) if spec else None
+
+        if not tiers:
+            return None
+
+        try:
+            ordered = sorted(tiers, key=lambda t: float(t.get("notional_floor", 0)))
+        except (TypeError, ValueError):
+            logger.warning("%s 的維持保證金分層資料格式有問題,忽略", symbol)
+            return None
+
+        selected = ordered[0]
+        for tier in ordered:
+            if float(tier.get("notional_floor", 0)) <= float(notional):
+                selected = tier
+            else:
+                break
+
+        return selected
+
+    def max_leverage_for_notional(self, symbol, notional):
+        """
+        這個名目價值能用的最高槓桿。分層資料裡通常也帶這個。
+        沒有資料就回 None(交給其他條件決定)。
+        """
+        tier = self.tier_for(symbol, notional)
+        if tier is None:
+            return None
+
+        value = tier.get("max_leverage")
+        return float(value) if value is not None else None
 
     def taker_fee(self, symbol):
         return self._value(symbol, "taker_fee", DEFAULT_TAKER_FEE)
@@ -253,6 +313,9 @@ class SpecStore:
             )
 
         for symbol in symbols:
+            spec = self.get(symbol)
+            tiers = getattr(spec, "maintenance_margin_tiers", None) if spec else None
+
             sources = {
                 "maintenance_margin_ratio": self.maintenance_margin_ratio(symbol),
                 "taker_fee": self.taker_fee(symbol),
@@ -263,6 +326,16 @@ class SpecStore:
                 name: {"value": value, "source": source}
                 for name, (value, source) in sources.items()
             }
+            report["symbols"][symbol]["maintenance_margin_tiers"] = {
+                "value": len(tiers) if tiers else 0,
+                "source": SOURCE_EXCHANGE if tiers else SOURCE_DEFAULT,
+            }
+
+            if not tiers:
+                report["warnings"].append(
+                    f"{symbol} 沒有維持保證金分層資料。倉位越大維持保證金率越高,"
+                    f"用單一數字會**低估大倉位的強平風險**。"
+                )
 
             guessed = [n for n, (_, src) in sources.items() if src == SOURCE_DEFAULT]
             if guessed:
