@@ -16,11 +16,24 @@ Phase 10 加入**強制平倉**。判定順序與回測引擎一致:
 停損與強平之中,**離進場價較近的那個先觸發**,不是無條件先看強平。
 做多停損 99、強平 91 時,價格是先經過 99 的,那筆是正常停損。
 
-⚠️ 已知的樂觀偏誤:這裡比對的是輪詢當下的**單一價格**,不是這段期間的
-high / low。兩次輪詢之間穿刺停損又彈回來的行情,這裡看不到 ——
-實際交易所的觸發單會成交,模擬盤不會。這會讓模擬勝率偏高。
-要修掉需要 WebSocket 逐筆價格(Phase 12 / 13)。
+原本這裡比對的是輪詢當下的**單一價格**。兩次輪詢之間穿刺停損又彈回來的行情
+看不到 —— 但交易所的觸發單會成交。那會讓模擬勝率系統性偏高。
+
+現在改成看輪詢間隔內的 1m K 棒 high / low,規則與回測引擎一致:
+
+  * 做多看 low,做空看 high
+  * 停損與強平之中,離進場價較近的那個先觸發
+  * K 棒開盤已經穿過觸發價時,成交價是**開盤價**不是觸發價
+    (跳空時不可能還在觸發價成交)
+
+取不到 K 棒時退回單一價格判定,並且記錄下來 ——
+降級可以接受,安靜地降級不行。
+
+⚠️ 仍然存在的偏誤:1m K 棒還是聚合過的。同一根裡先碰停損還是先碰停利,
+   沒有逐筆資料就不知道。這裡沿用回測的假設:**一律當作停損先到**。
+   寧可低估績效也不要高估。
 """
+from agmcis.config import settings
 from database_service import get_open_trades
 from direction import is_long, is_short
 from logger_service import logger
@@ -59,28 +72,107 @@ def _adverse_level(signal, stoploss, liquidation_price):
     return stoploss, False
 
 
-def _exit_reason(signal, price, stoploss, takeprofit, liquidation_price=None):
+def _exit_reason(signal, price, stoploss, takeprofit, liquidation_price=None,
+                 high=None, low=None, open_price=None):
     """
-    回傳 (平倉原因, 是否為強平)。沒有觸發條件則回傳 (None, False)。
+    回傳 (平倉原因, 是否為強平, 成交價)。沒有觸發條件則回傳 (None, False, None)。
+
+    high / low 給了就用它們判定觸發(那是輪詢間隔內真的走到過的價格);
+    沒給就退回單一價格 —— 行為與 Phase 10 相同。
+
     stoploss / takeprofit / liquidation_price 都可為 None。
     """
     level, liquidated = _adverse_level(signal, stoploss, liquidation_price)
 
-    if is_long(signal):
-        if level is not None and price <= level:
-            return (LIQUIDATION_REASON if liquidated else "自動止損"), liquidated
-        if takeprofit is not None and price >= takeprofit:
-            return "自動止盈", False
-        return None, False
+    # 沒有 high/low 時,單一價格同時扮演兩者
+    worst = low if low is not None else price
+    best = high if high is not None else price
 
     if is_short(signal):
-        if level is not None and price >= level:
-            return (LIQUIDATION_REASON if liquidated else "自動止損"), liquidated
-        if takeprofit is not None and price <= takeprofit:
-            return "自動止盈", False
-        return None, False
+        worst, best = best, worst
 
-    return None, False
+    if not (is_long(signal) or is_short(signal)):
+        return None, False, None
+
+    long_side = is_long(signal)
+
+    # ---- 不利方向:停損 / 強平 ----
+    if level is not None:
+        hit = worst <= level if long_side else worst >= level
+        if hit:
+            fill = _fill_price(level, open_price, long_side)
+            reason = LIQUIDATION_REASON if liquidated else "自動止損"
+            return reason, liquidated, fill
+
+    # ---- 有利方向:停利 ----
+    #
+    # 同一根 K 棒同時觸及停損與停利時,上面的停損已經先回傳了 ——
+    # 那是刻意的。沒有逐筆資料就不知道誰先到,一律假設停損先到,
+    # 寧可低估績效也不要高估(與回測引擎同一個假設)。
+    if takeprofit is not None:
+        hit = best >= takeprofit if long_side else best <= takeprofit
+        if hit:
+            return "自動止盈", False, _fill_price(takeprofit, open_price, long_side)
+
+    return None, False, None
+
+
+def _fill_price(level, open_price, long_side):
+    """
+    實際成交價。
+
+    K 棒開盤就已經穿過觸發價時,不可能還在觸發價成交 —— 成交在開盤價。
+    這是保守的一邊:假設還能在停損價出場會高估績效。
+    """
+    if open_price is None:
+        return level
+
+    if long_side and open_price < level:
+        return open_price
+    if not long_side and open_price > level:
+        return open_price
+
+    return level
+
+
+def _intrabar_range(symbol):
+    """
+    輪詢間隔內的 (high, low, 第一根開盤價)。取不到就回 (None, None, None)。
+
+    取不到不是錯誤 —— 呼叫端會退回單一價格判定。但它必須被記錄,
+    因為那代表這一輪的停損判定比平常寬鬆。
+    """
+    if not settings.POSITION_MONITOR_USE_INTRABAR:
+        return None, None, None
+
+    try:
+        from agmcis.data.market_data import get_ohlcv_dicts
+
+        candles = get_ohlcv_dicts(
+            symbol, timeframe="1m",
+            limit=settings.POSITION_MONITOR_INTRABAR_CANDLES,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Position Monitor | INTRABAR_FAILED | %s | %s | 本輪退回單一價格判定",
+            symbol, exc,
+        )
+        return None, None, None
+
+    if not candles:
+        logger.warning(
+            "Position Monitor | INTRABAR_EMPTY | %s | 本輪退回單一價格判定", symbol,
+        )
+        return None, None, None
+
+    highs = [float(c["high"]) for c in candles if c.get("high") is not None]
+    lows = [float(c["low"]) for c in candles if c.get("low") is not None]
+
+    if not highs or not lows:
+        return None, None, None
+
+    first_open = candles[0].get("open")
+    return max(highs), min(lows), (float(first_open) if first_open else None)
 
 
 def run_position_monitor(notify=True):
@@ -119,26 +211,36 @@ def run_position_monitor(notify=True):
             continue
 
         price = float(price)
-        checked_symbols.append({"symbol": symbol, "price": price})
 
-        reason, liquidated = _exit_reason(
+        # 輪詢間隔內真的走到過的價格。取不到就退回單一價格判定。
+        high, low, open_price = _intrabar_range(symbol)
+
+        checked_symbols.append({
+            "symbol": symbol, "price": price,
+            "high": high, "low": low,
+            "intrabar": high is not None,
+        })
+
+        reason, liquidated, fill = _exit_reason(
             signal, price, stoploss, takeprofit, liquidation_price,
+            high=high, low=low, open_price=open_price,
         )
 
         if not reason:
             continue
 
         if liquidated:
-            # 強平在強平價成交,不是在輪詢到的那個價格成交。
+            # 強平在強平價成交,不是在輪詢到的那個價格成交,
+            # 也不套用滑點(見 paper_trading.close_paper_trade)。
             logger.error(
                 "Position Monitor | LIQUIDATION | %s | %s | 強平價=%s 當前價=%s",
                 symbol, signal, liquidation_price, price,
             )
             result = close_paper_trade(
-                symbol, liquidation_price, reason, liquidated=True,
+                symbol, fill, reason, liquidated=True,
             )
         else:
-            result = close_paper_trade(symbol, price, reason)
+            result = close_paper_trade(symbol, fill, reason)
 
         if not result.get("success"):
             if result.get("already_closed"):
@@ -154,8 +256,9 @@ def run_position_monitor(notify=True):
         closed.append(closed_trade)
 
         logger.info(
-            "Position Monitor | CLOSE | %s | %s | %s | price=%s roi=%s%% pnl=%s",
-            symbol, signal, reason, price,
+            "Position Monitor | CLOSE | %s | %s | %s | 觸發價=%s 當前價=%s "
+            "(盤中 high=%s low=%s) roi=%s%% pnl=%s",
+            symbol, signal, reason, fill, price, high, low,
             closed_trade.get("pnl_pct"), closed_trade.get("pnl_usdt"),
         )
 
@@ -163,7 +266,7 @@ def run_position_monitor(notify=True):
             notify_close_trade(
                 symbol,
                 signal,
-                price,
+                fill,
                 pnl_pct=closed_trade.get("pnl_pct"),
                 pnl_usdt=closed_trade.get("pnl_usdt"),
                 reason=reason,
@@ -174,6 +277,9 @@ def run_position_monitor(notify=True):
         "closed_count": len(closed),
         "closed": closed,
         "liquidated_count": len([c for c in closed if c.get("liquidated")]),
+        # 這一輪有幾個標的是用盤中 high/low 判定的。
+        # 數字比持倉數少代表有些標的取不到 K 棒,那一輪的停損判定比較寬鬆。
+        "intrabar_checked": len([c for c in checked_symbols if c.get("intrabar")]),
         "checked_symbols": checked_symbols,
         "skipped": skipped,
         "unprotected": unprotected,

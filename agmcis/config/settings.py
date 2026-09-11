@@ -125,6 +125,11 @@ EXCHANGE_RATE_LIMIT_CALLS = env_int("EXCHANGE_RATE_LIMIT_CALLS", 100)
 # 預設關閉:它需要 migration 006 建好的資料表。**開之前先跑 migration** ——
 # 表不存在時每次呼叫都會失敗一次再降級,那比不開更慢。
 EXCHANGE_SHARED_RATE_LIMIT = env_bool("EXCHANGE_SHARED_RATE_LIMIT", False)
+
+# 清掉舊的限流紀錄。每次 API 呼叫寫一列,不清理這張表會一直長。
+SCHEDULER_RATE_LIMIT_CLEANUP_INTERVAL = env_int(
+    "SCHEDULER_RATE_LIMIT_CLEANUP_INTERVAL", 3600,
+)
 EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
 
 # 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,
@@ -245,6 +250,19 @@ SCHEDULER_NAKED_SWEEP_INTERVAL = env_int("SCHEDULER_NAKED_SWEEP_INTERVAL", 120)
 # 對帳。狀態不明的訂單不可以重送,只能查 —— 查得越快越好,
 # 但查詢本身要打交易所 API,所以不宜每分鐘跑。
 SCHEDULER_RECONCILE_INTERVAL = env_int("SCHEDULER_RECONCILE_INTERVAL", 180)
+
+# 持倉監控要不要看輪詢間隔內的 high / low。
+#
+# 關掉時只比對當下的單一價格,兩次輪詢之間穿刺停損又彈回的行情看不到 ——
+# 但交易所的觸發單會成交。那會讓模擬勝率系統性偏高。
+#
+# 打開時每個持倉每輪多一次 K 棒請求。持倉不多時成本很低,
+# 而且它換來的是「模擬損益與實盤可比」這件事。
+POSITION_MONITOR_USE_INTRABAR = env_bool("POSITION_MONITOR_USE_INTRABAR", True)
+
+# 看多少根 1m K 棒。要蓋過輪詢間隔,再多留一點緩衝 ——
+# 少看一根等於那一分鐘的穿刺不算數。
+POSITION_MONITOR_INTRABAR_CANDLES = env_int("POSITION_MONITOR_INTRABAR_CANDLES", 5)
 SCHEDULER_RISK_ALERT_INTERVAL = env_int("SCHEDULER_RISK_ALERT_INTERVAL", 300)
 SCHEDULER_TICK_SECONDS = env_int("SCHEDULER_TICK_SECONDS", 10)
 SCHEDULER_STATUS_FILE = env("SCHEDULER_STATUS_FILE", default="scheduler_status.json")

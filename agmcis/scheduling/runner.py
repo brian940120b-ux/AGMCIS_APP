@@ -182,6 +182,30 @@ def _job_naked_position_sweep():
     )
 
 
+def _job_rate_limit_cleanup():
+    """
+    清掉舊的限流紀錄。每次 API 呼叫寫一列,不清理這張表會一直長。
+
+    功能沒開的時候這個工作直接跳過 —— 表可能根本不存在,
+    每小時對一張不存在的表發一次 DELETE 只會在 log 裡堆錯誤。
+    """
+    from agmcis.exchange.shared_rate_limit import SharedRateLimitStore
+
+    def cleanup():
+        if not settings.EXCHANGE_SHARED_RATE_LIMIT:
+            return {"status": "DISABLED"}
+
+        SharedRateLimitStore().cleanup()
+        return {"status": "CLEANED"}
+
+    return Job(
+        name="rate_limit_cleanup",
+        run=cleanup,
+        interval_seconds=settings.SCHEDULER_RATE_LIMIT_CLEANUP_INTERVAL,
+        tags=["maintenance"],
+    )
+
+
 def _job_reconciliation():
     from agmcis.execution.reconciliation import run_reconciliation
     return Job(
@@ -239,11 +263,13 @@ JOB_SETS = {
     JOB_SET_ALL: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
+        _job_rate_limit_cleanup,
         _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
+        _job_rate_limit_cleanup,
     ],
     JOB_SET_OPPORTUNITY: [_job_opportunity_scanner],
     JOB_SET_TRADER: [_job_auto_trader, _job_daily_report],
