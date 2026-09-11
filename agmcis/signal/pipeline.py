@@ -4,7 +4,7 @@
 Phase 0 稽核最根本的發現是系統有兩條互相矛盾的管線:
 
     管線 A: market_universe(12 檔硬編碼)-> technical_service
-            -> decision_engine -> emoji 字串("🟢 Strong Buy")
+            -> emoji 字串("🟢 Strong Buy")
             用於 Dashboard
 
     管線 B: exchange_universe(成交量前 50)-> strategy.analyze_symbol

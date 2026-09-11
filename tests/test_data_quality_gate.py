@@ -8,7 +8,6 @@ trend="UNKNOWN",而 calculate_scanner_confidence 遇到 None 會給出 50 分的
 import unittest
 from unittest.mock import patch
 
-import decision_engine
 import direction_engine
 import scanner_service
 from agmcis.core.enums import Direction
@@ -97,10 +96,29 @@ class TestBadDataNeverBecomesASignal(unittest.TestCase):
     def test_direction_engine_returns_wait(self):
         self.assertEqual(direction_engine.get_trade_direction(self.BAD), "WAIT")
 
-    def test_decision_engine_returns_no_data(self):
-        self.assertEqual(
-            decision_engine.get_trade_signal(None, "WAIT", self.BAD), "⚪ No Data"
+    def test_position_evaluation_returns_no_data_when_agents_cannot_see(self):
+        """
+        Phase 9:持倉評估改由 Agent 群產生。所有 Agent 棄權(通常就是資料不可用)
+        時必須回 No Data,不能給出一個看起來很正常的建議。
+        原本這條測的是 decision_engine,那個模組是第四套獨立評分,已移除。
+        """
+        import ai_decision_service
+        from agmcis.agents.base import AgentOpinion
+        from agmcis.agents.consensus import Deliberation
+
+        deliberation = Deliberation(
+            symbol="BTC/USDT",
+            opinions=[AgentOpinion(agent=f"a{i}") for i in range(3)],
         )
+
+        with patch.object(ai_decision_service.agent_pipeline, "analyse_symbol",
+                          return_value=(deliberation, None)):
+            result = ai_decision_service._evaluate_position(
+                {"symbol": "BTC/USDT", "signal": "做多"},
+            )
+
+        self.assertEqual(result["trade_signal"], "⚪ No Data")
+        self.assertIsNone(result["confidence"])
 
     def test_pipeline_emits_a_wait_signal_when_data_is_bad(self):
         """資料品質不合格時,管線回傳帶原因的 WAIT Signal,而不是 None 或例外。"""

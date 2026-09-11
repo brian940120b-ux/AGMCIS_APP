@@ -1,172 +1,161 @@
+"""
+已開倉部位的 AI 評估(Dashboard 的 AI Decision Center)。
+
+Phase 9 重寫。舊版是**第三套**獨立的評分:自己一套 score_rsi / score_trend /
+score_macd / score_atr 加權出 confidence,再丟給 decision_engine 產生訊號字串。
+那套權重跟訊號管線的權重不一樣,也跟風控的判斷不一樣 ——
+同一個部位在三個地方會得到三種不同的結論。
+
+現在改成:**跑同一套 Agent 群**,只是帶上部位資訊。
+Dashboard 看到的評估,就是系統內部真正在用的評估。
+
+這一層**不下單、不平倉**。它只呈現意見。
+真正的出場動作要等 Phase 12 的 Execution Engine。
+"""
+import logging
 import time
+
+from agmcis.agents.base import Vote
+from agmcis.core.enums import Direction
+from agmcis.signal import agent_pipeline
 from database_service import get_open_trades
-from market_data import get_price
-from technical_service import get_indicators
-from decision_engine import get_trade_signal
-from logger_service import logger
+from direction import is_long, is_short
 from ranking_engine import rank_decisions
-from direction import is_directional, is_long, is_short, price_change_pct
+
+logger = logging.getLogger("agmcis.ai_decision")
 
 LAST_TOP3_LOG = {"summary": None, "ts": 0}
+TOP3_LOG_INTERVAL_SECONDS = 60
 
-def clamp(v, low=0, high=100):
-    return max(low, min(high, v))
-
-def score_roi(roi):
-    return clamp(50 + roi * 2)
-
-def score_rsi(rsi):
-    if rsi is None:
-        return 50
-    if rsi > 75:
-        return 35
-    if rsi > 70:
-        return 45
-    if 45 <= rsi <= 65:
-        return 75
-    if rsi < 30:
-        return 40
-    return 60
+# 部位管理的訊號詞彙。與進場訊號刻意分開 ——
+# 「要不要開新倉」和「手上這張要不要動」是兩個問題。
+NO_DATA = "⚪ No Data"
+STOPLOSS_WARNING = "🔴 Stoploss Warning"
+REDUCE = "🟠 Reduce Position"
+HOLD_NEUTRAL = "🟡 Hold"
+HOLD_ALIGNED = "🟢 Hold"
 
 
+def _position_direction(position):
+    signal = position.get("signal") or position.get("direction") or ""
+    if is_long(signal):
+        return Direction.LONG
+    if is_short(signal):
+        return Direction.SHORT
+    return Direction.WAIT
 
-def score_atr(atr, price):
-    if atr is None or not price:
-        return 50
 
-    atr_pct = (atr / price) * 100
+def _trade_signal(deliberation, position_direction, exit_opinion):
+    """
+    把 Agent 的意見翻譯成部位管理建議。
 
-    if atr_pct > 5:
-        return 30
-    if atr_pct > 3:
-        return 45
-    if atr_pct > 1.5:
-        return 60
-    return 75
+    優先順序是刻意的:**風險先於機會**。
+    停損快到了這件事,比「共識還是看多」重要。
+    """
+    if exit_opinion is not None and exit_opinion.vote is Vote.WAIT:
+        if exit_opinion.confidence >= 80:
+            return STOPLOSS_WARNING, exit_opinion.reasons
+        return REDUCE, exit_opinion.reasons
 
-def score_macd(macd_hist):
-    if macd_hist is None:
-        return 50
-    if macd_hist > 0:
-        return 80
-    if macd_hist < 0:
-        return 40
-    return 50
+    direction = deliberation.direction
 
-def score_trend(trend):
-    if trend == "BULLISH":
-        return 80
-    if trend == "BEARISH":
-        return 40
-    return 50
+    if direction.is_directional and position_direction.is_directional:
+        if direction is position_direction:
+            return HOLD_ALIGNED, deliberation.reasons
+        # 共識已經轉向,但這一層不平倉 —— 只提示
+        return REDUCE, ["Agent 共識方向與持倉相反"] + list(deliberation.reasons)
 
-def score_risk(distance_sl, distance_tp):
-    risk = 50
+    if deliberation.blocked_reason:
+        return HOLD_NEUTRAL, [deliberation.blocked_reason]
 
-    if distance_sl is not None:
-        if distance_sl < 1:
-            risk -= 25
-        elif distance_sl < 2:
-            risk -= 15
-        elif distance_sl < 4:
-            risk += 5
-        else:
-            risk += 15
+    return HOLD_NEUTRAL, list(deliberation.reasons)
 
-    if distance_tp is not None:
-        if distance_tp < 1:
-            risk -= 10
-        elif distance_tp > 4:
-            risk += 10
 
-    return clamp(risk)
+def _evaluate_position(position):
+    symbol = position.get("symbol")
+
+    deliberation, report = agent_pipeline.analyse_symbol(
+        symbol, position=position,
+    )
+
+    opinions = {o.agent: o for o in deliberation.opinions}
+    exit_opinion = opinions.get("exit")
+
+    position_direction = _position_direction(position)
+
+    # 資料壞掉時不給建議。分不出「市場中性」與「資料壞掉」是 Phase 0 的老問題。
+    errored = [o for o in deliberation.opinions if o.error]
+    all_abstained = all(
+        o.vote is Vote.ABSTAIN for o in deliberation.opinions
+    )
+
+    if all_abstained:
+        return {
+            "symbol": symbol,
+            "action": position_direction.value,
+            "trade_signal": NO_DATA,
+            "confidence": None,
+            "reason": "所有 Agent 棄權(通常是資料不可用),不給建議",
+            "votes": {a: o.vote.value for a, o in opinions.items()},
+            "errors": [f"{o.agent}: {o.error}" for o in errored],
+            "vetoed": bool(report and report.vetoed),
+        }
+
+    trade_signal, reasons = _trade_signal(
+        deliberation, position_direction, exit_opinion,
+    )
+
+    return {
+        "symbol": symbol,
+        "action": position_direction.value,
+        "trade_signal": trade_signal,
+        "confidence": round(deliberation.confidence, 2),
+        "reason": "; ".join(reasons[:3]) if reasons else "無特別意見",
+        "votes": {a: o.vote.value for a, o in opinions.items()},
+        "errors": [f"{o.agent}: {o.error}" for o in errored],
+        "vetoed": bool(report and report.vetoed),
+        "entry_price": position.get("entry_price"),
+        "stop_loss": position.get("stoploss") or position.get("stop_loss"),
+        "take_profit": position.get("takeprofit") or position.get("take_profit"),
+        "leverage": position.get("leverage"),
+    }
+
 
 def get_ai_decisions():
-    positions = get_open_trades()
     results = []
 
-    for p in positions:
-        symbol = p.get("symbol")
-        signal = p.get("signal", "觀察")
-        indicators = get_indicators(symbol)
-
-        entry = float(p.get("entry_price") or 0)
-        current = float(get_price(symbol) or entry or 0)
-        leverage = float(p.get("leverage") or 1)
-
-        stoploss = float(p.get("stoploss") or 0)
-        takeprofit = float(p.get("takeprofit") or 0)
-
-        if entry > 0 and is_directional(signal):
-            roi = round(price_change_pct(signal, entry, current) * leverage * 100, 2)
-        else:
-            roi = 0
-
-        distance_sl = abs((current - stoploss) / current * 100) if current and stoploss else None
-        distance_tp = abs((takeprofit - current) / current * 100) if current and takeprofit else None
-
-        roi_score = score_roi(roi)
-        rsi_score = score_rsi(indicators.get("rsi"))
-        trend_score = score_trend(indicators.get("trend"))
-        macd_score = score_macd(indicators.get("macd_hist"))
-        atr_score = score_atr(indicators.get("atr"), current)
-        risk_score = score_risk(distance_sl, distance_tp)
-
-        confidence = round(
-            roi_score * 0.20 +
-            rsi_score * 0.18 +
-            trend_score * 0.22 +
-            macd_score * 0.15 +
-            risk_score * 0.15 +
-            atr_score * 0.10,
-            2
-        )
-
-        if is_long(signal):
-            action = "LONG"
-        elif is_short(signal):
-            action = "SHORT"
-        else:
-            action = "WATCH"
-
-        if confidence >= 75:
-            reason = "多因子 AI 評估：趨勢與風險條件較佳，可持續觀察。"
-        elif confidence >= 55:
-            reason = "多因子 AI 評估：條件中性，建議維持風控。"
-        else:
-            reason = "多因子 AI 評估：信心偏低，建議降低風險。"
-
-        trade_signal = get_trade_signal(confidence, action, indicators, roi, distance_sl)
-
-        logger.info(f"AI Decision | {symbol} | {trade_signal} | confidence={confidence:.2f} | roi={roi}")
-
-        results.append({
-            "symbol": symbol,
-            "action": action,
-            "trade_signal": trade_signal,
-            "confidence": confidence,
-            "trend_score": round(trend_score, 2),
-            "risk_score": round(risk_score, 2),
-            "momentum_score": round(roi_score, 2),
-            "roi": roi,
-            "distance_to_sl": round(distance_sl, 2) if distance_sl is not None else None,
-            "distance_to_tp": round(distance_tp, 2) if distance_tp is not None else None,
-            "reason": reason,
-            "indicators": indicators
-        })
+    for position in get_open_trades():
+        symbol = position.get("symbol")
+        try:
+            results.append(_evaluate_position(position))
+        except Exception as exc:
+            # 一個部位評估失敗不該讓整個面板空白,但也不能假裝它沒問題。
+            logger.exception("AI 部位評估失敗 | %s", symbol)
+            results.append({
+                "symbol": symbol,
+                "action": "UNKNOWN",
+                "trade_signal": NO_DATA,
+                "confidence": None,
+                "reason": f"評估失敗:{type(exc).__name__}: {exc}",
+                "votes": {},
+                "errors": [str(exc)],
+                "vetoed": False,
+            })
 
     ranked = rank_decisions(results)
+    _log_top3(ranked)
+    return ranked
 
-    top3 = ranked[:3]
-    summary = " | ".join([
-        f"{i+1}. {d.get('symbol')} {d.get('trade_signal')} {d.get('confidence')}%"
-        for i, d in enumerate(top3)
-    ])
+
+def _log_top3(ranked):
+    summary = " | ".join(
+        f"{i + 1}. {d.get('symbol')} {d.get('trade_signal')} {d.get('confidence')}"
+        for i, d in enumerate(ranked[:3])
+    )
 
     now = time.time()
-    if summary != LAST_TOP3_LOG["summary"] or now - LAST_TOP3_LOG["ts"] >= 60:
-        logger.info(f"Top Opportunities | {summary}")
+    if (summary != LAST_TOP3_LOG["summary"]
+            or now - LAST_TOP3_LOG["ts"] >= TOP3_LOG_INTERVAL_SECONDS):
+        logger.info("持倉評估 | %s", summary or "無持倉")
         LAST_TOP3_LOG["summary"] = summary
         LAST_TOP3_LOG["ts"] = now
-
-    return ranked

@@ -1,12 +1,18 @@
 """
 自動交易。
 
-Phase 5 之後的完整鏈路:
+Phase 9 之後的完整鏈路:
 
-    scan_market()            訊號
-        -> TradeIntent       Agent/策略唯一能產出的東西(建構時強制驗證停損)
+    scan_market()            決定要看哪些標的(掃描層)
+        -> Agent 群          十二個 Agent 各自出意見
+        -> Consensus         彙總成 TradeIntent(建構時強制驗證停損)
+        -> Supervisor        Agent 群本身可不可信?可否決,不可製造交易
         -> Risk Engine       要不要開?幾倍槓桿?押多少保證金?
         -> create_paper_trade
+
+**TradeIntent 的產生者只有一個,就是 Agent 共識。**
+掃描層負責的是「看哪些標的」,不是「要不要進場」——
+Phase 6 合併過兩條互相矛盾的訊號管線,不能在這裡又長出第二條。
 
 倉位大小不再是固定的 1000 USDT。現在由
 `權益 × MAX_RISK_PER_TRADE_PCT ÷ 停損距離` 反推 ——
@@ -15,53 +21,39 @@ Phase 5 之後的完整鏈路:
 槓桿也不再由信心分數決定,改由停損距離與波動度決定,
 而且保證強平價永遠比停損遠。
 """
-from agmcis.core.errors import TradingRuleViolation
-from agmcis.core.models import TradeIntent
-from agmcis.config import settings
-from database_service import get_open_trade, get_open_trades
-from direction import LONG, SHORT
+from agmcis.signal import agent_pipeline
+from database_service import get_open_trade
 from logger_service import logger
 from notifier import notify_open_trade
 from paper_trading import create_paper_trade
 from risk_control import assert_can_open, evaluate_intent
 from scanner_service import scan_market
 
-LONG_SIGNALS = {"🟢 Buy", "🟢 Strong Buy"}
-SHORT_SIGNALS = {"🔴 Sell", "🔴 Strong Sell"}
 
-
-def _build_intent(candidate):
+def _agent_intent(symbol, timeframe=None):
     """
-    把掃描結果轉成 TradeIntent。
+    跑 Agent 共識,回傳 (TradeIntent | None, 說明)。
 
-    TradeIntent 在建構時就會驗證停損存在且方向正確,
-    所以不合格的候選在這裡就會被擋下,不會進到風控。
+    Agent 層只產生意圖。它拿不到交易所連線,也決定不了部位大小 ——
+    那是 Risk Engine 的職責(Master Prompt 第十九、三十二節)。
     """
-    signal = candidate.get("trade_signal")
-
-    if signal in SHORT_SIGNALS:
-        direction = SHORT
-    elif signal in LONG_SIGNALS:
-        direction = LONG
-    else:
-        return None, "訊號不是明確的買賣"
+    kwargs = {"timeframe": timeframe} if timeframe else {}
 
     try:
-        intent = TradeIntent(
-            symbol=candidate.get("symbol"),
-            market_type="perpetual",
-            direction=direction,
-            entry=candidate.get("entry_price"),
-            stop_loss=candidate.get("stoploss"),
-            take_profit=candidate.get("takeprofit"),
-            confidence=candidate.get("confidence"),
-            strategy="scanner",
-            reasons=[candidate.get("blocked_reason")] if candidate.get("blocked_reason") else [],
-        )
-    except (TradingRuleViolation, ValueError, TypeError) as exc:
-        return None, str(exc)
+        deliberation, report = agent_pipeline.analyse_symbol(symbol, **kwargs)
+    except Exception as exc:
+        # Agent 層出錯不能讓整個自動交易掛掉,但也不能安靜地跳過。
+        logger.exception("Auto Trader | AGENT_ERROR | %s", symbol)
+        return None, f"Agent 層失敗:{type(exc).__name__}: {exc}"
 
-    return intent, None
+    if report is not None and report.health_warnings:
+        for warning in report.health_warnings:
+            logger.warning("Auto Trader | AGENT_HEALTH | %s | %s", symbol, warning)
+
+    if deliberation.intent is None:
+        return None, deliberation.blocked_reason or "Agent 共識結論是觀望"
+
+    return deliberation.intent, None
 
 
 def run_auto_trader(max_candidates=10):
@@ -84,16 +76,16 @@ def run_auto_trader(max_candidates=10):
         if candidate.get("data_ok") is False:
             continue
 
-        intent, problem = _build_intent(candidate)
-        if intent is None:
-            if problem and "訊號不是" not in problem:
-                logger.info("Auto Trader | SKIP | %s | %s", symbol, problem)
-            continue
-
+        # 已有部位就不必浪費 Agent 與交易所的請求
         if get_open_trade(symbol):
             continue
 
         considered.append(symbol)
+
+        intent, problem = _agent_intent(symbol)
+        if intent is None:
+            logger.info("Auto Trader | NO_INTENT | %s | %s", symbol, problem)
+            continue
 
         # ---------- HARD GATE:風控決定要不要開、開多大、幾倍 ----------
         decision = evaluate_intent(

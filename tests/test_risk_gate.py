@@ -32,6 +32,10 @@ def open_status():
 
 
 def candidate(signal="🟢 Buy", symbol="BTC/USDT"):
+    """
+    掃描層的候選。Phase 9 之後它只決定「要看哪些標的」——
+    要不要進場、停損放哪裡,由 Agent 共識決定。
+    """
     return {
         "symbol": symbol,
         "trade_signal": signal,
@@ -44,6 +48,46 @@ def candidate(signal="🟢 Buy", symbol="BTC/USDT"):
         "data_ok": True,
         "indicators": {"atr": 1.0, "price": 100.0},
     }
+
+
+def deliberation_for(symbol="BTC/USDT", direction="做多", entry=100.0,
+                     stop_loss=97.0, take_profit=106.0, blocked_reason=None):
+    """
+    假的 Agent 共識結果。
+
+    Phase 9 之後 auto_trader 的 TradeIntent 來自 Agent 共識,
+    所以這裡 patch 的接縫是 agent_pipeline,不再是掃描結果的欄位。
+    """
+    from agmcis.agents.consensus import Deliberation
+    from agmcis.core.models import TradeIntent
+    from agmcis.core.enums import Direction
+
+    if blocked_reason is not None:
+        return Deliberation(symbol=symbol, blocked_reason=blocked_reason)
+
+    intent = TradeIntent(
+        symbol=symbol, market_type="perpetual", direction=direction,
+        entry=entry, stop_loss=stop_loss, take_profit=take_profit,
+        confidence=90.0, strategy="multi_agent",
+    )
+    return Deliberation(
+        symbol=symbol, direction=Direction.parse(direction),
+        confidence=90.0, intent=intent,
+    )
+
+
+def agent_returns(*deliberations):
+    """
+    依呼叫順序回傳這些共識結果;用完就重複最後一個。
+    回傳 (deliberation, None) —— 第二個是 SupervisorReport,這裡用不到。
+    """
+    queue = list(deliberations)
+
+    def fake(symbol, **kwargs):
+        result = queue.pop(0) if len(queue) > 1 else queue[0]
+        return result, None
+
+    return fake
 
 
 class TestAssertCanOpen(unittest.TestCase):
@@ -86,12 +130,12 @@ class TestCapLeverage(unittest.TestCase):
 
 class TestAutoTraderRespectsRiskGate(unittest.TestCase):
     """
-    Phase 5 之後 auto_trader 走完整鏈路:
-        scan -> TradeIntent -> Risk Engine(閘門 + 槓桿 + 倉位)-> 開倉
+    Phase 9 之後 auto_trader 走完整鏈路:
+        scan -> Agent 共識 -> TradeIntent -> Risk Engine -> 開倉
 
     倉位不再是固定 1000 USDT,由風控依停損距離反推。
-    這裡 patch 的是新的接縫(evaluate_intent),但要求不變:
-    風控擋下就不開,而且槓桿不得超過上限。
+    Agent 層只產生意圖,風控才決定大小與槓桿 —— 這裡鎖住的要求始終不變:
+    **風控擋下就不開。**
     """
 
     def setUp(self):
@@ -128,6 +172,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[candidate()]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=agent_returns(deliberation_for())), \
              patch.object(auto_trader, "evaluate_intent",
                           side_effect=lambda i, **k: self._decision(i)), \
              patch.object(auto_trader, "create_paper_trade",
@@ -143,6 +189,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[candidate()]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=agent_returns(deliberation_for())), \
              patch.object(auto_trader, "evaluate_intent",
                           side_effect=lambda i, **k: self._decision(i, size=137.5, leverage=4.0)), \
              patch.object(auto_trader, "create_paper_trade",
@@ -167,6 +215,10 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[first, second]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=agent_returns(
+                              deliberation_for(symbol="AAA/USDT"),
+                              deliberation_for(symbol="BBB/USDT"))), \
              patch.object(auto_trader, "evaluate_intent", side_effect=evaluate), \
              patch.object(auto_trader, "create_paper_trade",
                           return_value={"success": True, "message": "ok"}) as create:
@@ -183,6 +235,10 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
              patch.object(auto_trader, "scan_market",
                           return_value=[candidate("🟢 Buy", "AAA/USDT"),
                                         candidate("🟢 Buy", "BBB/USDT")]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=agent_returns(
+                              deliberation_for(symbol="AAA/USDT"),
+                              deliberation_for(symbol="BBB/USDT"))), \
              patch.object(auto_trader, "evaluate_intent",
                           side_effect=lambda i, **k: self._decision(
                               i, approved=False, reason="MAX_DRAWDOWN",
@@ -208,15 +264,21 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
         evaluate.assert_not_called()
         create.assert_not_called()
 
-    def test_candidate_without_stop_loss_never_becomes_an_intent(self):
-        """TradeIntent 建構時就強制停損,所以這種候選根本進不到風控。"""
-        no_sl = candidate()
-        no_sl["stoploss"] = None
+    def test_no_agent_intent_means_no_risk_call_and_no_trade(self):
+        """
+        Agent 共識結論是觀望時,連風控都不必呼叫。
 
+        Phase 9 之前這裡測的是「掃描結果沒有停損就進不到風控」。
+        現在停損由 TradeIntent 在建構時強制(見 tests/test_agents.py),
+        auto_trader 這一層要保證的是:**沒有 intent 就沒有交易。**
+        """
         with patch.object(auto_trader, "assert_can_open",
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
-             patch.object(auto_trader, "scan_market", return_value=[no_sl]), \
+             patch.object(auto_trader, "scan_market", return_value=[candidate()]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=agent_returns(
+                              deliberation_for(blocked_reason="觀望票過半"))), \
              patch.object(auto_trader, "evaluate_intent") as evaluate, \
              patch.object(auto_trader, "create_paper_trade") as create:
             result = auto_trader.run_auto_trader()
@@ -225,19 +287,21 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
         evaluate.assert_not_called()
         create.assert_not_called()
 
-    def test_stop_loss_on_the_wrong_side_is_rejected_at_construction(self):
-        wrong = candidate()
-        wrong["stoploss"] = 103.0      # 做多的停損卻高於進場價
-
+    def test_an_agent_layer_crash_skips_the_symbol_instead_of_trading_blind(self):
+        """Agent 層炸掉時絕不能退回「用掃描結果直接開倉」。"""
         with patch.object(auto_trader, "assert_can_open",
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
-             patch.object(auto_trader, "scan_market", return_value=[wrong]), \
-             patch.object(auto_trader, "evaluate_intent") as evaluate:
+             patch.object(auto_trader, "scan_market", return_value=[candidate()]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=RuntimeError("agent 壞了")), \
+             patch.object(auto_trader, "evaluate_intent") as evaluate, \
+             patch.object(auto_trader, "create_paper_trade") as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
         evaluate.assert_not_called()
+        create.assert_not_called()
 
     def test_short_signal_becomes_short_order(self):
         short = candidate(signal="🔴 Sell")
@@ -248,6 +312,9 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
              patch.object(auto_trader, "scan_market", return_value=[short]), \
+             patch.object(auto_trader.agent_pipeline, "analyse_symbol",
+                          side_effect=agent_returns(deliberation_for(
+                              direction="做空", stop_loss=103.0, take_profit=94.0))), \
              patch.object(auto_trader, "evaluate_intent",
                           side_effect=lambda i, **k: self._decision(i)), \
              patch.object(auto_trader, "create_paper_trade",
