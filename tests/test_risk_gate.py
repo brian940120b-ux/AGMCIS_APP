@@ -76,6 +76,34 @@ def deliberation_for(symbol="BTC/USDT", direction="做多", entry=100.0,
     )
 
 
+def execution_result(ok=True, status="OPENED", fill_price=100.05,
+                     naked=False, reason=None):
+    """
+    假的 Execution Engine 結果。
+
+    Phase 12 之後 auto_trader 不直接呼叫 create_paper_trade,
+    而是走 Execution Engine —— 那一層負責狀態機與停損保護。
+    """
+    from agmcis.execution.engine import ExecutionResult
+
+    return ExecutionResult(
+        ok=ok, status=status, fill_price=fill_price,
+        naked_position_closed=naked, reason=reason,
+    )
+
+
+def fake_execution(*results):
+    """依呼叫順序回傳這些執行結果;用完就重複最後一個。"""
+    from unittest.mock import MagicMock
+
+    queue = list(results) or [execution_result()]
+    engine = MagicMock()
+    engine.execute.side_effect = (
+        lambda *a, **k: queue.pop(0) if len(queue) > 1 else queue[0]
+    )
+    return engine
+
+
 def agent_returns(*deliberations):
     """
     依呼叫順序回傳這些共識結果;用完就重複最後一個。
@@ -159,7 +187,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           return_value=(False, "MAX_DAILY_LOSS",
                                         blocked_status("MAX_DAILY_LOSS"))), \
              patch.object(auto_trader, "scan_market") as scan, \
-             patch.object(auto_trader, "create_paper_trade") as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "BLOCKED_BY_RISK")
@@ -176,15 +205,18 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           side_effect=agent_returns(deliberation_for())), \
              patch.object(auto_trader, "evaluate_intent",
                           side_effect=lambda i, **k: self._decision(i)), \
-             patch.object(auto_trader, "create_paper_trade",
-                          return_value={"success": True, "message": "ok"}) as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "OPENED")
         create.assert_called_once()
 
     def test_position_size_comes_from_risk_engine_not_a_fixed_number(self):
-        """這是 Phase 5 的重點:倉位由風控算,不再是寫死的 1000 USDT。"""
+        """
+        Phase 5 的重點:倉位由風控算,不再是寫死的 1000 USDT。
+        Phase 12 之後執行層收到的是整個 RiskDecision —— 它照著送,不自己算。
+        """
         with patch.object(auto_trader, "assert_can_open",
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "get_open_trade", return_value=None), \
@@ -192,14 +224,16 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
              patch.object(auto_trader.agent_pipeline, "analyse_symbol",
                           side_effect=agent_returns(deliberation_for())), \
              patch.object(auto_trader, "evaluate_intent",
-                          side_effect=lambda i, **k: self._decision(i, size=137.5, leverage=4.0)), \
-             patch.object(auto_trader, "create_paper_trade",
-                          return_value={"success": True, "message": "ok"}) as create:
-            auto_trader.run_auto_trader()
+                          side_effect=lambda i, **k: self._decision(i, size=137.5, leverage=4.0)):
+            engine = fake_execution()
+            with patch.object(auto_trader.execution, "get_engine",
+                              return_value=engine):
+                auto_trader.run_auto_trader()
 
-        kwargs = create.call_args.kwargs
-        self.assertEqual(kwargs["size_usdt"], 137.5)
-        self.assertEqual(kwargs["leverage"], 4.0)
+        sent = engine.execute.call_args.args[0]
+        self.assertEqual(sent.size_usdt, 137.5)
+        self.assertEqual(sent.leverage, 4.0)
+        self.assertTrue(sent.approved)
 
     def test_per_intent_rejection_tries_the_next_candidate(self):
         """單一標的被拒(例如名目太小)不該讓整輪停下來。"""
@@ -220,8 +254,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                               deliberation_for(symbol="AAA/USDT"),
                               deliberation_for(symbol="BBB/USDT"))), \
              patch.object(auto_trader, "evaluate_intent", side_effect=evaluate), \
-             patch.object(auto_trader, "create_paper_trade",
-                          return_value={"success": True, "message": "ok"}) as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "OPENED")
@@ -243,7 +277,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           side_effect=lambda i, **k: self._decision(
                               i, approved=False, reason="MAX_DRAWDOWN",
                               blockers=["MAX_DRAWDOWN"])), \
-             patch.object(auto_trader, "create_paper_trade") as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "BLOCKED_BY_RISK")
@@ -257,7 +292,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           return_value=(True, None, open_status())), \
              patch.object(auto_trader, "scan_market", return_value=[bad]), \
              patch.object(auto_trader, "evaluate_intent") as evaluate, \
-             patch.object(auto_trader, "create_paper_trade") as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
@@ -280,7 +316,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           side_effect=agent_returns(
                               deliberation_for(blocked_reason="觀望票過半"))), \
              patch.object(auto_trader, "evaluate_intent") as evaluate, \
-             patch.object(auto_trader, "create_paper_trade") as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
@@ -296,7 +333,8 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
              patch.object(auto_trader.agent_pipeline, "analyse_symbol",
                           side_effect=RuntimeError("agent 壞了")), \
              patch.object(auto_trader, "evaluate_intent") as evaluate, \
-             patch.object(auto_trader, "create_paper_trade") as create:
+             patch.object(auto_trader.execution, "get_engine",
+                          return_value=fake_execution()) as create:
             result = auto_trader.run_auto_trader()
 
         self.assertEqual(result["status"], "NO_TRADE_SIGNAL")
@@ -316,9 +354,11 @@ class TestAutoTraderRespectsRiskGate(unittest.TestCase):
                           side_effect=agent_returns(deliberation_for(
                               direction="做空", stop_loss=103.0, take_profit=94.0))), \
              patch.object(auto_trader, "evaluate_intent",
-                          side_effect=lambda i, **k: self._decision(i)), \
-             patch.object(auto_trader, "create_paper_trade",
-                          return_value={"success": True, "message": "ok"}) as create:
-            auto_trader.run_auto_trader()
+                          side_effect=lambda i, **k: self._decision(i)):
+            engine = fake_execution()
+            with patch.object(auto_trader.execution, "get_engine",
+                              return_value=engine):
+                auto_trader.run_auto_trader()
 
-        self.assertEqual(create.call_args.kwargs["signal"], "做空")
+        sent = engine.execute.call_args.args[0]
+        self.assertEqual(sent.intent.direction.value, "做空")

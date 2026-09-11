@@ -8,7 +8,8 @@ Phase 9 之後的完整鏈路:
         -> Consensus         彙總成 TradeIntent(建構時強制驗證停損)
         -> Supervisor        Agent 群本身可不可信?可否決,不可製造交易
         -> Risk Engine       要不要開?幾倍槓桿?押多少保證金?
-        -> create_paper_trade
+        -> Trading Rules     交易所收不收這組數字?
+        -> Execution Engine  送單、狀態機、**開倉後必須有停損保護**
 
 **TradeIntent 的產生者只有一個,就是 Agent 共識。**
 掃描層負責的是「看哪些標的」,不是「要不要進場」——
@@ -21,11 +22,11 @@ Phase 6 合併過兩條互相矛盾的訊號管線,不能在這裡又長出第�
 槓桿也不再由信心分數決定,改由停損距離與波動度決定,
 而且保證強平價永遠比停損遠。
 """
+from agmcis.execution import engine as execution
 from agmcis.signal import agent_pipeline
 from database_service import get_open_trade
 from logger_service import logger
 from notifier import notify_open_trade
-from paper_trading import create_paper_trade
 from risk_control import assert_can_open, evaluate_intent
 from scanner_service import scan_market
 
@@ -113,26 +114,33 @@ def run_auto_trader(max_candidates=10):
             )
             continue
 
-        result = create_paper_trade(
-            symbol=symbol,
-            entry_price=intent.entry,
-            signal=intent.direction.value,
-            size_usdt=decision.size_usdt,
-            stoploss=intent.stop_loss,
-            takeprofit=intent.take_profit,
-            leverage=decision.leverage,
-            source="AUTO",
-        )
+        # ---------- Execution Engine:送單 + 狀態機 + 停損保護 ----------
+        result = execution.get_engine().execute(decision)
 
         logger.info(
-            "Auto Trader | OPEN_ATTEMPT | %s | %s | size=%.2f lev=%gx 風險=%.2f | %s",
+            "Auto Trader | EXECUTE | %s | %s | size=%.2f lev=%gx 風險=%.2f | %s | %s",
             symbol, intent.direction.value, decision.size_usdt,
-            decision.leverage, decision.risk_usdt or 0, result.get("message"),
+            decision.leverage, decision.risk_usdt or 0,
+            result.status, result.reason or "",
         )
 
-        if result.get("success"):
+        if result.naked_position_closed:
+            # 開了倉但沒有停損保護,已經被緊急平掉。
+            # 這不是「換下一個候選」的小事 —— 這一輪直接停,讓人去看為什麼。
+            logger.critical(
+                "Auto Trader | NAKED_POSITION | %s | 已緊急平倉,本輪中止", symbol,
+            )
+            return {
+                "status": "NAKED_POSITION_CLOSED",
+                "symbol": symbol,
+                "reason": result.reason,
+                "execution": result.to_dict(),
+            }
+
+        if result.ok:
             notify_open_trade(
-                symbol, intent.direction.value, intent.entry,
+                symbol, intent.direction.value,
+                result.fill_price or intent.entry,
                 intent.stop_loss, intent.take_profit,
                 leverage=decision.leverage,
                 confidence=intent.confidence,
@@ -142,10 +150,10 @@ def run_auto_trader(max_candidates=10):
                 "status": "OPENED",
                 "symbol": symbol,
                 "decision": decision.to_dict(),
-                "result": result,
+                "execution": result.to_dict(),
             }
 
-        # 開倉被拒(停損無效、已有持倉等)不算致命,換下一個候選
+        # 送單被拒(規則不符、已有持倉等)不算致命,換下一個候選
         continue
 
     logger.info("Auto Trader | NO_TRADE_SIGNAL | 評估過 %d 檔", len(considered))

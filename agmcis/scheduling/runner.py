@@ -162,6 +162,26 @@ def _job_trailing_stop():
     )
 
 
+def _job_exit_manager():
+    from agmcis.execution.exit_manager import run_exit_manager
+    return Job(
+        name="exit_manager",
+        run=run_exit_manager,
+        interval_seconds=settings.SCHEDULER_EXIT_MANAGER_INTERVAL,
+        tags=["exit"],
+    )
+
+
+def _job_naked_position_sweep():
+    from agmcis.execution.exit_manager import run_naked_position_sweep
+    return Job(
+        name="naked_position_sweep",
+        run=run_naked_position_sweep,
+        interval_seconds=settings.SCHEDULER_NAKED_SWEEP_INTERVAL,
+        tags=["risk"],
+    )
+
+
 def _job_risk_alert():
     from risk_alert import check_risk_alerts
     return Job(
@@ -207,10 +227,14 @@ def _job_daily_report():
 # 在 import agmcis.scheduling 時就載入會讓單元測試無法在離線環境跑。
 JOB_SETS = {
     JOB_SET_ALL: [
-        _job_position_monitor, _job_trailing_stop, _job_risk_alert,
+        _job_position_monitor, _job_trailing_stop, _job_exit_manager,
+        _job_naked_position_sweep, _job_risk_alert,
         _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
     ],
-    JOB_SET_POSITION: [_job_position_monitor, _job_trailing_stop, _job_risk_alert],
+    JOB_SET_POSITION: [
+        _job_position_monitor, _job_trailing_stop, _job_exit_manager,
+        _job_naked_position_sweep, _job_risk_alert,
+    ],
     JOB_SET_OPPORTUNITY: [_job_opportunity_scanner],
     JOB_SET_TRADER: [_job_auto_trader, _job_daily_report],
 }
