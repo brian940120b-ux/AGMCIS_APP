@@ -56,8 +56,10 @@ def parse_args():
     )
     parser.add_argument("--timeframe", default="1h")
     parser.add_argument(
-        "--candles", type=int, default=1500,
-        help="要抓幾根 K 棒。太少會讓 Walk Forward 切不出視窗。",
+        "--candles", type=int, default=5000,
+        help="要抓幾根 K 棒。超過 1200 會自動分頁抓取。"
+             "**樣本數是現在擋住驗證的真正原因** —— 1h 的 1500 根只有 62 天,"
+             "樣本外交易筆數湊不到 30 筆門檻。",
     )
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument(
@@ -110,7 +112,8 @@ def main():
     print(f"K 棒數   : {args.candles}")
     print(f"隨機種子 : {args.seed if args.seed is not None else '(未固定)'}")
     print()
-    print("這會花一段時間 —— 每個標的都要抓 K 棒,每個參數組合都要重跑回測。")
+    print("這會花一段時間 —— 每個標的都要抓 K 棒(超過 1200 根會分頁),")
+    print("每個參數組合都要重跑回測。K 棒會快取到 data/history/,第二次會快很多。")
     print()
 
     from strategy_optimizer import SURVIVORSHIP_WARNING, get_strategy_optimizer

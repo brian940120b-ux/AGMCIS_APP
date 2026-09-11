@@ -64,14 +64,31 @@ def add_indicators(df):
     return df
 
 
-def load_data(symbol, timeframe="1h", limit=1500):
+# 超過這個數量就走分頁抓取。單次請求給不到那麼多。
+PAGINATION_THRESHOLD = 1200
+
+
+def load_data(symbol, timeframe="1h", limit=1500, paginate=None):
     """
     取得帶指標的 K 棒。
 
     資料來源是 **BingX**,不是 Binance。
     舊版用 ccxt.binance() 抓資料回測,但實際下單在 BingX ——
     價格、流動性、資金費率都不一樣,回測結果對不上真實成交環境。
+
+    limit 超過單次請求上限時自動改走分頁抓取(agmcis/data/history.py)。
+    樣本數是現在擋住驗證的真正原因,所以這條路徑很重要。
+
+    ⚠️ 分頁抓來的資料**可能有缺口**,而且缺口不會被補值 ——
+    補值會製造出一段「什麼都沒發生」的假歷史。缺口會被記錄成警告。
     """
+    should_paginate = (
+        paginate if paginate is not None else limit > PAGINATION_THRESHOLD
+    )
+
+    if should_paginate:
+        return _load_paginated(symbol, timeframe, limit)
+
     df, report = market_data.get_ohlcv_checked(
         symbol, timeframe=timeframe, limit=limit, min_candles=WARMUP_BARS + 20,
     )
@@ -80,6 +97,30 @@ def load_data(symbol, timeframe="1h", limit=1500):
         raise ValueError(f"{symbol} {timeframe} 資料品質不合格,不回測:{report.summary}")
 
     return add_indicators(df)
+
+
+def _load_paginated(symbol, timeframe, limit):
+    from agmcis.data import history
+
+    result = history.fetch(symbol, timeframe=timeframe, total=limit)
+
+    if result.count < WARMUP_BARS + 20:
+        raise ValueError(
+            f"{symbol} {timeframe} 只抓到 {result.count} 根,"
+            f"不足以暖機({WARMUP_BARS} 根)"
+        )
+
+    for line in result.summary_lines():
+        logger.info("歷史資料 | %s", line)
+
+    if result.has_gaps:
+        logger.warning(
+            "歷史資料 | %s %s | %s 個缺口,回測會把缺口兩端當成連續的兩根 —— "
+            "那個價格跳動從來沒有發生過",
+            symbol, timeframe, len(result.gaps),
+        )
+
+    return add_indicators(history.to_frame(result))
 
 
 def _row_args(row):

@@ -52,3 +52,8 @@ live_gate_audit.log
 # 快照與紀錄是「這台機器上的設定怎麼變的」,不是專案內容。
 config_snapshot.json
 config_audit.log
+
+# 歷史 K 棒快取
+# 可重新抓取的資料,而且量很大。
+data/history/
+data/strategy_lab_report.json
