@@ -6,6 +6,9 @@ CacheService 與 market_data.py 整合測試
   2. TTL 過期後會重新抓
   3. API 短暫失敗時,若有舊快取,寧可回傳舊值也不整個掛掉(對交易系統是關鍵行為)
   4. market_data.get_market_snapshot 在資金費率/持倉量任一項失敗時,仍回傳其餘欄位而不整體失敗
+
+注意:market_data.py 自 Phase 2 起是 agmcis/data/market_data.py 的 re-export shim,
+所以要 patch 的是實作模組,patch shim 不會生效。
 """
 import sys
 import os
@@ -68,20 +71,39 @@ class TestCacheService(unittest.TestCase):
 class TestMarketDataSnapshot(unittest.TestCase):
 
     def test_snapshot_survives_partial_failure(self):
-        import market_data
+        from agmcis.data import market_data
 
         with patch.object(market_data, "get_ticker", return_value={
             "price": 65000, "change_pct_24h": 1.2, "high_24h": 66000,
-            "low_24h": 64000, "volume_24h": 1000, "source_exchange": "okx",
+            "low_24h": 64000, "volume_24h": 1000,
         }), \
              patch.object(market_data, "get_funding_rate", return_value=None), \
-             patch.object(market_data, "get_open_interest", return_value=None):
+             patch.object(market_data, "get_open_interest", return_value=None), \
+             patch.object(market_data, "get_order_book", return_value=None):
 
             snap = market_data.get_market_snapshot("BTC/USDT")
 
             self.assertEqual(snap["price"], 65000)
             self.assertIsNone(snap["funding_rate"])
             self.assertIsNone(snap["open_interest"])
+
+    def test_snapshot_survives_unexpected_exception(self):
+        """adapter 回傳非預期結構時也不能讓整個快照掛掉,但必須留下記錄。"""
+        from agmcis.data import market_data
+
+        with patch.object(market_data, "get_ticker", return_value={"price": 65000}), \
+             patch.object(market_data, "get_funding_rate", side_effect=AttributeError("boom")), \
+             patch.object(market_data, "get_open_interest", side_effect=RuntimeError("boom")), \
+             patch.object(market_data, "get_order_book", side_effect=KeyError("boom")), \
+             patch.object(market_data, "logger") as log:
+
+            snap = market_data.get_market_snapshot("BTC/USDT")
+
+            self.assertEqual(snap["price"], 65000)
+            self.assertIsNone(snap["funding_rate"])
+            self.assertIsNone(snap["open_interest"])
+            self.assertIsNone(snap["spread_pct"])
+            self.assertEqual(log.warning.call_count, 3)
 
 
 if __name__ == "__main__":

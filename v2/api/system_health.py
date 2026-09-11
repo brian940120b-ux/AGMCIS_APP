@@ -15,6 +15,5 @@ def system_health():
     return {
         "api": "active",
         "telegram": "active" if BOT_TOKEN and CHAT_ID else "missing",
-        "okx": "active" if exchanges.get("okx", {}).get("success") else "error",
         "bingx": "active" if exchanges.get("bingx", {}).get("success") else "error"
     }

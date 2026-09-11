@@ -426,7 +426,6 @@ async function loadSystemHealth(){
     el.innerHTML =
       badge("API", d.api) +
       badge("Telegram", d.telegram) +
-      badge("OKX", d.okx) +
       badge("BingX", d.bingx);
 
   }catch(e){

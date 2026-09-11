@@ -9,8 +9,11 @@ if ROOT not in sys.path:
 
 from portfolio_manager import get_portfolio_summary
 from scanner_service import scan_market
-from config import PAPER_START_BALANCE
 from database_service import get_closed_trades
+
+# 用完整套件路徑,不要寫 `from config import ...` ——
+# v3/config.py 與根目錄 config.py 同名,那樣寫誰贏取決於 sys.path 順序。
+from agmcis.config.settings import PAPER_START_BALANCE
 
 START_BALANCE = float(PAPER_START_BALANCE)
 

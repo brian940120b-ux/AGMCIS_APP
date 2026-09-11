@@ -27,10 +27,9 @@ class ExchangeNotAvailable(NetworkError):
 
 
 class _DummyExchangeClass:
-    """僅供 getattr(ccxt, 'okx') 這類預設 factory 呼叫時不會炸掉,測試中通常會用自訂 factory 取代。"""
+    """僅供 getattr(ccxt, 'bingx') 這類預設 factory 呼叫時不會炸掉,測試中通常會用自訂 factory 取代。"""
     def __init__(self, *args, **kwargs):
         pass
 
 
-okx = _DummyExchangeClass
 bingx = _DummyExchangeClass

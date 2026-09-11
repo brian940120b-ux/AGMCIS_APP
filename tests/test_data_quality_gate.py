@@ -12,42 +12,75 @@ import decision_engine
 import direction_engine
 import scanner_service
 import technical_service
+from agmcis.data import quality
 
 
 class TestIndicatorFailuresAreVisible(unittest.TestCase):
+    """
+    Phase 2 起,K 棒品質在**算指標之前**就被檢查(get_ohlcv_checked),
+    所以這裡 patch 的是那道 gate。行為要求不變:失敗必須被記錄,
+    而且回傳 data_ok=False,絕不悄悄變成中性訊號。
+    """
 
-    def test_ohlcv_failure_marks_data_not_ok(self):
+    def _report(self, code, detail):
+        report = quality.QualityReport(symbol="BTC/USDT", timeframe="1h")
+        report.add(code, quality.SEVERITY_ERROR, detail)
+        return report
+
+    def test_fetch_failure_marks_data_not_ok(self):
+        report = self._report("FETCH_FAILED", "api down")
+
         with patch.object(technical_service, "get_price", return_value=100.0), \
-             patch.object(technical_service, "get_ohlcv", side_effect=RuntimeError("api down")), \
+             patch.object(technical_service, "get_ohlcv_checked", return_value=(None, report)), \
              patch.object(technical_service, "logger") as log:
             result = technical_service.get_indicators("BTC/USDT")
 
         self.assertFalse(result["data_ok"])
-        self.assertIn("ohlcv_fetch_failed", result["data_error"])
-        self.assertTrue(log.error.called, "失敗必須被記錄,不能靜默")
+        self.assertIn("FETCH_FAILED", result["data_error"])
+        self.assertTrue(log.warning.called, "失敗必須被記錄,不能靜默")
 
-    def test_none_ohlcv_marks_data_not_ok(self):
+    def test_insufficient_candles_marks_data_not_ok(self):
+        report = self._report("INSUFFICIENT_CANDLES", "只有 10 根,需要至少 60 根")
+
         with patch.object(technical_service, "get_price", return_value=100.0), \
-             patch.object(technical_service, "get_ohlcv", return_value=None), \
+             patch.object(technical_service, "get_ohlcv_checked", return_value=(None, report)), \
              patch.object(technical_service, "logger"):
             result = technical_service.get_indicators("BTC/USDT")
 
         self.assertFalse(result["data_ok"])
-        self.assertIn("insufficient_candles", result["data_error"])
+        self.assertIn("INSUFFICIENT_CANDLES", result["data_error"])
 
-    def test_insufficient_candles_marks_data_not_ok(self):
-        import pandas as pd
-        short_df = pd.DataFrame(
-            {"open": [1] * 10, "high": [1] * 10, "low": [1] * 10,
-             "close": [1] * 10, "volume": [1] * 10}
-        )
+    def test_stale_data_marks_data_not_ok(self):
+        report = self._report("STALE_DATA", "最後一根 K 棒已經是 240 分鐘前")
+
         with patch.object(technical_service, "get_price", return_value=100.0), \
-             patch.object(technical_service, "get_ohlcv", return_value=short_df), \
+             patch.object(technical_service, "get_ohlcv_checked", return_value=(None, report)), \
+             patch.object(technical_service, "logger"):
+            result = technical_service.get_indicators("BTC/USDT")
+
+        self.assertFalse(result["data_ok"])
+        self.assertIn("STALE_DATA", result["data_error"])
+        self.assertTrue(result["data_issues"])
+
+    def test_indicator_calculation_failure_is_logged(self):
+        """K 棒過了品質檢查,但指標算出 NaN 時仍必須被擋下。"""
+        import pandas as pd
+
+        flat = pd.DataFrame({
+            "timestamp": range(150), "open": [1.0] * 150, "high": [1.0] * 150,
+            "low": [1.0] * 150, "close": [1.0] * 150, "volume": [1.0] * 150,
+        })
+        report = quality.QualityReport(symbol="BTC/USDT", timeframe="1h")
+
+        with patch.object(technical_service, "get_price", return_value=1.0), \
+             patch.object(technical_service, "get_ohlcv_checked", return_value=(flat, report)), \
+             patch.object(technical_service, "RSIIndicator", side_effect=RuntimeError("boom")), \
              patch.object(technical_service, "logger") as log:
             result = technical_service.get_indicators("BTC/USDT")
 
         self.assertFalse(result["data_ok"])
-        self.assertTrue(log.warning.called)
+        self.assertIn("indicator_calc_failed", result["data_error"])
+        self.assertTrue(log.exception.called)
 
 
 class TestBadDataNeverBecomesASignal(unittest.TestCase):

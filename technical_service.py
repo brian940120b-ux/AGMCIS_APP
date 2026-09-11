@@ -6,22 +6,25 @@ Phase 0.5 的修正:原本整段 try/except 是 `except Exception: pass`,
 下游評分函式遇到 None 會給出 confidence = 50 的「中性」分數,
 系統因此無法區分「市場中性」與「資料壞掉」。
 
-現在:
-  1. 失敗會被記錄(含 symbol / timeframe / 例外內容)。
-  2. 回傳值帶上 data_ok 與 data_error,讓訊號層可以據此回 NO TRADE。
-  3. K 棒數量不足以算出指標時也視為 data_ok=False,而不是硬算出無意義的數字。
+Phase 2 再往前一步:在**算指標之前**先檢查原始 K 棒本身是否可信。
+get_ohlcv_checked() 會檢查缺 K 棒、重複時間戳、OHLC 關係錯誤、離群值、
+資料過期與成交量異常 —— 任何一項是 ERROR 就直接 data_ok=False,
+連指標都不算,更不會產生訊號。
+
+回傳值帶上 data_ok / data_error / data_issues,讓訊號層據此回 NO TRADE。
 """
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import AverageTrueRange
 
+from agmcis.data.market_data import get_ohlcv_checked, get_price
 from logger_service import logger
-from market_data import get_ohlcv, get_price
 
 MIN_CANDLES = 60  # EMA60 需要的最小長度
+CANDLE_LIMIT = 150
 
 
-def _empty(symbol, price, reason):
+def _empty(symbol, price, reason, issues=None):
     return {
         "symbol": symbol,
         "price": price,
@@ -36,25 +39,25 @@ def _empty(symbol, price, reason):
         "signal": "HOLD",
         "data_ok": False,
         "data_error": reason,
+        "data_issues": issues or [],
     }
 
 
 def get_indicators(symbol, timeframe="1h"):
     price = get_price(symbol)
 
-    try:
-        df = get_ohlcv(symbol, timeframe, 100)
-    except Exception as exc:
-        logger.error("get_indicators | OHLCV 取得失敗 | %s %s | %s", symbol, timeframe, exc)
-        return _empty(symbol, price, f"ohlcv_fetch_failed: {exc}")
+    # 資料品質 gate:K 棒本身不可信就不算指標,更不產生訊號。
+    df, report = get_ohlcv_checked(
+        symbol, timeframe, limit=CANDLE_LIMIT, min_candles=MIN_CANDLES,
+    )
 
-    if df is None or len(df) < MIN_CANDLES:
-        have = 0 if df is None else len(df)
+    if df is None:
+        errors = [str(issue) for issue in report.errors]
         logger.warning(
-            "get_indicators | K 棒不足 | %s %s | 需要 %d 根,只有 %d 根",
-            symbol, timeframe, MIN_CANDLES, have,
+            "get_indicators | 資料品質不合格 | %s %s | %s",
+            symbol, timeframe, report.summary,
         )
-        return _empty(symbol, price, f"insufficient_candles: {have}/{MIN_CANDLES}")
+        return _empty(symbol, price, f"data_quality: {report.summary}", errors)
 
     try:
         close = df["close"]
@@ -105,4 +108,5 @@ def get_indicators(symbol, timeframe="1h"):
         "signal": "HOLD",
         "data_ok": True,
         "data_error": None,
+        "data_issues": [str(issue) for issue in report.warnings],
     }
