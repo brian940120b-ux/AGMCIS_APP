@@ -275,8 +275,9 @@ class TestSchemaAndMapperStayInSync(unittest.TestCase):
 
         mapped = database_service._row_to_trade(row)
 
-        # 索引用到最後一欄,代表沒有欄位被漏讀
-        self.assertEqual(mapped["cost_basis"], len(columns) - 1)
+        # 最後一欄的索引有出現在輸出裡,代表沒有欄位被漏讀。
+        # 不綁定特定欄位名稱 —— 之後再加欄位時這個測試仍然有效。
+        self.assertIn(len(columns) - 1, mapped.values())
 
     def test_liquidation_price_is_selected(self):
         """position_monitor 沒有這個欄位就判斷不出強平。"""

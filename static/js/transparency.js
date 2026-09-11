@@ -191,6 +191,55 @@ async function loadCosts() {
         </table>${legacy}`);
 }
 
+/* ---------------- 自我檢討 ---------------- */
+
+const VERDICT_CLASS = {
+    HEALTHY: "alert-ok",
+    FRAGILE: "alert-warning",
+    LOSING: "alert-critical",
+    NOT_ENOUGH_DATA: "alert-warning",
+};
+
+async function loadSelfReview() {
+    const data = await load("/api/self_review");
+    if (data.error) throw new Error(data.error);
+
+    const verdict = data.verdict || "NOT_ENOUGH_DATA";
+    const head = `<div class="alert ${VERDICT_CLASS[verdict] || "alert-warning"}">
+        <b>${esc(verdict)}</b> — ${esc(data.headline)}</div>`;
+
+    const findings = (data.findings || []).length
+        ? `<p><b>發現</b></p><ul>${data.findings
+            .map(f => `<li>${esc(f)}</li>`).join("")}</ul>`
+        : "";
+
+    /* 「答不出來的問題」跟「發現」一樣重要:看報告的人需要知道
+       哪些結論還沒有依據,否則他會把沉默當成沒問題。 */
+    const questions = (data.questions_we_cannot_answer || []).length
+        ? `<p><b>目前答不出來的問題</b></p><ul>${data.questions_we_cannot_answer
+            .map(q => `<li class="muted">${esc(q)}</li>`).join("")}</ul>`
+        : "";
+
+    const agents = (data.agents && data.agents.agents) || [];
+    const agentRows = agents.map(agent => `<tr>
+        <td class="nowrap">${esc(agent.agent)}</td>
+        <td class="nowrap">${esc(agent.verdict)}</td>
+        <td>${num(agent.edge, 4)}</td>
+        <td>${agent.edge_sigmas === null || agent.edge_sigmas === undefined
+            ? "-" : num(agent.edge_sigmas, 1) + " σ"}</td>
+        <td>${esc(agent.agreed_trades)} / ${esc(agent.disagreed_trades)}</td>
+        <td class="muted">${esc((agent.notes || [])[0] || "")}</td>
+    </tr>`).join("");
+
+    const agentTable = agentRows
+        ? `<p><b>Agent 貢獻度</b></p>
+           <table class="tp"><tr><th>Agent</th><th>判定</th><th>優勢</th>
+           <th>標準誤</th><th>同意/反對筆數</th><th>備註</th></tr>${agentRows}</table>`
+        : "";
+
+    render("self_review", head + findings + questions + agentTable);
+}
+
 /* ---------------- 校準 ---------------- */
 
 async function loadCalibration() {
@@ -223,6 +272,7 @@ const SECTIONS = [
     ["orders", loadOrders],
     ["reconciliation", loadReconciliation],
     ["costs", loadCosts],
+    ["self_review", loadSelfReview],
     ["calibration", loadCalibration],
 ];
 

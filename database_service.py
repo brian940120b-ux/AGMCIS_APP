@@ -15,6 +15,7 @@ Phase 0.5 的三個關鍵修正:
 import logging
 
 import psycopg2
+from psycopg2.extras import Json
 
 from db import get_connection, transaction
 from direction import price_change_pct, is_directional, is_long
@@ -48,7 +49,11 @@ TRADE_COLUMNS = """
     funding_usdt,
     gross_pnl_usdt,
     requested_entry_price,
-    cost_basis
+    cost_basis,
+    agent_votes,
+    market_regime,
+    strategy,
+    confidence
 """
 
 # ⚠️ 這份欄位清單與 _row_to_trade() 的索引是綁死的。
@@ -93,6 +98,11 @@ def _row_to_trade(row):
         "gross_pnl_usdt": _f(row[22]),
         "requested_entry_price": _f(row[23]),
         "cost_basis": row[24],
+        # Phase 15 的歸因欄位。舊資料是 None,分析時要排除而不是補預設值。
+        "agent_votes": row[25],
+        "market_regime": row[26],
+        "strategy": row[27],
+        "confidence": _f(row[28]),
     }
 
 
@@ -285,7 +295,9 @@ def get_consecutive_losses():
 def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None,
                  leverage=DEFAULT_LEVERAGE, position_value=None, source="MANUAL",
                  requested_entry_price=None, entry_fee=None,
-                 liquidation_price=None, cost_basis=None):
+                 liquidation_price=None, cost_basis=None,
+                 agent_votes=None, market_regime=None, strategy=None,
+                 confidence=None):
     """
     建立 OPEN 倉位。若該 symbol 已有 OPEN 倉位,資料庫的 unique index 會擋下來,
     這裡轉成 DuplicateOpenTradeError 讓呼叫端明確處理,而不是靜默寫入第二筆。
@@ -304,15 +316,18 @@ def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprof
                 INSERT INTO trades (
                     symbol, signal, entry_price, size_usdt, status,
                     stoploss, takeprofit, leverage, position_value, source, opened_at,
-                    requested_entry_price, entry_fee, liquidation_price, cost_basis
+                    requested_entry_price, entry_fee, liquidation_price, cost_basis,
+                    agent_votes, market_regime, strategy, confidence
                 )
                 VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, %s, CURRENT_TIMESTAMP,
-                        %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
                 """,
                 (symbol, signal, entry_price, size_usdt, stoploss, takeprofit,
                  leverage, position_value, source,
-                 requested_entry_price, entry_fee, liquidation_price, cost_basis),
+                 requested_entry_price, entry_fee, liquidation_price, cost_basis,
+                 Json(agent_votes) if agent_votes else None,
+                 market_regime, strategy, confidence),
             )
             return cur.fetchone()[0]
     except psycopg2.errors.UniqueViolation as exc:

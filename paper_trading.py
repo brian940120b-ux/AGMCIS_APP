@@ -78,7 +78,17 @@ def create_paper_trade(
     leverage=1,
     position_value=None,
     source="MANUAL",
+    agent_votes=None,
+    market_regime=None,
+    strategy=None,
+    confidence=None,
 ):
+    """
+    agent_votes / market_regime / strategy / confidence 是 Phase 15 的歸因欄位。
+
+    **必須在開倉當下記下來。** Agent 的投票取決於當下的指標,而指標會隨時間變 ——
+    事後推不回來,那筆交易的歸因就永遠遺失了。
+    """
     if not is_directional(signal):
         return _fail(f"{symbol} 方向無法辨識 ({signal!r}),拒絕開倉")
 
@@ -168,6 +178,10 @@ def create_paper_trade(
             entry_fee=entry_fee,
             liquidation_price=liquidation_price,
             cost_basis="WITH_COSTS",
+            agent_votes=agent_votes,
+            market_regime=market_regime,
+            strategy=strategy,
+            confidence=confidence,
         )
     except DuplicateOpenTradeError:
         return _fail(f"{symbol} 已有持倉,不重複開倉")

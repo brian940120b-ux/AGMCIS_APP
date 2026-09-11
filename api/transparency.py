@@ -207,6 +207,26 @@ def _calibration():
     return _safe("calibration", run, {"calibrated": False, "symbols": {}})
 
 
+@router.get("/api/self_review")
+def api_self_review():
+    return _self_review()
+
+
+def _self_review():
+    """
+    自我檢討:哪些東西其實沒有貢獻。
+
+    這份報告的設計目標是**能說出「我不知道」和「這裡在虧錢」**。
+    一份只會說好消息的檢討報告比沒有檢討報告更糟。
+    """
+    def run():
+        from agmcis.review.self_review import run_self_review
+
+        return run_self_review()
+
+    return _safe("self_review", run, {"verdict": "NOT_ENOUGH_DATA", "findings": []})
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()
@@ -244,13 +264,25 @@ def _summary():
             "message": f"對帳發現 {critical} 項需要立刻處理的差異",
         })
 
+    review = _self_review()
+    if review.get("verdict") == "LOSING":
+        alerts.append({
+            "level": "critical",
+            "message": f"自我檢討判定 LOSING:{review.get('headline')}",
+        })
+    elif review.get("verdict") == "FRAGILE":
+        alerts.append({
+            "level": "warning",
+            "message": f"自我檢討判定 FRAGILE:{review.get('headline')}",
+        })
+
     if not calibration.get("calibrated"):
         alerts.append({
             "level": "warning",
             "message": "合約規格尚未校準,強平價與成本都是估計值",
         })
 
-    for source in (orders, calibration, reconciliation):
+    for source in (orders, calibration, reconciliation, review):
         if source.get("error"):
             alerts.append({"level": "critical", "message": source["error"]})
 
@@ -261,4 +293,5 @@ def _summary():
         "unresolved_count": orders.get("unresolved_count", 0),
         "reconciliation_critical": critical,
         "calibrated": bool(calibration.get("calibrated")),
+        "self_review_verdict": review.get("verdict"),
     }

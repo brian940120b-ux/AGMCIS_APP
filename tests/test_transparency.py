@@ -125,11 +125,14 @@ class TestOrdersEndpoint(unittest.TestCase):
 
 class TestSummaryOnlyReportsWhatNeedsAttention(unittest.TestCase):
 
-    def _summary(self, orders, calibration, reconciliation):
+    def _summary(self, orders, calibration, reconciliation, review=None):
+        review = review if review is not None else {"verdict": "HEALTHY"}
+
         with patch.object(transparency, "_orders", return_value=orders), \
              patch.object(transparency, "_calibration", return_value=calibration), \
              patch.object(transparency, "_reconciliation",
-                          return_value=reconciliation):
+                          return_value=reconciliation), \
+             patch.object(transparency, "_self_review", return_value=review):
             return transparency._summary()
 
     def test_a_healthy_system_produces_no_alerts(self):
@@ -186,6 +189,42 @@ class TestSummaryOnlyReportsWhatNeedsAttention(unittest.TestCase):
         )
 
         self.assertTrue(any("讀不到訂單" in a["message"] for a in result["alerts"]))
+
+    def test_a_losing_self_review_is_critical(self):
+        """期望值為負時不該只是靜靜地列在報告裡。"""
+        result = self._summary(
+            {"naked_count": 0, "unresolved_count": 0},
+            {"calibrated": True},
+            {"critical_count": 0},
+            review={"verdict": "LOSING", "headline": "期望值 -1.2 USDT/筆"},
+        )
+
+        self.assertEqual(result["alerts"][0]["level"], "critical")
+        self.assertIn("LOSING", result["alerts"][0]["message"])
+
+    def test_a_fragile_self_review_is_a_warning(self):
+        """績效依賴少數幾筆極端獲利,那不是優勢 —— 但也還不是虧損。"""
+        result = self._summary(
+            {"naked_count": 0, "unresolved_count": 0},
+            {"calibrated": True},
+            {"critical_count": 0},
+            review={"verdict": "FRAGILE", "headline": "扣掉最好的三筆就變負"},
+        )
+
+        self.assertEqual(result["alerts"][0]["level"], "warning")
+
+    def test_not_enough_data_is_not_an_alert(self):
+        """
+        樣本不夠是常態,不是異常。把它做成警示會讓真正的警示被淹沒。
+        """
+        result = self._summary(
+            {"naked_count": 0, "unresolved_count": 0},
+            {"calibrated": True},
+            {"critical_count": 0},
+            review={"verdict": "NOT_ENOUGH_DATA", "headline": "只有 3 筆"},
+        )
+
+        self.assertEqual(result["alerts"], [])
 
     def test_reconciliation_criticals_are_surfaced(self):
         result = self._summary(

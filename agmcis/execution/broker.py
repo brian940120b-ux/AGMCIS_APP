@@ -99,6 +99,11 @@ class PaperBroker(Broker):
             takeprofit=intent.take_profit,
             leverage=leverage,
             source="EXEC",
+            # 歸因資料只有這一刻拿得到 —— 事後推不回來
+            agent_votes=dict(intent.agent_votes) if intent.agent_votes else None,
+            market_regime=intent.market_regime,
+            strategy=intent.strategy,
+            confidence=intent.confidence,
         )
 
         if not result.get("success"):
