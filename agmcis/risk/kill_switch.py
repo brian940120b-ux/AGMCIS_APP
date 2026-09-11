@@ -238,13 +238,51 @@ class KillSwitch:
         return result
 
 
+def build_wired_kill_switch(stop_file=None, audit_file=None):
+    """
+    接上真正的執行能力(Phase 16)。
+
+    Phase 5 建了 kill switch 的骨架,但 `order_canceller` 與 `position_closer`
+    一直是 None —— `panic()` 會記錄「未接上平倉能力,部位沒有被平掉」然後結束。
+    一個按下去不會平倉的緊急按鈕,比沒有按鈕更危險:你會以為自己按過了。
+
+    平倉走 Execution Engine,理由跟 Phase 12 一樣:
+    不要在系統裡長出第二條下單/平倉路徑。
+
+    撤單在模擬盤沒有意義(模擬盤沒有掛在市場上的單),
+    所以 `order_canceller` 仍然是 None,而 `status()` 會據實回報
+    `can_cancel_orders = False`。假裝有這個能力比沒有更糟。
+    """
+    from agmcis.execution.engine import get_engine
+
+    def close_position(position):
+        symbol = position.get("symbol") if isinstance(position, dict) else position
+        result = get_engine().close(symbol, reason="Kill Switch 緊急平倉")
+
+        if not result.ok:
+            raise RuntimeError(result.reason or f"{symbol} 平倉失敗")
+
+        return result
+
+    def open_positions():
+        from database_service import get_open_trades
+        return get_open_trades()
+
+    return KillSwitch(
+        stop_file=stop_file,
+        audit_file=audit_file,
+        position_closer=close_position,
+        open_positions_provider=open_positions,
+    )
+
+
 _switch = None
 
 
 def get_kill_switch():
     global _switch
     if _switch is None:
-        _switch = KillSwitch()
+        _switch = build_wired_kill_switch()
     return _switch
 
 

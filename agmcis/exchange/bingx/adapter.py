@@ -77,6 +77,26 @@ def _ccxt_type(market_type):
     return _CCXT_MARKET_TYPE[market_type]
 
 
+def _build_rate_limiter():
+    """
+    行程內限流,必要時再包一層跨行程限流。
+
+    跨行程那層預設關閉 —— 它需要 migration 006 的資料表。
+    表不存在時每次呼叫都會失敗一次再降級,那比不開更慢。
+    """
+    local = RateLimiter(
+        max_calls=settings.EXCHANGE_RATE_LIMIT_CALLS,
+        period_seconds=settings.EXCHANGE_RATE_LIMIT_PERIOD,
+    )
+
+    if not settings.EXCHANGE_SHARED_RATE_LIMIT:
+        return local
+
+    from agmcis.exchange.shared_rate_limit import SharedRateLimiter
+
+    return SharedRateLimiter(local)
+
+
 class BingXAdapter(ExchangeAdapter):
     name = "bingx"
 
@@ -92,9 +112,9 @@ class BingXAdapter(ExchangeAdapter):
             backoff_seconds if backoff_seconds is not None
             else settings.EXCHANGE_RETRY_BACKOFF_SECONDS
         )
-        self.rate_limiter = rate_limiter if rate_limiter is not None else RateLimiter(
-            max_calls=settings.EXCHANGE_RATE_LIMIT_CALLS,
-            period_seconds=settings.EXCHANGE_RATE_LIMIT_PERIOD,
+        self.rate_limiter = (
+            rate_limiter if rate_limiter is not None
+            else _build_rate_limiter()
         )
         # 伺服器時間與本機時間的差(毫秒)。None 代表還沒對過時。
         self._time_offset_ms = None

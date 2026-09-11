@@ -118,6 +118,13 @@ EXCHANGE_RETRY_BACKOFF_SECONDS = env_float("EXCHANGE_RETRY_BACKOFF_SECONDS", 0.8
 # 行程內的請求節流。多個 process 共用同一把 API Key 時各自有額度,
 # 真正的跨行程限流要等 Phase 16 有共用狀態。
 EXCHANGE_RATE_LIMIT_CALLS = env_int("EXCHANGE_RATE_LIMIT_CALLS", 100)
+
+# 跨行程限流(Phase 16)。scheduler / web / telegram 共用同一把 API Key 時,
+# 行程內限流會讓實際請求量變成設定值的倍數。
+#
+# 預設關閉:它需要 migration 006 建好的資料表。**開之前先跑 migration** ——
+# 表不存在時每次呼叫都會失敗一次再降級,那比不開更慢。
+EXCHANGE_SHARED_RATE_LIMIT = env_bool("EXCHANGE_SHARED_RATE_LIMIT", False)
 EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
 
 # 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,
