@@ -110,6 +110,15 @@ def _verdict(report, check):
             f"績效依賴少數幾筆極端獲利,那不是優勢。"
         )
 
+    decay = report.trend
+    if decay and decay.declining:
+        # 整體期望值還是正的,但最近一個月掉得很明顯。
+        # 那跟「穩定獲利」是兩件事,判定不該是 HEALTHY。
+        return FRAGILE, (
+            f"整體期望值為正,但最近一個月只有 {decay.recent_expectancy:+.4f},"
+            f"先前是 {decay.earlier_expectancy:+.4f} —— 績效正在衰退。"
+        )
+
     return HEALTHY, (
         f"{report.total_trades} 筆交易,期望值 {check.expectancy:+.4f} USDT/筆,"
         f"而且不依賴少數幾筆極端獲利。"

@@ -135,6 +135,94 @@ def by_direction(trades):
     return group_by(trades, lambda t: t.get("signal"))
 
 
+def _month_of(trade):
+    """
+    交易所屬的月份。用**平倉時間**,不是開倉時間 ——
+    損益是在平倉那一刻實現的。
+
+    時間格式不對就回 None(那筆會被排除),不硬解析成某個日期。
+    """
+    stamp = trade.get("closed_at") or trade.get("opened_at")
+    if not stamp:
+        return None
+
+    text = str(stamp)
+    # "2026-09-11 12:00:00" 與 ISO 格式都取前 7 碼
+    if len(text) >= 7 and text[4] == "-":
+        return text[:7]
+    return None
+
+
+def by_month(trades):
+    return group_by(trades, _month_of)
+
+
+@dataclass
+class TrendCheck:
+    """
+    績效有沒有在衰退。
+
+    一個月比一個月差,通常代表策略的優勢正在消失 ——
+    可能是市場結構變了,也可能是它從一開始就沒有優勢,
+    前面只是運氣。兩種都需要停下來看。
+    """
+    months: List[str] = field(default_factory=list)
+    expectancies: List[float] = field(default_factory=list)
+    recent_expectancy: Optional[float] = None
+    earlier_expectancy: Optional[float] = None
+    declining: bool = False
+    reliable: bool = False
+
+    def to_dict(self):
+        return dict(self.__dict__)
+
+
+# 至少要有這麼多個月才談得上趨勢
+MIN_MONTHS_FOR_TREND = 3
+
+
+def trend(trades):
+    """
+    比較「最近一個月」與「更早的月份」。
+
+    刻意不做線性迴歸之類的東西 —— 交易月數通常個位數,
+    在那麼少的點上擬合一條線,斜率幾乎完全由雜訊決定。
+    """
+    buckets, _ = by_month(trades)
+    check = TrendCheck()
+
+    if not buckets:
+        return check
+
+    months = sorted(buckets)
+    check.months = months
+    check.expectancies = [round(buckets[m].expectancy, 4) for m in months]
+
+    if len(months) < MIN_MONTHS_FOR_TREND:
+        return check
+
+    check.reliable = all(buckets[m].trades >= MIN_SAMPLE_HARD for m in months)
+
+    recent_bucket = buckets[months[-1]]
+    earlier = [buckets[m] for m in months[:-1]]
+
+    earlier_trades = sum(b.trades for b in earlier)
+    if earlier_trades == 0:
+        return check
+
+    check.recent_expectancy = round(recent_bucket.expectancy, 4)
+    check.earlier_expectancy = round(
+        sum(b.net_pnl for b in earlier) / earlier_trades, 4,
+    )
+
+    check.declining = (
+        check.earlier_expectancy > 0
+        and check.recent_expectancy < check.earlier_expectancy * 0.5
+    )
+
+    return check
+
+
 @dataclass
 class ConcentrationCheck:
     """
@@ -189,6 +277,7 @@ class AttributionReport:
     buckets: Dict[str, List[Dict]] = field(default_factory=dict)
     skipped: Dict[str, int] = field(default_factory=dict)
     concentration: Optional[ConcentrationCheck] = None
+    trend: Optional[TrendCheck] = None
     warnings: List[str] = field(default_factory=list)
 
     def to_dict(self):
@@ -200,11 +289,13 @@ class AttributionReport:
             "concentration": (
                 self.concentration.to_dict() if self.concentration else None
             ),
+            "trend": self.trend.to_dict() if self.trend else None,
             "warnings": list(self.warnings),
         }
 
 
 DIMENSIONS = {
+    "month": by_month,
     "regime": by_regime,
     "strategy": by_strategy,
     "exit_reason": by_exit_reason,
@@ -229,6 +320,7 @@ def build(trades):
 
     report.attributed_trades = report.total_trades - report.skipped.get("regime", 0)
     report.concentration = concentration(trades)
+    report.trend = trend(trades)
 
     _add_warnings(report)
     return report
@@ -259,6 +351,20 @@ def _add_warnings(report):
         report.warnings.append(
             f"扣掉最好的三筆之後期望值變成 {check.expectancy_without_top3:+.4f} ——"
             f"這套系統的績效依賴少數幾筆極端獲利,那不是優勢。"
+        )
+
+    decay = report.trend
+    if decay and decay.declining:
+        report.warnings.append(
+            f"最近一個月的期望值 {decay.recent_expectancy:+.4f} 只有先前 "
+            f"{decay.earlier_expectancy:+.4f} 的一半不到 —— 績效正在衰退。"
+            f"可能是市場結構變了,也可能是它從一開始就沒有優勢、前面只是運氣。"
+        )
+
+    if decay and decay.months and len(decay.months) < MIN_MONTHS_FOR_TREND:
+        report.warnings.append(
+            f"只有 {len(decay.months)} 個月的資料(門檻 {MIN_MONTHS_FOR_TREND}),"
+            f"還看不出績效趨勢。"
         )
 
     for name, buckets in report.buckets.items():

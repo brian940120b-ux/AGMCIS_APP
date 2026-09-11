@@ -21,7 +21,7 @@ from agmcis.review import agent_scorecard, attribution, self_review
 
 
 def trade(pnl, regime="BULL", signal="做多", votes=None, symbol="BTC/USDT",
-          reason=None, strategy="multi_agent", status="CLOSED"):
+          reason=None, strategy="multi_agent", status="CLOSED", month=None):
     return {
         "status": status,
         "pnl_usdt": pnl,
@@ -31,6 +31,7 @@ def trade(pnl, regime="BULL", signal="做多", votes=None, symbol="BTC/USDT",
         "signal": signal,
         "close_reason": reason or ("自動止盈" if pnl > 0 else "自動止損"),
         "agent_votes": votes,
+        "closed_at": f"{month or '2026-06'}-15 10:00:00",
     }
 
 
@@ -139,6 +140,100 @@ class TestAttributionWarnings(unittest.TestCase):
         self.assertTrue(any("沒有市況紀錄" in w for w in report.warnings))
 
 
+class TestTimeTrend(unittest.TestCase):
+    """
+    一個月比一個月差,通常代表優勢正在消失 —— 可能是市場結構變了,
+    也可能是它從一開始就沒有優勢,前面只是運氣。兩種都需要停下來看。
+    """
+
+    def _months(self, *pairs):
+        trades = []
+        for month, pnl in pairs:
+            trades.extend(many(30, pnl, month=month))
+        return trades
+
+    def test_a_declining_system_is_detected(self):
+        check = attribution.trend(
+            self._months(("2026-06", 10.0), ("2026-07", 8.0), ("2026-08", 0.5)),
+        )
+
+        self.assertTrue(check.declining)
+        self.assertEqual(len(check.months), 3)
+
+    def test_a_steady_system_is_not_flagged(self):
+        check = attribution.trend(
+            self._months(("2026-06", 5.0), ("2026-07", 5.0), ("2026-08", 5.0)),
+        )
+
+        self.assertFalse(check.declining)
+
+    def test_an_improving_system_is_not_flagged(self):
+        check = attribution.trend(
+            self._months(("2026-06", 2.0), ("2026-07", 5.0), ("2026-08", 9.0)),
+        )
+
+        self.assertFalse(check.declining)
+
+    def test_too_few_months_cannot_show_a_trend(self):
+        """
+        兩個點連得出一條線,但那條線沒有意義。
+        """
+        check = attribution.trend(
+            self._months(("2026-07", 10.0), ("2026-08", 1.0)),
+        )
+
+        self.assertFalse(check.declining)
+        self.assertFalse(check.reliable)
+
+    def test_a_previously_losing_system_is_not_called_declining(self):
+        """先前就在虧的系統,「衰退」不是正確的描述。"""
+        check = attribution.trend(
+            self._months(("2026-06", -5.0), ("2026-07", -5.0), ("2026-08", -8.0)),
+        )
+
+        self.assertFalse(check.declining)
+
+    def test_trades_without_a_timestamp_are_excluded(self):
+        trades = many(30, 5.0, month="2026-06")
+        for item in trades[:10]:
+            item["closed_at"] = None
+            item["opened_at"] = None
+
+        buckets, skipped = attribution.by_month(trades)
+
+        self.assertEqual(skipped, 10)
+
+    def test_a_malformed_timestamp_is_excluded_not_guessed(self):
+        trades = many(5, 5.0)
+        for item in trades:
+            item["closed_at"] = "不是日期"
+            item["opened_at"] = None
+
+        buckets, skipped = attribution.by_month(trades)
+
+        self.assertEqual(buckets, {})
+        self.assertEqual(skipped, 5)
+
+    def test_decay_makes_the_verdict_fragile_not_healthy(self):
+        """
+        整體期望值還是正的,但最近一個月掉得很明顯 ——
+        那跟「穩定獲利」是兩件事。
+        """
+        review = self_review.build(
+            self._months(("2026-06", 10.0), ("2026-07", 9.0), ("2026-08", 0.5)),
+        )
+
+        self.assertEqual(review.verdict, self_review.FRAGILE)
+        self.assertIn("衰退", review.headline)
+
+    def test_month_is_one_of_the_attribution_dimensions(self):
+        report = attribution.build(
+            self._months(("2026-06", 5.0), ("2026-07", 5.0)),
+        )
+
+        self.assertIn("month", report.buckets)
+
+
 class TestAgentScorecard(unittest.TestCase):
 
     def _informative(self, count=120, seed=7):
@@ -166,7 +261,7 @@ class TestAgentScorecard(unittest.TestCase):
         trend = next(a for a in report.agents if a["agent"] == "trend")
 
         self.assertEqual(trend["verdict"], "CONTRIBUTING")
-        self.assertGreater(trend["edge_sigmas"], agent_scorecard.MIN_SIGMA)
+        self.assertGreater(trend["edge_sigmas"], trend["min_sigma"])
 
     def test_a_random_agent_is_not_mistaken_for_a_contributor(self):
         """
@@ -177,7 +272,7 @@ class TestAgentScorecard(unittest.TestCase):
         momentum = next(a for a in report.agents if a["agent"] == "momentum")
 
         self.assertEqual(momentum["verdict"], "UNKNOWN")
-        self.assertLess(abs(momentum["edge_sigmas"]), agent_scorecard.MIN_SIGMA)
+        self.assertLess(abs(momentum["edge_sigmas"]), momentum["min_sigma"])
 
     def test_an_agent_that_never_speaks_is_marked_silent(self):
         report = agent_scorecard.build(self._informative())
@@ -224,6 +319,95 @@ class TestAgentScorecard(unittest.TestCase):
 
         self.assertEqual(report.trades_with_votes, 0)
         self.assertTrue(any("補不回來" in w for w in report.warnings))
+
+
+class TestMultipleComparisonCorrection(unittest.TestCase):
+    """
+    單獨看一個 Agent 時 2 個標準誤代表「純屬巧合的機率約 5%」。
+    但我們同時看十二個 —— 至少一個假陽性的機率是 1 - 0.95^12 ≈ 46%。
+
+    也就是說:一套**全部由隨機投票組成**的 Agent 群,
+    有將近一半的機會會產生「至少一個有貢獻的 Agent」。
+    那個結論毫無意義,但它看起來跟真的一模一樣。
+    """
+
+    def test_a_single_agent_uses_the_base_threshold(self):
+        self.assertEqual(
+            agent_scorecard.min_sigma_for(1), agent_scorecard.BASE_MIN_SIGMA,
+        )
+
+    def test_more_agents_means_a_higher_bar(self):
+        thresholds = [agent_scorecard.min_sigma_for(n) for n in (1, 3, 12, 30)]
+
+        self.assertEqual(thresholds, sorted(thresholds))
+        self.assertGreater(thresholds[-1], thresholds[0])
+
+    def test_the_twelve_agent_threshold_is_meaningfully_higher(self):
+        self.assertGreater(
+            agent_scorecard.min_sigma_for(12),
+            agent_scorecard.BASE_MIN_SIGMA + 0.5,
+        )
+
+    def test_an_absurd_count_is_capped_not_unbounded(self):
+        self.assertEqual(
+            agent_scorecard.min_sigma_for(10000), agent_scorecard.MAX_SIGMA,
+        )
+
+    def test_a_whole_panel_of_random_agents_produces_no_contributors(self):
+        """
+        這是整個校正存在的理由。十二個純隨機的 Agent,
+        不校正時很可能會冒出一兩個「有貢獻」的。
+        """
+        rng = random.Random(5)
+        trades = []
+
+        for i in range(200):
+            pnl = rng.uniform(-20, 20)
+            votes = {
+                f"random{n}": rng.choice(["做多", "做空"]) for n in range(12)
+            }
+            trades.append(trade(round(pnl, 2), votes=votes))
+
+        report = agent_scorecard.build(trades)
+        contributors = [a for a in report.agents if a["verdict"] == "CONTRIBUTING"]
+
+        self.assertEqual(contributors, [], contributors)
+
+    def test_the_correction_is_explained_in_the_warnings(self):
+        rng = random.Random(9)
+        trades = []
+        for i in range(120):
+            good = i % 2 == 0
+            pnl = rng.uniform(5, 30) if good else rng.uniform(-25, -5)
+            trades.append(trade(round(pnl, 2), votes={
+                "a": "做多" if good else "做空",
+                "b": rng.choice(["做多", "做空"]),
+                "c": rng.choice(["做多", "做空"]),
+            }))
+
+        report = agent_scorecard.build(trades)
+
+        self.assertTrue(any("Bonferroni" in w for w in report.warnings))
+
+    def test_a_strong_signal_still_gets_through_the_higher_bar(self):
+        """
+        校正是保守的,但不能保守到連真的訊號都認不出來。
+        """
+        rng = random.Random(7)
+        trades = []
+        for i in range(200):
+            good = i % 2 == 0
+            pnl = rng.uniform(10, 30) if good else rng.uniform(-30, -10)
+            votes = {"trend": "做多" if good else "做空"}
+            votes.update({
+                f"noise{n}": rng.choice(["做多", "做空"]) for n in range(11)
+            })
+            trades.append(trade(round(pnl, 2), votes=votes))
+
+        report = agent_scorecard.build(trades)
+        trend = next(a for a in report.agents if a["agent"] == "trend")
+
+        self.assertEqual(trend["verdict"], "CONTRIBUTING")
 
 
 class TestSelfReviewVerdicts(unittest.TestCase):
