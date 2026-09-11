@@ -41,3 +41,9 @@ backups/
 # 不進版控:不同帳戶的費率不同,VIP 等級也會變,而且它是可重新產生的資料。
 # 在 VPS 上用 scripts/verify_bingx.py --write-specs 產生。
 data/bingx_specs.json
+
+# LIVE SAFETY GATE 的人工確認檔(Phase 17)
+# 絕不進版控:它是「這個人在這個時間點批准了這個金額」的憑證,
+# 提交進 git 等於把那個決定變成永久的、對所有人生效的。
+live_gate_confirmation.json
+live_gate_audit.log
