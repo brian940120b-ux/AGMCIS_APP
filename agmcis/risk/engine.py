@@ -21,6 +21,7 @@ from typing import List, Optional
 from agmcis.config import settings
 from agmcis.core.models import RiskDecision, TradeIntent
 from agmcis.risk import leverage as leverage_module
+from agmcis.risk import portfolio
 from agmcis.risk import position_sizing
 
 logger = logging.getLogger("agmcis.risk_engine")
@@ -40,11 +41,15 @@ class AccountState:
     current_exposure_usdt: float = 0.0
     unrealized_pnl_usdt: float = 0.0
     realized_pnl_24h: float = 0.0
+    realized_pnl_7d: float = 0.0
     trades_24h: int = 0
     consecutive_losses: int = 0
     max_drawdown_pct: float = 0.0
     profit_factor: float = 0.0
     open_symbols: List[str] = field(default_factory=list)
+    # 現有部位的結構。曝險上限只看總和,相關性上限要看每一腿 ——
+    # 每一筆至少要有 symbol、direction 與名目價值(或 size_usdt + leverage)。
+    open_legs: List[dict] = field(default_factory=list)
 
     @property
     def exposure_pct(self):
@@ -115,6 +120,11 @@ class RiskEngine:
             blockers.append("MAX_DAILY_LOSS")
             emergency = True
 
+        weekly_limit = abs(self._limit("MAX_WEEKLY_LOSS_USDT", 900))
+        if state.realized_pnl_7d <= -weekly_limit:
+            blockers.append("MAX_WEEKLY_LOSS")
+            emergency = True
+
         if state.consecutive_losses >= self._limit("MAX_CONSECUTIVE_LOSSES", 4):
             blockers.append("MAX_CONSECUTIVE_LOSSES")
 
@@ -136,7 +146,7 @@ class RiskEngine:
 
     def evaluate(self, intent: TradeIntent, state: AccountState,
                  atr=None, mtf_score=None, contract_max_leverage=None,
-                 min_notional=None) -> RiskDecision:
+                 min_notional=None, correlation=None) -> RiskDecision:
         """
         對一個 TradeIntent 做完整裁決。
 
@@ -209,10 +219,43 @@ class RiskEngine:
                 reason=reason, blockers=["LIQUIDATION_BEFORE_STOP"],
             )
 
+        # ---- 組合層:這一筆跟已經有的部位是不是同一個賭注 ----
+        # 必須放在算完倉位之後 —— 曝險要用實際的名目價值,不是意圖。
+        exposure = portfolio.assess(
+            candidate={
+                "symbol": intent.symbol,
+                "direction": intent.direction,
+                "notional_usdt": sizing.notional,
+                "entry": intent.entry,
+                "stop_loss": intent.stop_loss,
+            },
+            open_positions=state.open_legs,
+            equity=state.equity,
+            matrix=correlation,
+            max_symbol_pct=self._limit("MAX_SYMBOL_EXPOSURE_PCT", 50),
+            max_cluster_risk_pct=self._limit("MAX_CORRELATED_RISK_PCT", 3.0),
+            threshold=self._limit("CORRELATION_THRESHOLD", 0.7),
+            assumed_risk_pct=self._limit("MAX_RISK_PER_TRADE_PCT", 1.0),
+        )
+
+        if not exposure.allowed:
+            logger.warning(
+                "Risk Engine | REJECT | %s | 組合風險:%s | %s",
+                intent.symbol, ",".join(exposure.blockers),
+                " / ".join(exposure.warnings),
+            )
+            return RiskDecision(
+                intent=intent, approved=False,
+                reason=" / ".join(exposure.warnings) or ",".join(exposure.blockers),
+                blockers=list(exposure.blockers),
+            )
+
         logger.info(
-            "Risk Engine | APPROVE | %s | size=%.2f lev=%gx 名目=%.2f 風險=%.2f (%.2f%%)",
+            "Risk Engine | APPROVE | %s | size=%.2f lev=%gx 名目=%.2f 風險=%.2f (%.2f%%)"
+            " | 相關群 %s 風險 %.2f%%",
             intent.symbol, sizing.size_usdt, leverage_decision.leverage,
             sizing.notional, sizing.risk_usdt, sizing.risk_pct_of_equity,
+            "+".join(exposure.cluster_symbols), exposure.cluster_risk_pct,
         )
 
         return RiskDecision(
@@ -222,6 +265,7 @@ class RiskEngine:
             leverage=leverage_decision.leverage,
             reason=None,
             blockers=[],
+            warnings=list(exposure.warnings),
         )
 
 

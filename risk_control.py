@@ -197,9 +197,32 @@ def evaluate_intent(intent, atr=None, mtf_score=None,
     from agmcis.risk.engine import get_engine
 
     state = build_account_state()
+
     return get_engine().evaluate(
         intent, state,
         atr=atr, mtf_score=mtf_score,
         contract_max_leverage=contract_max_leverage,
         min_notional=min_notional,
+        correlation=_correlation_for(intent, state),
     )
+
+
+def _correlation_for(intent, state):
+    """
+    組合風險要用的相關係數矩陣。
+
+    取不到就回 None —— portfolio.assess() 收到 None 會把所有同向部位
+    當成同一群,也就是最保守的那一邊。這裡刻意不讓失敗變成「不相關」。
+    """
+    from agmcis.risk import correlation
+
+    symbols = list(dict.fromkeys([intent.symbol] + list(state.open_symbols or [])))
+
+    if len(symbols) < 2:
+        return None      # 只有一檔的時候沒有相關性可言
+
+    try:
+        return correlation.get_matrix(symbols)
+    except Exception as exc:
+        logger.warning("相關係數取得失敗,改用保守假設 | %s", exc)
+        return None

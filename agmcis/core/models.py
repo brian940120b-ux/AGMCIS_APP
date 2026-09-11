@@ -239,6 +239,9 @@ class RiskDecision:
     leverage: Optional[float] = None
     reason: Optional[str] = None
     blockers: List[str] = field(default_factory=list)
+    # 通過了但值得知道的事:例如某幾檔因為算不出相關係數而被當成相關。
+    # 這些不影響 approved,但會進 log 與 Dashboard。
+    warnings: List[str] = field(default_factory=list)
     decided_at: datetime = field(default_factory=_utcnow)
 
     @property

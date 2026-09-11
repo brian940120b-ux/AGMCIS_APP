@@ -205,6 +205,21 @@ MAX_OPEN_POSITIONS = env_int("MAX_OPEN_POSITIONS", 5)
 MAX_AUTO_POSITIONS = env_int("MAX_AUTO_POSITIONS", 3)
 MAX_LEVERAGE = env_float("MAX_LEVERAGE", 5)
 MAX_DAILY_LOSS_USDT = env_float("MAX_DAILY_LOSS_USDT", 300)
+MAX_WEEKLY_LOSS_USDT = env_float("MAX_WEEKLY_LOSS_USDT", 900)
+# 組合層(Master Prompt 第五十九 / 六十節)。
+#
+# MAX_SYMBOL_EXPOSURE_PCT 管的是**名目**:單一標的的集中度與槓桿守門員。
+# 參考值:1% 風險配 3% 停損 = 名目 33% 權益,所以 50 大約是「一檔最多
+# 吃掉總曝險上限(80%)的一半多一點」。
+#
+# MAX_CORRELATED_RISK_PCT 管的是**風險**:一整群其實是同一個賭注的部位
+# 同時停損會虧掉多少。3% = 最多同時押三個 1% 的同方向賭注。
+# 用風險而不是名目,是因為名目是停損距離的倒數 —— 用名目管會懲罰
+# 停損放得近的部位,而那些是比較好的部位。
+MAX_SYMBOL_EXPOSURE_PCT = env_float("MAX_SYMBOL_EXPOSURE_PCT", 50)
+MAX_CORRELATED_RISK_PCT = env_float("MAX_CORRELATED_RISK_PCT", 3.0)
+CORRELATION_THRESHOLD = env_float("CORRELATION_THRESHOLD", 0.7)
+CORRELATION_LOOKBACK = env_int("CORRELATION_LOOKBACK", 200)
 MAX_TOTAL_OPEN_LOSS_USDT = env_float("MAX_TOTAL_OPEN_LOSS_USDT", -300)
 MAX_CONSECUTIVE_LOSSES = env_int("MAX_CONSECUTIVE_LOSSES", 4)
 MAX_TRADES_PER_DAY = env_int("MAX_TRADES_PER_DAY", 10)
@@ -229,6 +244,10 @@ def risk_limits_dict():
         "max_auto_positions": MAX_AUTO_POSITIONS,
         "max_leverage": MAX_LEVERAGE,
         "max_daily_loss_usdt": MAX_DAILY_LOSS_USDT,
+        "max_weekly_loss_usdt": MAX_WEEKLY_LOSS_USDT,
+        "max_symbol_exposure_pct": MAX_SYMBOL_EXPOSURE_PCT,
+        "max_correlated_risk_pct": MAX_CORRELATED_RISK_PCT,
+        "correlation_threshold": CORRELATION_THRESHOLD,
         "max_total_open_loss_usdt": MAX_TOTAL_OPEN_LOSS_USDT,
         "max_consecutive_losses": MAX_CONSECUTIVE_LOSSES,
         "max_trades_per_day": MAX_TRADES_PER_DAY,

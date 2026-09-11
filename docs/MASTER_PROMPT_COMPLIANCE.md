@@ -43,7 +43,7 @@
 | 十七 | Position Reconciliation | ✅ | `agmcis/execution/reconciliation.py` + `orders` / `order_events` 表 |
 | 十八 | TP / SL 保護 | ✅ | `agmcis/execution/emergency.py` 完整六步驟:Retry → Verify → Reduce → Close → Disable New Orders → Notify。每一步之間重新 Verify;查不到 / 不支援 / 拋例外一律當成沒有保護 |
 | 十九 | Risk Engine 是 HARD GATE | ✅ | `agmcis/risk/engine.py`;`test_risk_gate.py` 用 AST 檢查沒有旁路 |
-| 二十 | Risk Parameters | ⚠️ | 10 個參數裡有 7 個。**缺 MAX_WEEKLY_LOSS、MAX_SYMBOL_EXPOSURE、MAX_CORRELATED_EXPOSURE** |
+| 二十 | Risk Parameters | ✅ | 10 個參數齊全。相關群上限管的是**風險**(一起停損會虧多少)而不是名目 —— 名目是停損距離的倒數,用名目管會懲罰停損放得近的部位 |
 
 ## 二十一~三十:倉位、槓桿、市況、訊號、Agent
 
@@ -102,8 +102,8 @@
 | 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 推導,但沒有依市場結構 / 支撐壓力調整,也沒有回測驗證過的參數 |
 | 五十七 | Partial Take Profit | ❌ | **完全沒有**。沒有 TP1/TP2/TP3,沒有 TP1 後移動停損到成本價 |
 | 五十八 | Trailing Stop | ⚠️ | `trailing_stop.py` 只有百分比式。**缺 ATR Trailing、Structure Trailing**,而且沒有接進 `agmcis/` 執行路徑 |
-| 五十九 | Portfolio Risk | ❌ | **沒有**。同時做多 BTC/ETH/SOL 目前只被各自的單筆風險擋,沒有任何相關性曝險限制 |
-| 六十 | Correlation Engine | ❌ | **沒有**。只有一個 BtcCorrelationAgent 看方向一致性,沒有真正算 correlation / beta |
+| 五十九 | Portfolio Risk | ✅ | `agmcis/risk/portfolio.py`。相關群一起停損的總風險有上限;反向部位不給抵銷(爆倉時對沖那一邊不會保護你,而且給抵銷會產生繞過上限的漏洞) |
+| 六十 | Correlation Engine | ✅ | `agmcis/risk/correlation.py`。用對數報酬率算 Pearson 與 Beta;樣本不足回 None 而不是 0;算不出來時一律當成相關 |
 
 ## 六十一~七十:Dashboard、資料庫、可觀測性、測試
 
@@ -177,16 +177,16 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 51 |
-| ⚠️ 部分做到 | 43 |
-| ❌ 沒做 | 12 |
+| ✅ 已做到 | 54 |
+| ⚠️ 部分做到 | 42 |
+| ❌ 沒做 | 10 |
 
 ## 缺口排序(由大到小)
 
 排序依據是「對真實資金的風險」,不是實作難度。
 
 1. ~~**十八 — SL 失敗六步驟**~~ ✅ 已補(`agmcis/execution/emergency.py`,27 個測試)。
-2. **五十九 + 六十 + 二十 — 組合風險與相關性**(安全)同時開三個高相關多單,目前風控看不見。
+2. ~~**五十九 + 六十 + 二十 — 組合風險與相關性**~~ ✅ 已補(`agmcis/risk/{correlation,portfolio}.py`,41 個測試)。
 3. **四十六 — SAFE LIVE MODE**(安全)第一次實單沒有獨立於 paper 的更嚴格上限。
 4. **五十一 — News Risk 封鎖窗口**(安全)FOMC/CPI 當下系統會照常開單。
 5. **七十四 + 七十五 + 七十六 — 策略退化偵測**(安全)策略壞掉不會自己停。

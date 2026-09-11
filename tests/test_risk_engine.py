@@ -41,6 +41,9 @@ LIMITS = {
     "MAX_OPEN_POSITIONS": 5, "MAX_LEVERAGE": 5, "MAX_DAILY_LOSS_USDT": 300,
     "MAX_TOTAL_OPEN_LOSS_USDT": -300, "MAX_CONSECUTIVE_LOSSES": 4,
     "MAX_TRADES_PER_DAY": 10, "MIN_PROFIT_FACTOR": 0.8,
+    "MAX_WEEKLY_LOSS_USDT": 900,
+    "MAX_SYMBOL_EXPOSURE_PCT": 50, "MAX_CORRELATED_RISK_PCT": 3.0,
+    "CORRELATION_THRESHOLD": 0.7,
     "AUTO_TRADING_ENABLED": True,
     "EMERGENCY_STOP_FILE": "/nonexistent/emergency.stop",
     "TRADING_PAUSE_FILE": "/nonexistent/trading_pause.flag",
@@ -376,3 +379,102 @@ class TestKillSwitch(unittest.TestCase):
 
         self.assertTrue(any("撤單能力" in e for e in result.errors))
         self.assertTrue(any("平倉能力" in e for e in result.errors))
+
+
+class TestWeeklyLoss(unittest.TestCase):
+    """
+    日虧損上限擋得住單日崩盤,擋不住「連續五天各虧一點」——
+    那種慢性出血在日上限眼裡每一天都是合格的。
+    """
+
+    def test_the_weekly_loss_limit_blocks_new_trades(self):
+        result = engine().check_gate(healthy_state(realized_pnl_7d=-950.0))
+
+        self.assertFalse(result.allowed)
+        self.assertIn("MAX_WEEKLY_LOSS", result.blockers)
+        self.assertTrue(result.emergency)
+
+    def test_a_week_within_the_limit_passes(self):
+        self.assertTrue(
+            engine().check_gate(healthy_state(realized_pnl_7d=-500.0)).allowed
+        )
+
+    def test_a_profitable_week_never_blocks(self):
+        self.assertTrue(
+            engine().check_gate(healthy_state(realized_pnl_7d=5000.0)).allowed
+        )
+
+    def test_a_bad_week_blocks_even_when_today_is_fine(self):
+        result = engine().check_gate(
+            healthy_state(realized_pnl_24h=0.0, realized_pnl_7d=-1200.0),
+        )
+
+        self.assertEqual(result.blockers, ["MAX_WEEKLY_LOSS"])
+
+
+class TestCorrelatedExposureIsSeenByTheEngine(unittest.TestCase):
+    """
+    第五十九節:同時做多 BTC / ETH / SOL 不是三個 1%,是一個 3%。
+    這裡測的是 Risk Engine 真的會因為那件事拒絕開倉。
+    """
+
+    def _leg(self, symbol, notional=4000.0, direction="做多"):
+        return {"symbol": symbol, "direction": direction,
+                "notional_usdt": notional, "entry": 100.0, "stop_loss": 97.0}
+
+    def test_a_third_correlated_long_is_rejected(self):
+        state = healthy_state(
+            open_positions=2,
+            open_symbols=["ETH/USDT", "SOL/USDT"],
+            open_legs=[self._leg("ETH/USDT"), self._leg("SOL/USDT")],
+        )
+
+        decision = engine().evaluate(intent(), state, atr=500, mtf_score=3)
+
+        self.assertFalse(decision.approved)
+        self.assertIn("MAX_CORRELATED_RISK", decision.blockers)
+
+    def test_the_rejection_says_how_much_the_cluster_would_lose(self):
+        state = healthy_state(
+            open_positions=2,
+            open_symbols=["ETH/USDT", "SOL/USDT"],
+            open_legs=[self._leg("ETH/USDT"), self._leg("SOL/USDT")],
+        )
+
+        decision = engine().evaluate(intent(), state, atr=500, mtf_score=3)
+        self.assertIn("一起停損", decision.reason)
+
+    def test_the_first_trade_of_the_day_is_not_blocked_by_correlation(self):
+        decision = engine().evaluate(intent(), healthy_state(), atr=500, mtf_score=3)
+
+        self.assertTrue(decision.approved, decision.reason)
+
+    def test_an_opposite_side_position_does_not_count_toward_the_cluster(self):
+        """反向部位不加也不減 —— 它自己由單檔上限管。"""
+        state = healthy_state(
+            open_positions=2,
+            open_symbols=["ETH/USDT", "SOL/USDT"],
+            open_legs=[
+                self._leg("ETH/USDT", direction="做空"),
+                self._leg("SOL/USDT", direction="做空"),
+            ],
+        )
+
+        decision = engine().evaluate(intent(), state, atr=500, mtf_score=3)
+        self.assertTrue(decision.approved, decision.reason)
+
+    def test_an_approved_decision_still_reports_what_it_assumed(self):
+        """
+        沒有相關係數矩陣的時候,「這幾檔被當成相關」必須說出來 ——
+        通過了不代表那個假設不存在。
+        """
+        state = healthy_state(
+            open_positions=1,
+            open_symbols=["ETH/USDT"],
+            open_legs=[self._leg("ETH/USDT")],
+        )
+
+        decision = engine().evaluate(intent(), state, atr=500, mtf_score=3)
+
+        self.assertTrue(decision.approved, decision.reason)
+        self.assertTrue(any("當成相關" in w for w in decision.warnings))

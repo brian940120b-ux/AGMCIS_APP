@@ -38,9 +38,33 @@ def build_account_state():
         current_exposure_usdt=exposure,
         unrealized_pnl_usdt=unrealized,
         realized_pnl_24h=get_realized_pnl_since(24),
+        realized_pnl_7d=get_realized_pnl_since(24 * 7),
         trades_24h=count_trades_since(24),
         consecutive_losses=get_consecutive_losses(),
         max_drawdown_pct=float(analytics.get("max_drawdown") or 0),
         profit_factor=float(analytics.get("profit_factor") or 0),
         open_symbols=[t.get("symbol") for t in portfolio.get("open_trades", [])],
+        # 組合層風險要看每一腿的方向、名目與停損,不只是有哪些標的。
+        open_legs=[_leg(t) for t in portfolio.get("open_trades", [])],
     )
+
+
+def _leg(trade):
+    """
+    把一筆持倉整理成組合風險看得懂的樣子。
+
+    名目價值優先用 position_value(建倉當下記下來的實際值);
+    沒有的話才用 size_usdt × leverage 回推 —— 那是估計,
+    因為 step size 對齊會讓實際名目略小於帳面。
+    """
+    notional = trade.get("position_value")
+    if notional is None:
+        notional = float(trade.get("size_usdt") or 0) * float(trade.get("leverage") or 1)
+
+    return {
+        "symbol": trade.get("symbol"),
+        "direction": trade.get("signal") or trade.get("direction"),
+        "notional_usdt": float(notional or 0.0),
+        "entry": trade.get("entry_price"),
+        "stop_loss": trade.get("stoploss"),
+    }
