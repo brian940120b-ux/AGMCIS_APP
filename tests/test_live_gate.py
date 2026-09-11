@@ -55,7 +55,10 @@ def passing_providers(**overrides):
         },
         "self_review": lambda: {"verdict": "HEALTHY", "headline": "沒問題"},
         "strategy_validation": lambda: {
-            "all_results": [{"verdict": "PASS", "strategy": "X"}],
+            "all_results": [
+                {"verdict": "PASS", "strategy": "LIVE_PIPELINE",
+                 "is_live_pipeline": True},
+            ],
         },
         "calibration": lambda: {
             "calibrated": True, "stale": False, "testnet": False,
@@ -149,11 +152,56 @@ class TestTheGateOpensOnlyWhenEverythingIsReady(GateTestCase):
     def test_no_validated_strategy_keeps_it_shut(self):
         result = self.open_gate(
             strategy_validation=lambda: {
-                "all_results": [{"verdict": "REJECT"}, {"verdict": "MARGINAL"}],
+                "all_results": [
+                    {"verdict": "REJECT", "is_live_pipeline": True},
+                    {"verdict": "MARGINAL", "is_live_pipeline": True},
+                ],
             },
         )
 
         self.assertFalse(result.open)
+
+    def test_only_legacy_strategies_passing_keeps_it_shut(self):
+        """
+        系統裡還留著幾個舊的模組式策略,它們會一起被驗證,但 live 不用它們。
+        **驗證一組永遠不會下單的策略,等於沒有驗證。**
+        """
+        result = self.open_gate(
+            strategy_validation=lambda: {
+                "all_results": [
+                    {"verdict": "PASS", "strategy": "EMA_RSI_MACD_PRO",
+                     "is_live_pipeline": False},
+                    {"verdict": "REJECT", "strategy": "LIVE_PIPELINE",
+                     "is_live_pipeline": True, "blockers": ["OOS 只有 12 筆"]},
+                ],
+            },
+        )
+
+        self.assertFalse(result.open)
+        detail = next(c.detail for c in result.failed if c.name == "策略驗證")
+        self.assertIn("live 訊號管線", detail)
+
+    def test_a_report_without_the_live_pipeline_keeps_it_shut(self):
+        """
+        舊格式的報告(或驗證根本沒跑到 live 管線)不能算通過。
+        """
+        result = self.open_gate(
+            strategy_validation=lambda: {
+                "all_results": [{"verdict": "PASS", "strategy": "EMA_RSI_MACD_PRO"}],
+            },
+        )
+
+        self.assertFalse(result.open)
+        detail = next(c.detail for c in result.failed if c.name == "策略驗證")
+        self.assertIn("沒有 live 訊號管線", detail)
+
+    def test_a_passing_live_pipeline_is_enough(self):
+        check = self.gate(
+            providers=passing_providers(),
+        ).check_strategy_validation()
+
+        self.assertTrue(check.passed)
+        self.assertIn("live 訊號管線", check.detail)
 
     def test_uncalibrated_specs_keep_it_shut(self):
         """

@@ -21,6 +21,10 @@ Lab(Phase 8)早就寫好了,缺的是真實資料。
 
 然後輸出一份 JSON 報告,以及一份人看得懂的摘要。
 
+**第一個評估的一定是 LIVE_PIPELINE** —— live 實際在用的訊號管線
+(agmcis/strategy/builtin.py 的策略集成)。其餘是舊的模組式策略,
+留著只是對照:live 不會用它們,LIVE SAFETY GATE 也只認 LIVE_PIPELINE。
+
 ## 它不做什麼
 
 **它不會挑出「最好的」策略拿去交易。** 它只回報每個組合通過或沒通過,
@@ -68,10 +72,11 @@ def summarise(row):
     mark = {"PASS": "✅", "MARGINAL": "🟡", "REJECT": "⛔", "ERROR": "💥"}.get(
         verdict, "?",
     )
+    live = "★" if row.get("is_live_pipeline") else " "
 
     line = (
-        f"  {mark} {row.get('symbol', '-'):<14} {row.get('strategy') or '-':<20} "
-        f"{verdict:<9}"
+        f"  {live}{mark} {row.get('symbol', '-'):<14} "
+        f"{row.get('strategy') or '-':<20} {verdict:<9}"
     )
 
     expectancy = row.get("oos_expectancy_r")
@@ -119,7 +124,7 @@ def main():
 
     rows = result.get("all_results", [])
 
-    print("結果")
+    print("結果   (★ = live 實際在用的訊號管線)")
     print("-" * 70)
     for row in rows:
         print(summarise(row))
@@ -179,21 +184,31 @@ def main():
     print()
     print(f"完整報告已寫入 {output}")
 
-    passed = [r for r in rows if r.get("verdict") == "PASS"]
+    live_passed = result.get("live_pipeline_passed") or []
+    other_passed = [
+        r for r in rows
+        if r.get("verdict") == "PASS" and not r.get("is_live_pipeline")
+    ]
 
     print("=" * 70)
-    if not passed:
-        print("沒有任何 (標的, 策略) 組合通過驗證。")
+    if not live_passed:
+        print("**live 訊號管線沒有通過驗證。**")
+
+        if other_passed:
+            print()
+            print(f"({len(other_passed)} 個舊策略通過了,但 live 不會用它們 ——")
+            print(" 驗證一組永遠不會下單的策略等於沒有驗證。)")
+
         print()
         print("這通常不代表程式壞了。最常見的三個原因:")
         print("  1. 樣本外交易筆數不足 30 筆 —— 抓更多 K 棒或換更短的時間框架")
-        print("  2. 樣本外期望值不為正 —— 這個策略在這個標的上沒有優勢")
+        print("  2. 樣本外期望值不為正 —— 這套訊號在這個標的上沒有優勢")
         print("  3. Walk Forward 一致性低 —— 只有某幾段時間有效,那是運氣")
         print()
         print("LIVE SAFETY GATE 的第 4 項條件因此不會通過,而那是正確的。")
         return 1
 
-    print(f"{len(passed)} 個組合通過驗證。")
+    print(f"live 訊號管線在 {len(live_passed)} 個標的上通過驗證。")
     print()
     print("⚠️  通過驗證**不等於**可以上線。LIVE SAFETY GATE 還有另外八項條件:")
     print("    .venv/bin/python scripts/live_gate.py")

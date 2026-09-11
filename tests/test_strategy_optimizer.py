@@ -222,6 +222,7 @@ class TestSurvivorshipBiasIsDeclared(unittest.TestCase):
 class TestEndToEndScan(unittest.TestCase):
 
     def test_a_full_symbol_scan_produces_verdicts_for_every_strategy(self):
+        """live 管線 + 每個舊策略都要有結果。"""
         df = wavy_frame(800)
 
         with patch.object(strategy_optimizer, "load_data", return_value=df):
@@ -229,7 +230,12 @@ class TestEndToEndScan(unittest.TestCase):
                 "TEST/USDT", monte_carlo_runs=100, seed=1,
             )
 
-        self.assertEqual(len(evaluations), len(strategy_optimizer.STRATEGIES))
+        self.assertEqual(
+            len(evaluations), len(strategy_optimizer.LEGACY_STRATEGIES) + 1,
+        )
+        self.assertEqual(
+            evaluations[0].name, strategy_optimizer.LIVE_PIPELINE_NAME,
+        )
         for evaluation in evaluations:
             with self.subTest(name=evaluation.name):
                 self.assertIn(
@@ -250,8 +256,47 @@ class TestEndToEndScan(unittest.TestCase):
         }
         self.assertEqual(
             strategies_in_report,
-            {name for name, _ in strategy_optimizer.STRATEGIES},
+            {name for name, _ in strategy_optimizer.LEGACY_STRATEGIES}
+            | {strategy_optimizer.LIVE_PIPELINE_NAME},
         )
+
+    def test_the_live_pipeline_result_is_flagged(self):
+        """
+        LIVE SAFETY GATE 只認這個旗標為 True 的結果 ——
+        驗證一組永遠不會下單的策略等於沒有驗證。
+        """
+        df = wavy_frame(800)
+
+        with patch.object(strategy_optimizer, "load_data", return_value=df):
+            result = strategy_optimizer.get_strategy_optimizer(
+                symbols=["TEST/USDT"], candles=800, seed=1,
+            )
+
+        live = [r for r in result["all_results"] if r.get("is_live_pipeline")]
+
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["strategy"], strategy_optimizer.LIVE_PIPELINE_NAME)
+
+    def test_the_live_pipeline_trades_more_than_the_legacy_strategies(self):
+        """
+        舊策略在 1 小時 K 棒上交易得太少,樣本外永遠湊不到 30 筆。
+        live 管線是集成的,訊號密度高得多 —— 那是它才有機會通過驗證的原因。
+        """
+        df = wavy_frame(1200)
+
+        with patch.object(strategy_optimizer, "load_data", return_value=df):
+            result = strategy_optimizer.get_strategy_optimizer(
+                symbols=["TEST/USDT"], candles=1200, seed=1,
+            )
+
+        rows = {r["strategy"]: r for r in result["all_results"] if r["strategy"]}
+        live_trades = rows[strategy_optimizer.LIVE_PIPELINE_NAME]["oos_trades"]
+        legacy_best = max(
+            rows[name]["oos_trades"]
+            for name, _ in strategy_optimizer.LEGACY_STRATEGIES
+        )
+
+        self.assertGreater(live_trades, legacy_best)
 
 
 if __name__ == "__main__":

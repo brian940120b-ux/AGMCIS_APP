@@ -34,11 +34,25 @@ from exchange_universe import get_top_volume_symbols
 
 logger = logging.getLogger("agmcis.strategy_optimizer")
 
-STRATEGIES = [
+# ⚠️ 這三個是**舊的模組式策略**,live 已經不用它們了。
+#
+# live 走的是 agmcis/strategy/builtin.py 的策略集成
+# (TrendFollowing / Breakout / Momentum / MeanReversion),
+# 由 agmcis/signal/pipeline.py 與 Agent 層驅動。
+#
+# 保留它們的驗證是為了對照,但**LIVE SAFETY GATE 只認 live 管線的結果** ——
+# 驗證一組永遠不會下單的策略,等於沒有驗證。
+LEGACY_STRATEGIES = [
     ("EMA_RSI_MACD_PRO", ema_strategy),
     ("RSI_REVERSAL_PRO", rsi_strategy),
     ("BREAKOUT_PRO", breakout_strategy),
 ]
+
+# 向下相容:舊名稱仍然指向舊策略
+STRATEGIES = LEGACY_STRATEGIES
+
+# live 管線的名稱。它在報告裡與舊策略並列,但 is_live_pipeline=True。
+LIVE_PIPELINE_NAME = "LIVE_PIPELINE"
 
 # 唯一可調的參數:ATR 停損倍數。
 # 刻意只留一個 —— 參數越多越容易在歷史上擬合出漂亮的曲線。
@@ -47,6 +61,14 @@ ATR_STOP_MULTIPLES = [1.5, 2.0, 2.5, 3.0]
 DEFAULT_TIMEFRAME = "1h"
 DEFAULT_LIMIT = 1500
 MONTE_CARLO_RUNS = 1000
+
+LEGACY_STRATEGY_WARNING = (
+    f"{', '.join(name for name, _ in LEGACY_STRATEGIES)} 是**舊的模組式策略**,"
+    f"live 已經不用它們了。live 走的是 {LIVE_PIPELINE_NAME}"
+    f"(agmcis/strategy/builtin.py 的策略集成)。"
+    f"LIVE SAFETY GATE 只認 {LIVE_PIPELINE_NAME} 的結果 —— "
+    f"驗證一組永遠不會下單的策略等於沒有驗證。"
+)
 
 SURVIVORSHIP_WARNING = (
     "標的清單是**當前**成交量前 N 名。當時還沒上市或已經下市的標的不在樣本裡,"
@@ -101,13 +123,25 @@ def _make_builders(df, strategy_module):
 
 
 def evaluate_symbol(symbol, timeframe=DEFAULT_TIMEFRAME, limit=DEFAULT_LIMIT,
-                    strategies=None, monte_carlo_runs=MONTE_CARLO_RUNS, seed=None):
-    """回傳這個標的上每個策略的 StrategyEvaluation。"""
-    strategies = strategies or STRATEGIES
+                    strategies=None, monte_carlo_runs=MONTE_CARLO_RUNS, seed=None,
+                    include_live_pipeline=True):
+    """
+    回傳這個標的上每個策略的 StrategyEvaluation。
+
+    include_live_pipeline=True 時第一個評估的是**實際在用的訊號管線**,
+    其餘是舊的模組式策略(對照用)。
+    """
+    strategies = strategies if strategies is not None else LEGACY_STRATEGIES
     df = load_data(symbol, timeframe=timeframe, limit=limit)
     candles = df.to_dict("records")
 
     evaluations = []
+
+    if include_live_pipeline:
+        evaluations.append(_evaluate_live_pipeline(
+            df, candles, symbol, timeframe, monte_carlo_runs, seed,
+        ))
+
     for name, module in strategies:
         build_signal, build_exit = _make_builders(df, module)
 
@@ -124,6 +158,48 @@ def evaluate_symbol(symbol, timeframe=DEFAULT_TIMEFRAME, limit=DEFAULT_LIMIT,
     return evaluations
 
 
+def _evaluate_live_pipeline(df, candles, symbol, timeframe,
+                            monte_carlo_runs, seed):
+    """
+    驗證 live 實際在用的訊號管線。
+
+    這是 LIVE SAFETY GATE 真正該看的那一個 —— 其他都是對照。
+    """
+    from agmcis.lab import pipeline_bridge
+
+    def build_signal(slice_candles, params):
+        # Lab 會傳切好的子區間。指標一次算完整段之後逐根取值,
+        # 所以這裡要把切片起點對回原始 DataFrame 的位置。
+        offset = _offset_of(df, slice_candles)
+        signal_fn = pipeline_bridge.build_signal_fn(
+            df, params, symbol=symbol, timeframe=timeframe,
+        )
+        return lambda history, index: signal_fn(history, index + offset)
+
+    evaluation = evaluate_module.evaluate(
+        candles, build_signal, pipeline_bridge.default_param_sets(),
+        name=LIVE_PIPELINE_NAME, symbol=symbol,
+        monte_carlo_runs=monte_carlo_runs, seed=seed,
+        warmup=pipeline_bridge.WARMUP_BARS,
+        engine=BacktestEngine(costs=DEFAULT_COSTS),
+    )
+    return evaluation
+
+
+def _offset_of(df, slice_candles):
+    """切片的第一根在原始 DataFrame 的哪一列。對不上就回 0。"""
+    if not slice_candles:
+        return 0
+
+    first = slice_candles[0]
+    stamp = first.get("time") or first.get("timestamp")
+    if stamp is None:
+        return 0
+
+    index_of_time = {int(t): i for i, t in enumerate(df["timestamp"])}
+    return index_of_time.get(int(stamp), 0)
+
+
 def _row(evaluation):
     validation = evaluation.validation
     oos = validation.oos_run if validation else None
@@ -132,6 +208,9 @@ def _row(evaluation):
     return {
         "symbol": evaluation.symbol,
         "strategy": evaluation.name,
+        # LIVE SAFETY GATE 只認這個為 True 的那些 ——
+        # 驗證一組永遠不會下單的策略等於沒有驗證。
+        "is_live_pipeline": evaluation.name == LIVE_PIPELINE_NAME,
         "verdict": evaluation.verdict,
         "params": evaluation.chosen_params,
         "oos_trades": metrics.total_trades if metrics else 0,
@@ -152,9 +231,16 @@ def _row(evaluation):
 
 
 def _rank_key(row):
-    """排名依據:通過與否 > Health > OOS 期望值。報酬率不參與排名。"""
+    """
+    排名依據:live 管線優先 > 通過與否 > Health > OOS 期望值。
+    報酬率不參與排名。
+
+    live 管線排前面不是因為它比較好,是因為**它才是會下單的那一個** ——
+    看報告的人第一眼應該看到它。
+    """
     verdict_rank = {"PASS": 0, "MARGINAL": 1, "REJECT": 2, "ERROR": 3}
     return (
+        not row.get("is_live_pipeline"),
         verdict_rank.get(row["verdict"], 3),
         -(row["health_score"] or 0),
         -(row["oos_expectancy_r"] or 0),
@@ -183,6 +269,7 @@ def get_strategy_optimizer(symbols=None, limit=20, timeframe=DEFAULT_TIMEFRAME,
             errors.append({"symbol": symbol, "error": message})
             results.append({
                 "symbol": symbol, "strategy": None, "verdict": "ERROR",
+                "is_live_pipeline": False,
                 "error": message, "health_score": 0.0,
                 "oos_expectancy_r": None, "oos_trades": 0,
             })
@@ -211,8 +298,12 @@ def get_strategy_optimizer(symbols=None, limit=20, timeframe=DEFAULT_TIMEFRAME,
         "strategy_summary": _summarise_by_strategy(results),
         "best_overall": _best_overall(results),
         "ensemble": ensemble_module.build(all_evaluations).to_dict(),
+        "live_pipeline_passed": [
+            row for row in results
+            if row.get("is_live_pipeline") and row.get("verdict") == "PASS"
+        ],
         "errors": errors,
-        "warnings": [SURVIVORSHIP_WARNING],
+        "warnings": [SURVIVORSHIP_WARNING, LEGACY_STRATEGY_WARNING],
     }
 
 

@@ -29,7 +29,7 @@ Master Prompt 第一百零二節:Live Trading / API Key / Risk Limit 需要人�
 | 1 | 上線前檢查沒有 BLOCKER | 見 `scripts/preflight.py` |
 | 2 | 合約規格已校準且非測試網 | 用猜的維持保證金率算出來的強平價不會準,而它準不準決定的是會不會爆倉 |
 | 3 | 模擬盤 ≥ 100 筆 / ≥ 30 天 | 筆數夠但只跑兩天,代表沒有經歷過不同的市況 |
-| 4 | 至少一個策略通過 OOS 驗證 | Phase 8 |
+| 4 | **live 訊號管線**通過 OOS 驗證 | Phase 8。只認 `is_live_pipeline` —— 驗證一組永遠不會下單的策略等於沒有驗證 |
 | 5 | 自我檢討判定 **HEALTHY** | `FRAGILE` 也不行 |
 | 6 | 沒有裸倉、沒有未結訂單、沒有對帳差異 | Phase 12 / 13 |
 | 7 | Kill Switch 可平倉且未啟動 | Phase 16 |

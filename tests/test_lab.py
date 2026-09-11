@@ -504,3 +504,174 @@ class TestEvaluateEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPipelineBridgeValidatesWhatActuallyTrades(unittest.TestCase):
+    """
+    系統裡有兩組策略:agmcis/strategy/builtin.py(live 在用)與
+    strategies/*.py(舊的模組式)。Phase 8 的 Lab 原本只驗第二組 ——
+    也就是說 LIVE SAFETY GATE 第 4 項驗的是**一組永遠不會下單的策略**。
+
+    那是 Phase 6 與 Phase 9 處理過兩次的同一類問題:兩條路徑,
+    而實際生效的是哪一條沒有人說得清楚。
+    """
+
+    def _frame(self, count=500):
+        import math
+
+        import pandas as pd
+
+        rows = []
+        for i in range(count):
+            trend = i * 0.12
+            wave = 9.0 * math.sin(i / 10.0) + 3.0 * math.sin(i / 3.0)
+            close = 100 + trend + wave
+            open_ = 100 + (i - 1) * 0.12 + 9.0 * math.sin((i - 1) / 10.0) \
+                + 3.0 * math.sin((i - 1) / 3.0)
+            rows.append({
+                "timestamp": i * 3_600_000,
+                "open": open_,
+                "high": max(open_, close) + 0.7,
+                "low": min(open_, close) - 0.7,
+                "close": close,
+                "volume": 1200.0 + 400.0 * abs(math.sin(i / 5.0)),
+            })
+        return pd.DataFrame(rows)
+
+    def test_the_bridge_uses_the_real_strategy_registry(self):
+        """
+        複製一份策略邏輯到 Lab 裡,會讓驗的東西與 live 用的東西悄悄分岔。
+        """
+        import inspect
+
+        from agmcis.lab import pipeline_bridge
+
+        source = inspect.getsource(pipeline_bridge)
+        self.assertIn("StrategyRegistry", source)
+        self.assertIn("registry.consensus", source)
+
+    def test_indicators_at_a_row_match_the_live_calculation(self):
+        """
+        Lab 逐根取指標,live 用 indicators.compute() 算最後一根。
+        兩邊必須得到同一組數字,否則 Lab 驗的是另一套訊號。
+        """
+        from agmcis.analysis import indicators as indicators_module
+        from agmcis.lab import pipeline_bridge
+
+        frame = self._frame(300)
+        precomputed = pipeline_bridge.precompute(frame)
+
+        live = indicators_module.compute(frame, "X", "1h")
+        lab = pipeline_bridge.indicators_at(precomputed, len(frame) - 1)
+
+        for field in ("ema20", "ema50", "rsi", "macd", "adx", "atr"):
+            with self.subTest(field=field):
+                self.assertAlmostEqual(
+                    getattr(lab, field), getattr(live, field), places=6,
+                )
+
+    def test_warmup_rows_are_reported_as_unusable(self):
+        """指標還沒暖機完就進場,等於用不存在的資訊做決定。"""
+        from agmcis.lab import pipeline_bridge
+
+        frame = pipeline_bridge.precompute(self._frame(200))
+
+        self.assertFalse(pipeline_bridge.indicators_at(frame, 3).data_ok)
+
+    def test_the_bridge_produces_signals(self):
+        """接錯的症狀是「一筆都不交易」,而那看起來跟「條件很嚴」一樣。"""
+        from agmcis.lab import pipeline_bridge
+
+        frame = self._frame(500)
+        signal_fn = pipeline_bridge.build_signal_fn(frame, {"min_score": 0})
+
+        signals = [
+            signal_fn(None, i) for i in range(pipeline_bridge.WARMUP_BARS, 500)
+        ]
+
+        self.assertGreater(len([s for s in signals if s]), 0)
+
+    def test_every_signal_carries_a_stop_on_the_correct_side(self):
+        from agmcis.lab import pipeline_bridge
+
+        frame = self._frame(500)
+        signal_fn = pipeline_bridge.build_signal_fn(frame, {"min_score": 0})
+
+        checked = 0
+        for i in range(pipeline_bridge.WARMUP_BARS, 500):
+            signal = signal_fn(None, i)
+            if not signal:
+                continue
+
+            checked += 1
+            price = float(frame["close"].iloc[i])
+            if signal["direction"] == "做多":
+                self.assertLess(signal["stop_loss"], price)
+            else:
+                self.assertGreater(signal["stop_loss"], price)
+
+        self.assertGreater(checked, 0)
+
+    def test_a_higher_score_threshold_produces_fewer_signals(self):
+        """
+        這正是 Lab 要回答的取捨:嚴一點的門檻是不是真的換來更好的期望值,
+        還是只是讓樣本變小到看不出東西。
+        """
+        from agmcis.lab import pipeline_bridge
+
+        frame = self._frame(500)
+
+        def count(min_score):
+            fn = pipeline_bridge.build_signal_fn(frame, {"min_score": min_score})
+            return len([
+                s for s in (
+                    fn(None, i)
+                    for i in range(pipeline_bridge.WARMUP_BARS, 500)
+                ) if s
+            ])
+
+        self.assertGreaterEqual(count(0), count(75))
+
+    def test_only_one_tunable_parameter(self):
+        """參數越多越容易在歷史上擬合出漂亮的曲線。"""
+        from agmcis.lab import pipeline_bridge
+
+        keys = set()
+        for params in pipeline_bridge.default_param_sets():
+            keys.update(params)
+
+        self.assertEqual(keys, {"min_score"})
+
+
+class TestTheScanValidatesTheLivePipeline(unittest.TestCase):
+
+    def test_the_live_pipeline_is_marked_in_the_report(self):
+        import strategy_optimizer
+
+        self.assertEqual(strategy_optimizer.LIVE_PIPELINE_NAME, "LIVE_PIPELINE")
+
+    def test_the_warning_names_the_legacy_strategies(self):
+        """
+        報告要說清楚哪些策略 live 不會用 ——
+        看報告的人不該需要去翻程式碼才知道。
+        """
+        import strategy_optimizer
+
+        warning = strategy_optimizer.LEGACY_STRATEGY_WARNING
+        self.assertIn("永遠不會下單", warning)
+        for name, _ in strategy_optimizer.LEGACY_STRATEGIES:
+            self.assertIn(name, warning)
+
+    def test_the_live_pipeline_ranks_first(self):
+        """它不是比較好,是**它才是會下單的那一個**。"""
+        import strategy_optimizer
+
+        rows = [
+            {"verdict": "PASS", "health_score": 99.0, "oos_expectancy_r": 5.0,
+             "is_live_pipeline": False},
+            {"verdict": "REJECT", "health_score": 0.0, "oos_expectancy_r": 0.1,
+             "is_live_pipeline": True},
+        ]
+
+        ranked = sorted(rows, key=strategy_optimizer._rank_key)
+        self.assertTrue(ranked[0]["is_live_pipeline"])

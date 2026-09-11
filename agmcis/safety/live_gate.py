@@ -277,7 +277,15 @@ class LiveGate:
         return GateCheck("績效判定", True, review.get("headline", "HEALTHY"))
 
     def check_strategy_validation(self):
-        """至少要有一個策略通過 Phase 8 的樣本外驗證。"""
+        """
+        **live 實際在用的訊號管線**要通過 Phase 8 的樣本外驗證。
+
+        只看「有沒有策略通過」是不夠的。系統裡還留著幾個舊的模組式策略,
+        它們會一起被驗證,但 live 不會用它們 ——
+        **驗證一組永遠不會下單的策略,等於沒有驗證。**
+
+        所以這裡只認 is_live_pipeline=True 的結果。
+        """
         provider = self._provider("strategy_validation", None)
         if provider is None:
             return GateCheck("策略驗證", False, "取不到策略驗證結果")
@@ -287,21 +295,41 @@ class LiveGate:
         except Exception as exc:
             return GateCheck("策略驗證", False, f"讀取失敗:{exc}")
 
-        passed = [
-            row for row in (result.get("all_results") or [])
-            if row.get("verdict") == "PASS"
-        ]
+        rows = result.get("all_results") or []
+        live_rows = [row for row in rows if row.get("is_live_pipeline")]
 
-        if not passed:
+        if not live_rows:
+            # 報告裡完全沒有 live 管線的結果。那可能是舊格式的報告,
+            # 也可能是驗證根本沒跑到它 —— 兩種都不能算通過。
             return GateCheck(
                 "策略驗證", False,
-                "沒有任何策略通過 OOS + Walk Forward 驗證。",
+                "驗證結果裡沒有 live 訊號管線。只驗舊的模組式策略"
+                "等於沒有驗證 —— 那些策略不會下單。",
             )
 
-        return GateCheck(
-            "策略驗證", True,
-            f"{len(passed)} 個 (標的, 策略) 組合通過驗證",
-        )
+        passed = [row for row in live_rows if row.get("verdict") == "PASS"]
+
+        if not passed:
+            blockers = []
+            for row in live_rows:
+                blockers.extend(row.get("blockers") or [])
+
+            return GateCheck(
+                "策略驗證", False,
+                "live 訊號管線沒有通過 OOS + Walk Forward 驗證。"
+                + (f"\n{blockers[0]}" if blockers else ""),
+            )
+
+        other = len([
+            row for row in rows
+            if row.get("verdict") == "PASS" and not row.get("is_live_pipeline")
+        ])
+
+        detail = f"live 訊號管線在 {len(passed)} 個標的上通過驗證"
+        if other:
+            detail += f"(另有 {other} 個舊策略也通過,但 live 不用它們)"
+
+        return GateCheck("策略驗證", True, detail)
 
     def check_calibration(self):
         """

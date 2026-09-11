@@ -71,6 +71,7 @@ Broker            PaperBroker(LiveBroker 不存在)
 | 調整只能讓部位更安全,不能更寬鬆 | Phase 4 起,每一層的四捨五入都往保守方向 |
 | 狀態不明的訂單不可以重送 | `state_machine.can_resubmit` |
 | 對帳只更正紀錄,絕不下單 | `tests/test_reconciliation.py` 掃描原始碼 |
+| Lab 驗證的必須是 live 實際在用的訊號 | `LiveGate.check_strategy_validation` 只認 `is_live_pipeline` |
 | 棄權不是反對票 | `Vote.opposes` |
 | 資料壞掉不等於市場中性 | 資料品質 Gate、`data_ok=False` |
 | 安全檢查壞掉時算「沒通過」 | `LiveGate.evaluate` |
