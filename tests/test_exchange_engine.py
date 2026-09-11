@@ -20,8 +20,7 @@ from unittest.mock import MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import fake_ccxt
-sys.modules["ccxt"] = fake_ccxt
+import ccxt
 
 os.environ.setdefault("EXCHANGE_MAX_RETRIES", "2")
 os.environ.setdefault("EXCHANGE_RETRY_BACKOFF_SECONDS", "0")  # 測試不用真的等待
@@ -48,7 +47,7 @@ class TestExchangeEngine(unittest.TestCase):
     def test_retries_on_network_error_then_succeeds(self):
         mock = MagicMock()
         mock.fetch_ticker.side_effect = [
-            fake_ccxt.NetworkError("timeout"),
+            ccxt.NetworkError("timeout"),
             {"last": 65010, "percentage": 1.1},
         ]
 
@@ -60,7 +59,7 @@ class TestExchangeEngine(unittest.TestCase):
 
     def test_raises_unavailable_after_retries_exhausted(self):
         mock = MagicMock()
-        mock.fetch_ticker.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_ticker.side_effect = ccxt.NetworkError("down")
 
         engine = make_engine(mock)
         with self.assertRaises(ExchangeUnavailableError):
@@ -70,7 +69,7 @@ class TestExchangeEngine(unittest.TestCase):
 
     def test_non_retryable_error_fails_immediately(self):
         mock = MagicMock()
-        mock.fetch_ticker.side_effect = fake_ccxt.BaseError("symbol not found")
+        mock.fetch_ticker.side_effect = ccxt.BadSymbol("symbol not found")
 
         engine = make_engine(mock)
         with self.assertRaises(ExchangeUnavailableError):
@@ -80,7 +79,7 @@ class TestExchangeEngine(unittest.TestCase):
 
     def test_funding_rate_returns_none_on_failure(self):
         mock = MagicMock()
-        mock.fetch_funding_rate.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_funding_rate.side_effect = ccxt.NetworkError("down")
 
         engine = make_engine(mock)
         result = engine.get_funding_rate("BTC/USDT:USDT")
@@ -89,7 +88,7 @@ class TestExchangeEngine(unittest.TestCase):
 
     def test_open_interest_returns_none_on_failure(self):
         mock = MagicMock()
-        mock.fetch_open_interest.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_open_interest.side_effect = ccxt.NetworkError("down")
 
         engine = make_engine(mock)
         result = engine.get_open_interest("BTC/USDT:USDT")

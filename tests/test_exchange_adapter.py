@@ -11,7 +11,7 @@ ExchangeAdapter(BingX)。
 import unittest
 from unittest.mock import MagicMock
 
-import fake_ccxt
+import ccxt
 
 from agmcis.core.enums import MarketType, OrderSide, OrderType
 from agmcis.core.errors import ExchangeUnavailableError
@@ -35,11 +35,17 @@ class TestSymbolConversion(unittest.TestCase):
             self.a.to_market_symbol("BTC/USDT", MarketType.PERPETUAL), "BTC/USDT:USDT"
         )
 
-    def test_standard_has_no_suffix(self):
-        """Standard 與 Perpetual 的符號格式不同,不能混用。"""
-        self.assertEqual(
-            self.a.to_market_symbol("BTC/USDT", MarketType.STANDARD), "BTC/USDT"
-        )
+    def test_standard_is_rejected_loudly(self):
+        """
+        Phase 3 實測發現 ccxt 的 bingx 沒有 futures 市場型態
+        (has['future'] 是 False),Standard Contract 只有三個 private 端點。
+
+        原本這裡會回傳一個看起來合理的符號,然後在更深的地方失敗,
+        錯誤訊息完全看不出根因。現在早點失敗、訊息說清楚。
+        """
+        with self.assertRaises(ExchangeUnavailableError) as ctx:
+            self.a.to_market_symbol("BTC/USDT", MarketType.STANDARD)
+        self.assertIn("Standard Futures", str(ctx.exception))
 
     def test_already_converted_symbol_is_left_alone(self):
         self.assertEqual(
@@ -72,14 +78,14 @@ class TestCoreMarketDataRaises(unittest.TestCase):
     def test_retries_then_succeeds(self):
         mock = MagicMock()
         mock.fetch_ticker.side_effect = [
-            fake_ccxt.NetworkError("timeout"), {"last": 65010},
+            ccxt.NetworkError("timeout"), {"last": 65010},
         ]
         self.assertEqual(adapter(mock).get_ticker("BTC/USDT")["price"], 65010)
         self.assertEqual(mock.fetch_ticker.call_count, 2)
 
     def test_raises_after_retries_exhausted(self):
         mock = MagicMock()
-        mock.fetch_ticker.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_ticker.side_effect = ccxt.NetworkError("down")
 
         with self.assertRaises(ExchangeUnavailableError):
             adapter(mock).get_ticker("BTC/USDT")
@@ -88,7 +94,7 @@ class TestCoreMarketDataRaises(unittest.TestCase):
     def test_non_retryable_error_fails_immediately(self):
         """交易所明確拒絕(symbol 不存在)重試沒用,不要浪費時間。"""
         mock = MagicMock()
-        mock.fetch_ticker.side_effect = fake_ccxt.BaseError("symbol not found")
+        mock.fetch_ticker.side_effect = ccxt.BadSymbol("symbol not found")
 
         with self.assertRaises(ExchangeUnavailableError):
             adapter(mock).get_ticker("FAKE/USDT")
@@ -104,7 +110,7 @@ class TestCoreMarketDataRaises(unittest.TestCase):
 
     def test_ohlcv_raises_on_failure(self):
         mock = MagicMock()
-        mock.fetch_ohlcv.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_ohlcv.side_effect = ccxt.NetworkError("down")
         with self.assertRaises(ExchangeUnavailableError):
             adapter(mock).get_ohlcv("BTC/USDT")
 
@@ -114,17 +120,17 @@ class TestAuxiliaryDataReturnsNone(unittest.TestCase):
 
     def test_funding_rate_returns_none_on_failure(self):
         mock = MagicMock()
-        mock.fetch_funding_rate.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_funding_rate.side_effect = ccxt.NetworkError("down")
         self.assertIsNone(adapter(mock).get_funding_rate("BTC/USDT"))
 
     def test_open_interest_returns_none_on_failure(self):
         mock = MagicMock()
-        mock.fetch_open_interest.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_open_interest.side_effect = ccxt.NetworkError("down")
         self.assertIsNone(adapter(mock).get_open_interest("BTC/USDT"))
 
     def test_order_book_returns_none_on_failure(self):
         mock = MagicMock()
-        mock.fetch_order_book.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_order_book.side_effect = ccxt.NetworkError("down")
         self.assertIsNone(adapter(mock).get_order_book("BTC/USDT"))
 
     def test_standard_futures_has_no_funding_rate(self):
@@ -306,7 +312,7 @@ class TestAdapterContract(unittest.TestCase):
 
     def test_ping_reports_failure_without_raising(self):
         mock = MagicMock()
-        mock.fetch_ticker.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_ticker.side_effect = ccxt.NetworkError("down")
         result = adapter(mock).ping()
 
         self.assertFalse(result["success"])
@@ -329,7 +335,7 @@ class TestUniverseUsesPublicApi(unittest.TestCase):
 
     def test_get_tickers_raises_on_failure(self):
         mock = MagicMock()
-        mock.fetch_tickers.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_tickers.side_effect = ccxt.NetworkError("down")
         with self.assertRaises(ExchangeUnavailableError):
             adapter(mock).get_tickers()
 
@@ -339,7 +345,7 @@ class TestUniverseUsesPublicApi(unittest.TestCase):
         from agmcis.data import market_data
 
         mock = MagicMock()
-        mock.fetch_tickers.side_effect = fake_ccxt.NetworkError("down")
+        mock.fetch_tickers.side_effect = ccxt.NetworkError("down")
         market_data.set_adapter(adapter(mock))
         try:
             self.assertEqual(exchange_universe.get_top_volume_symbols(), [])
@@ -366,3 +372,169 @@ class TestUniverseUsesPublicApi(unittest.TestCase):
 
         self.assertEqual([r["symbol"] for r in result], ["BTC/USDT", "ETH/USDT"])
         self.assertTrue(all(r["exchanges"] == ["bingx"] for r in result))
+
+
+class TestRetryPolicyIsApplied(unittest.TestCase):
+    """
+    _call 的重試行為現在由 error_policy 決定。
+    這裡確認策略真的被套用,而不是所有錯誤都拿到一樣的待遇。
+    """
+
+    def _adapter(self, mock, limiter=None):
+        self.slept = []
+        return BingXAdapter(
+            exchange_factory=lambda mt=None: mock,
+            max_retries=3, backoff_seconds=1.0,
+            rate_limiter=limiter, sleep=self.slept.append,
+        )
+
+    def test_rate_limit_triggers_cooldown_not_a_normal_retry(self):
+        from agmcis.exchange.rate_limiter import RateLimiter
+
+        limiter = RateLimiter(max_calls=1000, period_seconds=10.0)
+        mock = MagicMock()
+        mock.fetch_ticker.side_effect = [
+            ccxt.RateLimitExceeded("429"), {"last": 65000},
+        ]
+        a = self._adapter(mock, limiter)
+        a.get_ticker("BTC/USDT")
+
+        # 限流走冷卻,不是一般的 sleep 退避
+        self.assertEqual(limiter.status()["cooldown_count"], 1)
+
+    def test_clock_skew_resyncs_time_instead_of_blind_retry(self):
+        mock = MagicMock()
+        mock.fetch_ticker.side_effect = [
+            ccxt.InvalidNonce("timestamp"), {"last": 65000},
+        ]
+        mock.fetch_time.return_value = 1_700_000_000_000
+
+        a = self._adapter(mock)
+        a.get_ticker("BTC/USDT")
+
+        mock.fetch_time.assert_called_once()
+
+    def test_clock_skew_gives_up_after_one_resync(self):
+        """對過時還是失敗就不要一直對時。"""
+        mock = MagicMock()
+        mock.fetch_ticker.side_effect = ccxt.InvalidNonce("timestamp")
+        mock.fetch_time.return_value = 1_700_000_000_000
+
+        a = self._adapter(mock)
+        with self.assertRaises(ExchangeUnavailableError):
+            a.get_ticker("BTC/USDT")
+
+        self.assertEqual(mock.fetch_time.call_count, 1)
+
+    def test_auth_error_is_not_retried(self):
+        mock = MagicMock()
+        mock.fetch_balance.side_effect = ccxt.AuthenticationError("bad key")
+
+        a = self._adapter(mock)
+        with self.assertRaises(ExchangeUnavailableError):
+            a.get_balance()
+
+        mock.fetch_balance.assert_called_once()
+
+    def test_write_timeout_demands_reconciliation_and_never_retries(self):
+        """
+        送出訂單後逾時:交易所可能已經收到。
+        重送是重複開倉最常見的來源,所以這裡必須拋 OrderStateUnknownError。
+        """
+        from agmcis.core.errors import OrderStateUnknownError
+
+        mock = MagicMock()
+        mock.create_order.side_effect = ccxt.RequestTimeout("no response")
+
+        a = self._adapter(mock)
+        with self.assertRaises(OrderStateUnknownError):
+            a.create_order("BTC/USDT", OrderSide.BUY, 0.01)
+
+        mock.create_order.assert_called_once()
+
+    def test_insufficient_funds_on_write_is_a_plain_rejection(self):
+        """交易所明確拒絕代表它沒有收單,不需要對帳。"""
+        from agmcis.core.errors import OrderRejectedError
+
+        mock = MagicMock()
+        mock.create_order.side_effect = ccxt.InsufficientFunds("no margin")
+
+        a = self._adapter(mock)
+        with self.assertRaises(OrderRejectedError):
+            a.create_order("BTC/USDT", OrderSide.BUY, 0.01)
+
+
+class TestServerTimeSync(unittest.TestCase):
+
+    def _adapter(self, mock):
+        return BingXAdapter(
+            exchange_factory=lambda mt=None: mock,
+            max_retries=1, backoff_seconds=0, sleep=lambda s: None,
+        )
+
+    def test_reports_offset(self):
+        import time as _time
+
+        mock = MagicMock()
+        mock.fetch_time.return_value = _time.time() * 1000 + 500
+
+        a = self._adapter(mock)
+        offset = a.sync_server_time()
+
+        self.assertIsNotNone(offset)
+        self.assertTrue(a.clock_status()["within_tolerance"])
+
+    def test_large_skew_is_flagged(self):
+        """時鐘偏移的錯誤訊息看起來像 API Key 有問題,必須明確標出來。"""
+        import time as _time
+
+        mock = MagicMock()
+        mock.fetch_time.return_value = _time.time() * 1000 + 60_000
+
+        a = self._adapter(mock)
+        a.sync_server_time()
+
+        self.assertFalse(a.clock_status()["within_tolerance"])
+
+    def test_failure_returns_none_without_raising(self):
+        mock = MagicMock()
+        mock.fetch_time.side_effect = ccxt.NetworkError("down")
+
+        a = self._adapter(mock)
+        self.assertIsNone(a.sync_server_time())
+        self.assertFalse(a.clock_status()["synced"])
+
+
+class TestStandardFuturesIsRejectedEverywhere(unittest.TestCase):
+    """
+    Phase 3 實測:ccxt 的 bingx has['future'] 是 False,
+    而 defaultType='futures' 建構時不報錯、呼叫時才炸。
+    所以每一條進入點都要明確擋下,不能留下「看起來能跑」的路徑。
+    """
+
+    def setUp(self):
+        self.a = adapter(MagicMock())
+
+    def test_symbol_conversion_rejects(self):
+        with self.assertRaises(ExchangeUnavailableError):
+            self.a.to_market_symbol("BTC/USDT", MarketType.STANDARD)
+
+    def test_ticker_rejects(self):
+        with self.assertRaises(ExchangeUnavailableError):
+            self.a.get_ticker("BTC/USDT", MarketType.STANDARD)
+
+    def test_ohlcv_rejects(self):
+        with self.assertRaises(ExchangeUnavailableError):
+            self.a.get_ohlcv("BTC/USDT", "1h", 10, MarketType.STANDARD)
+
+    def test_trading_rules_reject(self):
+        with self.assertRaises(ExchangeUnavailableError):
+            self.a.get_trading_rules("BTC/USDT", MarketType.STANDARD)
+
+    def test_capabilities_does_not_claim_support(self):
+        self.assertFalse(self.a.supports("standard_futures"))
+
+    def test_reason_explains_why(self):
+        from agmcis.exchange.bingx.adapter import STANDARD_UNSUPPORTED_REASON
+        self.assertIn("has['future']", STANDARD_UNSUPPORTED_REASON)
+        self.assertIn("PHASE_3_REPORT", STANDARD_UNSUPPORTED_REASON)

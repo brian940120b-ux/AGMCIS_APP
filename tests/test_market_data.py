@@ -19,9 +19,6 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import fake_ccxt
-sys.modules["ccxt"] = fake_ccxt
-
 from cache_service import CacheService  # noqa: E402
 
 

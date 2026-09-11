@@ -115,6 +115,18 @@ EXCHANGE_TIMEOUT_MS = env_int("EXCHANGE_TIMEOUT_MS", 8000)
 EXCHANGE_MAX_RETRIES = env_int("EXCHANGE_MAX_RETRIES", 3)
 EXCHANGE_RETRY_BACKOFF_SECONDS = env_float("EXCHANGE_RETRY_BACKOFF_SECONDS", 0.8)
 
+# 行程內的請求節流。多個 process 共用同一把 API Key 時各自有額度,
+# 真正的跨行程限流要等 Phase 16 有共用狀態。
+EXCHANGE_RATE_LIMIT_CALLS = env_int("EXCHANGE_RATE_LIMIT_CALLS", 100)
+EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
+
+# 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,
+# 而錯誤訊息看起來像 API Key 有問題,很容易誤判。
+EXCHANGE_MAX_CLOCK_SKEW_MS = env_int("EXCHANGE_MAX_CLOCK_SKEW_MS", 3000)
+
+# 使用 BingX 測試環境(VST)。Phase 11 驗證用;正式環境必須是 false。
+EXCHANGE_USE_TESTNET = env_bool("EXCHANGE_USE_TESTNET", False)
+
 
 def has_exchange_credentials():
     return bool(EXCHANGE_CREDENTIALS["apiKey"] and EXCHANGE_CREDENTIALS["secret"])

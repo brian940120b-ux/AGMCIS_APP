@@ -1,14 +1,22 @@
 """
 BingX ExchangeAdapter 實作。
 
-Phase 2 範圍:行情 + 合約規則 + 衍生品資料。
-下單與帳戶方法的介面已就位,但風控與 Trading Rules Engine 完成前不可直接使用。
-
 設計:
   - ccxt 實體透過 exchange_factory 注入,不在 import 時建立 —— 這是能寫單元測試的前提。
-  - 重試分兩種:網路/逾時值得重試(指數退避);交易所明確拒絕不值得重試。
+  - 重試策略由 error_policy 決定,不同錯誤有不同退避(限流退更久、時鐘偏移先對時)。
   - 核心行情失敗拋例外,輔助資料失敗回 None(見 base.py 的約定)。
-  - Standard 與 Perpetual 用不同的 defaultType 與符號格式。
+
+⚠️ 為什麼用 ccxt 而不自己實作 HTTP 與簽章:
+  Master Prompt 要求「不要靠模型記憶猜 API」。BingX 的端點路徑與參數會變,
+  自己手寫一份簽章與端點對應表,等於把「猜」寫進程式碼。
+  ccxt 是持續對著活的 API 維護的,把它當成 HTTP + 簽章層,
+  我們專注在它不提供的東西:限流策略、錯誤分類、對時、合約規則快取、狀態正規化。
+
+⚠️ Standard Futures 目前無法支援(Phase 3 實測結論,見 docs/PHASE_3_REPORT.md):
+  ccxt 的 bingx 只有 spot 與 swap 兩種統一市場型態(has['future'] 是 False)。
+  BingX Standard Contract 是另一套 API,在 ccxt 只有三個 private 端點
+  (balance / allPosition / allOrders)—— 沒有行情、沒有合約清單、沒有下單。
+  所以這裡對 Standard 一律明確拒絕,不做「看起來能跑但其實錯」的事。
 """
 import logging
 import time
@@ -21,84 +29,212 @@ from agmcis.config import settings
 from agmcis.core.enums import MarketType, OrderSide, OrderType
 from agmcis.core.errors import ExchangeUnavailableError
 from agmcis.core.models import TradingRules
+from agmcis.exchange import error_policy
 from agmcis.exchange.base import ExchangeAdapter
+from agmcis.exchange.rate_limiter import RateLimiter
 
 logger = logging.getLogger("agmcis.exchange.bingx")
 
-# ccxt 的 defaultType。BingX 的永續是 swap;標準合約走 futures。
+# ccxt 的 bingx 只有這一種合約市場型態。
+# has['future'] 是 False,傳 defaultType='futures' 建構時不會報錯,
+# 但實際呼叫時才會失敗 —— 這種「延後爆炸」正是要避免的。
 _CCXT_MARKET_TYPE = {
     MarketType.PERPETUAL: "swap",
-    MarketType.STANDARD: "futures",
 }
 
+STANDARD_UNSUPPORTED_REASON = (
+    "BingX Standard Futures 目前無法透過 ccxt 支援:"
+    "ccxt 的 bingx 統一 API 只涵蓋 spot 與 swap(has['future'] = False),"
+    "Standard Contract 只有 balance / allPosition / allOrders 三個 private 端點,"
+    "沒有行情、沒有合約清單、也沒有下單。詳見 docs/PHASE_3_REPORT.md。"
+)
+
 CAPABILITIES = frozenset({
-    "ticker", "ohlcv", "order_book", "funding_rate", "open_interest",
-    "trading_rules", "perpetual_futures",
+    "ticker", "ohlcv", "tickers", "order_book", "funding_rate", "open_interest",
+    "trading_rules", "perpetual_futures", "server_time", "sandbox",
 })
 
 
 def _build_ccxt_exchange(market_type=MarketType.PERPETUAL):
     credentials = {k: v for k, v in settings.EXCHANGE_CREDENTIALS.items() if v}
-    return ccxt.bingx({
+    exchange = ccxt.bingx({
         **credentials,
         "enableRateLimit": True,
         "timeout": settings.EXCHANGE_TIMEOUT_MS,
-        "options": {"defaultType": _CCXT_MARKET_TYPE[market_type]},
+        "options": {"defaultType": _ccxt_type(market_type)},
     })
+    if settings.EXCHANGE_USE_TESTNET:
+        # BingX 的測試環境(VST)。Phase 11 會用到。
+        exchange.set_sandbox_mode(True)
+        logger.warning("[bingx] 使用測試環境 (VST) —— 這不是真實市場")
+    return exchange
+
+
+def _ccxt_type(market_type):
+    market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
+    if market_type not in _CCXT_MARKET_TYPE:
+        raise ExchangeUnavailableError(STANDARD_UNSUPPORTED_REASON)
+    return _CCXT_MARKET_TYPE[market_type]
 
 
 class BingXAdapter(ExchangeAdapter):
     name = "bingx"
 
     def __init__(self, exchange_factory=_build_ccxt_exchange,
-                 max_retries=None, backoff_seconds=None):
+                 max_retries=None, backoff_seconds=None,
+                 rate_limiter=None, sleep=time.sleep):
         self._factory = exchange_factory
         self._instances = {}
         self._markets_cache = {}
+        self._sleep = sleep
         self.max_retries = max_retries or settings.EXCHANGE_MAX_RETRIES
         self.backoff_seconds = (
             backoff_seconds if backoff_seconds is not None
             else settings.EXCHANGE_RETRY_BACKOFF_SECONDS
         )
+        self.rate_limiter = rate_limiter if rate_limiter is not None else RateLimiter(
+            max_calls=settings.EXCHANGE_RATE_LIMIT_CALLS,
+            period_seconds=settings.EXCHANGE_RATE_LIMIT_PERIOD,
+        )
+        # 伺服器時間與本機時間的差(毫秒)。None 代表還沒對過時。
+        self._time_offset_ms = None
+        self._time_synced_at = None
 
     def capabilities(self):
-        # standard_futures 刻意不在清單裡:符號與規則的處理已就位,
-        # 但尚未對真實 BingX Standard 市場驗證過(Phase 3)。
+        # standard_futures 不在清單裡,而且是**確定不支援**,不是尚未驗證。
+        # 原因見模組頂端的 STANDARD_UNSUPPORTED_REASON。
         return CAPABILITIES
 
     # ---------------- 底層呼叫 ----------------
 
     def _instance(self, market_type):
         market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
+        self._require_supported(market_type)
         if market_type not in self._instances:
             self._instances[market_type] = self._factory(market_type)
         return self._instances[market_type]
 
-    def _call(self, fn_name, *args, market_type=MarketType.PERPETUAL, **kwargs):
+    def _call(self, fn_name, *args, market_type=MarketType.PERPETUAL,
+              is_write=False, **kwargs):
+        """
+        帶重試的交易所呼叫。
+
+        重試策略由 error_policy 決定 —— 不是所有「網路錯誤」都該用同樣的退避:
+          被限流要退更久,時鐘偏移要先對時,而寫入操作的逾時根本不該重試。
+        """
         exchange = self._instance(market_type)
         fn = getattr(exchange, fn_name)
         last_error = None
+        resynced = False
 
         for attempt in range(1, self.max_retries + 1):
+            self.rate_limiter.acquire(sleep=self._sleep)
+
             try:
                 return fn(*args, **kwargs)
-            except (ccxt.NetworkError, ccxt.ExchangeNotAvailable, ccxt.RequestTimeout) as exc:
+            except Exception as exc:
                 last_error = exc
-                logger.warning(
-                    "[bingx] %s attempt %d/%d failed (retryable): %s",
-                    fn_name, attempt, self.max_retries, exc,
+                policy = (
+                    error_policy.classify_write_failure(exc) if is_write
+                    else error_policy.classify(exc)
                 )
-                if attempt < self.max_retries:
-                    time.sleep(self.backoff_seconds * attempt)
-            except ccxt.BaseError as exc:
-                # 交易所明確拒絕(symbol 不存在、權限不足)重試沒用,直接放棄
-                last_error = exc
-                logger.error("[bingx] %s non-retryable error: %s", fn_name, exc)
-                break
 
-        raise ExchangeUnavailableError(
-            f"{fn_name} failed on bingx: {last_error!r}"
+                if policy.action == error_policy.ACTION_RECONCILE:
+                    # 送出訂單後失敗:交易所可能已經收到。重送是重複開倉最常見的來源。
+                    logger.error(
+                        "[bingx] %s 寫入失敗且狀態不明,必須對帳不可重送: %s",
+                        fn_name, error_policy.describe(exc),
+                    )
+                    raise policy.exception_class(
+                        f"{fn_name} 狀態不明: {exc!r}。{policy.description}"
+                    ) from exc
+
+                if not policy.is_retryable or attempt >= self.max_retries:
+                    logger.error(
+                        "[bingx] %s 放棄 (attempt %d/%d): %s",
+                        fn_name, attempt, self.max_retries, error_policy.describe(exc),
+                    )
+                    break
+
+                if policy.action == error_policy.ACTION_BACKOFF_LONG:
+                    cooldown = self.backoff_seconds * policy.backoff_multiplier * attempt
+                    actual = self.rate_limiter.penalise(cooldown)
+                    logger.warning(
+                        "[bingx] %s 被限流,冷卻 %.1fs: %s",
+                        fn_name, actual, error_policy.describe(exc),
+                    )
+                    continue
+
+                if policy.action == error_policy.ACTION_RESYNC_TIME:
+                    if resynced:
+                        logger.error("[bingx] %s 對時後仍然失敗,放棄", fn_name)
+                        break
+                    resynced = True
+                    logger.warning(
+                        "[bingx] %s 時間戳被拒,重新同步伺服器時間: %s",
+                        fn_name, error_policy.describe(exc),
+                    )
+                    self.sync_server_time(market_type=market_type)
+                    continue
+
+                delay = self.backoff_seconds * policy.backoff_multiplier * attempt
+                logger.warning(
+                    "[bingx] %s attempt %d/%d 失敗,%.1fs 後重試: %s",
+                    fn_name, attempt, self.max_retries, delay,
+                    error_policy.describe(exc),
+                )
+                self._sleep(delay)
+
+        policy = error_policy.classify(last_error)
+        raise policy.exception_class(
+            f"{fn_name} failed on bingx ({policy.category}): {last_error!r}"
         ) from last_error
+
+    # ---------------- 伺服器時間同步 ----------------
+
+    def sync_server_time(self, market_type=MarketType.PERPETUAL):
+        """
+        取得交易所時間並記錄與本機的差。
+
+        時鐘偏移是簽章失敗的經典原因:BingX 會拒絕時間戳偏差過大的請求,
+        而錯誤訊息看起來像「簽章錯誤」,很容易被誤判成 API Key 有問題。
+        回傳偏移毫秒數;失敗回 None 而不是讓呼叫端掛掉。
+        """
+        try:
+            exchange = self._instance(market_type)
+            self.rate_limiter.acquire(sleep=self._sleep)
+            server_ms = exchange.fetch_time()
+        except Exception as exc:
+            logger.warning("[bingx] 無法取得伺服器時間: %s", exc)
+            return None
+
+        local_ms = time.time() * 1000
+        self._time_offset_ms = server_ms - local_ms
+        self._time_synced_at = local_ms
+
+        if abs(self._time_offset_ms) > settings.EXCHANGE_MAX_CLOCK_SKEW_MS:
+            logger.error(
+                "[bingx] ⚠️ 本機時鐘與交易所相差 %.0f ms,已超過 %d ms。"
+                "簽章可能被拒。請在伺服器上檢查 NTP 對時。",
+                self._time_offset_ms, settings.EXCHANGE_MAX_CLOCK_SKEW_MS,
+            )
+        else:
+            logger.info("[bingx] 時鐘偏移 %.0f ms", self._time_offset_ms)
+
+        return self._time_offset_ms
+
+    def clock_status(self):
+        """給健康檢查用。"""
+        skew = self._time_offset_ms
+        return {
+            "offset_ms": skew,
+            "synced": skew is not None,
+            "within_tolerance": (
+                None if skew is None
+                else abs(skew) <= settings.EXCHANGE_MAX_CLOCK_SKEW_MS
+            ),
+            "tolerance_ms": settings.EXCHANGE_MAX_CLOCK_SKEW_MS,
+        }
 
     def _optional(self, fn_name, *args, market_type=MarketType.PERPETUAL, **kwargs):
         """輔助資料:失敗回 None 而不是拋例外。"""
@@ -112,18 +248,26 @@ class BingXAdapter(ExchangeAdapter):
 
     def to_market_symbol(self, symbol, market_type=MarketType.PERPETUAL):
         market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
-        symbol = str(symbol).upper().strip()
+        self._require_supported(market_type)
 
+        symbol = str(symbol).upper().strip()
         if ":" in symbol:
             return symbol
 
-        if market_type is MarketType.PERPETUAL:
-            # ccxt 統一格式下的 USDT-M 永續:BTC/USDT:USDT
-            quote = symbol.split("/")[-1]
-            return f"{symbol}:{quote}"
+        # ccxt 統一格式下的 USDT-M 永續:BTC/USDT:USDT
+        quote = symbol.split("/")[-1]
+        return f"{symbol}:{quote}"
 
-        # Standard Futures 在 ccxt 不加結算後綴
-        return symbol
+    @staticmethod
+    def _require_supported(market_type):
+        """
+        Standard Futures 一律明確拒絕。
+
+        原本這裡會回傳一個「看起來合理」的符號,然後在更深的地方失敗,
+        錯誤訊息完全看不出根因。早點失敗、訊息說清楚,比較好除錯。
+        """
+        if MarketType.parse(market_type, MarketType.PERPETUAL) not in _CCXT_MARKET_TYPE:
+            raise ExchangeUnavailableError(STANDARD_UNSUPPORTED_REASON)
 
     def load_markets(self, market_type=MarketType.PERPETUAL, reload=False):
         market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
@@ -137,7 +281,7 @@ class BingXAdapter(ExchangeAdapter):
         market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
         markets = self.load_markets(market_type)
 
-        wanted = _CCXT_MARKET_TYPE[market_type]
+        wanted = _ccxt_type(market_type)
         result = []
 
         for symbol, market in markets.items():
@@ -263,7 +407,8 @@ class BingXAdapter(ExchangeAdapter):
     def get_funding_rate(self, symbol, market_type=MarketType.PERPETUAL):
         market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
 
-        # Standard Futures 沒有資金費率,不該白打一次 API
+        # 只有永續有資金費率。Standard 本來就不支援(見模組頂端),
+        # 但即使未來支援了,它也沒有資金費率 —— 不該白打一次 API。
         if market_type is not MarketType.PERPETUAL:
             return None
 
@@ -322,16 +467,46 @@ class BingXAdapter(ExchangeAdapter):
 
         return self._call(
             "create_order", market_symbol, order_type.value, side.value,
-            quantity, price, request, market_type=market_type,
+            quantity, price, request, market_type=market_type, is_write=True,
         )
 
     def cancel_order(self, order_id, symbol, market_type=MarketType.PERPETUAL):
         market_symbol = self.to_market_symbol(symbol, market_type)
-        return self._call("cancel_order", order_id, market_symbol, market_type=market_type)
+        return self._call(
+            "cancel_order", order_id, market_symbol,
+            market_type=market_type, is_write=True,
+        )
 
     def get_order(self, order_id, symbol, market_type=MarketType.PERPETUAL):
         market_symbol = self.to_market_symbol(symbol, market_type)
         return self._call("fetch_order", order_id, market_symbol, market_type=market_type)
+
+    # ---------------- 合約設定(需要 API Key) ----------------
+
+    def get_leverage(self, symbol, market_type=MarketType.PERPETUAL):
+        market_symbol = self.to_market_symbol(symbol, market_type)
+        return self._call("fetch_leverage", market_symbol, market_type=market_type)
+
+    def get_position_mode(self, symbol=None, market_type=MarketType.PERPETUAL):
+        """One-Way 還是 Hedge。下單的 positionSide 參數取決於這個。"""
+        market_symbol = self.to_market_symbol(symbol, market_type) if symbol else None
+        return self._call("fetch_position_mode", market_symbol, market_type=market_type)
+
+    def set_leverage(self, leverage, symbol, market_type=MarketType.PERPETUAL):
+        """⚠️ 這會改變帳戶設定。風控完成前(Phase 5)不要自動呼叫。"""
+        market_symbol = self.to_market_symbol(symbol, market_type)
+        return self._call(
+            "set_leverage", leverage, market_symbol,
+            market_type=market_type, is_write=True,
+        )
+
+    def set_margin_mode(self, margin_mode, symbol, market_type=MarketType.PERPETUAL):
+        """⚠️ 這會改變帳戶設定。"""
+        market_symbol = self.to_market_symbol(symbol, market_type)
+        return self._call(
+            "set_margin_mode", margin_mode, market_symbol,
+            market_type=market_type, is_write=True,
+        )
 
     # ---------------- 健康檢查 ----------------
 
