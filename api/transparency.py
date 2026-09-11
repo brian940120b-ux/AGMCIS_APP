@@ -227,6 +227,40 @@ def _self_review():
     return _safe("self_review", run, {"verdict": "NOT_ENOUGH_DATA", "findings": []})
 
 
+@router.get("/api/config_changes")
+def api_config_changes(limit: int = Query(20, ge=1, le=200)):
+    return _config_changes(limit=limit)
+
+
+def _config_changes(limit=20):
+    """
+    風控參數的變更紀錄。
+
+    這一層答得出「什麼時候變的、從多少變成多少」,**答不出「是誰改的」**——
+    設定來自環境變數,環境變數沒有作者。不假裝做得到。
+    """
+    def run():
+        from agmcis.config.audit import get_auditor
+
+        auditor = get_auditor()
+        records = auditor.read_audit(limit=limit)
+
+        risk_increases = [
+            change
+            for record in records
+            for change in record.get("changes", [])
+            if change.get("kind") == "RISK_INCREASED"
+        ]
+
+        return {
+            "records": records,
+            "risk_increase_count": len(risk_increases),
+            "recent_risk_increases": risk_increases[-5:],
+        }
+
+    return _safe("config_changes", run, {"records": []})
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()
@@ -264,6 +298,16 @@ def _summary():
             "message": f"對帳發現 {critical} 項需要立刻處理的差異",
         })
 
+    config = _config_changes()
+    if config.get("risk_increase_count"):
+        alerts.append({
+            "level": "warning",
+            "message": (
+                f"風控參數被放寬過 {config['risk_increase_count']} 次。"
+                f"「先放寬一下試試看」之後常常沒有人記得改回來。"
+            ),
+        })
+
     review = _self_review()
     if review.get("verdict") == "LOSING":
         alerts.append({
@@ -282,7 +326,7 @@ def _summary():
             "message": "合約規格尚未校準,強平價與成本都是估計值",
         })
 
-    for source in (orders, calibration, reconciliation, review):
+    for source in (orders, calibration, reconciliation, review, config):
         if source.get("error"):
             alerts.append({"level": "critical", "message": source["error"]})
 
@@ -294,4 +338,5 @@ def _summary():
         "reconciliation_critical": critical,
         "calibrated": bool(calibration.get("calibrated")),
         "self_review_verdict": review.get("verdict"),
+        "config_risk_increases": config.get("risk_increase_count", 0),
     }

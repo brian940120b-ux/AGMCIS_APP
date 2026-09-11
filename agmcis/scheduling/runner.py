@@ -182,6 +182,17 @@ def _job_naked_position_sweep():
     )
 
 
+def _job_config_audit():
+    from agmcis.config.audit import run_config_audit
+
+    return Job(
+        name="config_audit",
+        run=run_config_audit,
+        interval_seconds=settings.SCHEDULER_CONFIG_AUDIT_INTERVAL,
+        tags=["risk"],
+    )
+
+
 def _job_rate_limit_cleanup():
     """
     清掉舊的限流紀錄。每次 API 呼叫寫一列,不清理這張表會一直長。
@@ -263,13 +274,13 @@ JOB_SETS = {
     JOB_SET_ALL: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
-        _job_rate_limit_cleanup,
+        _job_rate_limit_cleanup, _job_config_audit,
         _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
-        _job_rate_limit_cleanup,
+        _job_rate_limit_cleanup, _job_config_audit,
     ],
     JOB_SET_OPPORTUNITY: [_job_opportunity_scanner],
     JOB_SET_TRADER: [_job_auto_trader, _job_daily_report],

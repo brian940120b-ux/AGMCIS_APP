@@ -47,3 +47,8 @@ data/bingx_specs.json
 # 提交進 git 等於把那個決定變成永久的、對所有人生效的。
 live_gate_confirmation.json
 live_gate_audit.log
+
+# 設定稽核(Phase 16 後續)
+# 快照與紀錄是「這台機器上的設定怎麼變的」,不是專案內容。
+config_snapshot.json
+config_audit.log

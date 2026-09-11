@@ -240,6 +240,45 @@ async function loadSelfReview() {
     render("self_review", head + findings + questions + agentTable);
 }
 
+/* ---------------- 設定變更 ---------------- */
+
+async function loadConfigChanges() {
+    const data = await load("/api/config_changes");
+    if (data.error) throw new Error(data.error);
+
+    const records = data.records || [];
+
+    if (!records.length) {
+        render("config_changes",
+            '<span class="muted">沒有記錄到任何風控參數變更。</span>');
+        return;
+    }
+
+    const rows = [];
+    for (const record of records.slice().reverse()) {
+        for (const change of record.changes || []) {
+            const risky = change.kind === "RISK_INCREASED";
+            rows.push(`<tr>
+                <td class="nowrap">${esc(record.at)}</td>
+                <td class="nowrap">${esc(change.key)}</td>
+                <td>${esc(change.old)} → ${esc(change.new)}</td>
+                <td class="${risky ? "neg" : "muted"}">${
+                    risky ? "風險變大" : esc(change.kind)}</td>
+            </tr>`);
+        }
+    }
+
+    const banner = data.risk_increase_count
+        ? `<div class="alert alert-warning">風控參數被放寬過
+           ${esc(data.risk_increase_count)} 次。</div>`
+        : "";
+
+    render("config_changes", banner + (rows.length
+        ? `<table class="tp"><tr><th>時間</th><th>設定</th><th>變更</th>
+           <th>方向</th></tr>${rows.join("")}</table>`
+        : '<span class="muted">沒有記錄到任何風控參數變更。</span>'));
+}
+
 /* ---------------- 校準 ---------------- */
 
 async function loadCalibration() {
@@ -273,6 +312,7 @@ const SECTIONS = [
     ["reconciliation", loadReconciliation],
     ["costs", loadCosts],
     ["self_review", loadSelfReview],
+    ["config_changes", loadConfigChanges],
     ["calibration", loadCalibration],
 ];
 

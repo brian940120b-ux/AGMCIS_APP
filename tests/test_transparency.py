@@ -125,14 +125,17 @@ class TestOrdersEndpoint(unittest.TestCase):
 
 class TestSummaryOnlyReportsWhatNeedsAttention(unittest.TestCase):
 
-    def _summary(self, orders, calibration, reconciliation, review=None):
+    def _summary(self, orders, calibration, reconciliation, review=None,
+                 config=None):
         review = review if review is not None else {"verdict": "HEALTHY"}
+        config = config if config is not None else {"risk_increase_count": 0}
 
         with patch.object(transparency, "_orders", return_value=orders), \
              patch.object(transparency, "_calibration", return_value=calibration), \
              patch.object(transparency, "_reconciliation",
                           return_value=reconciliation), \
-             patch.object(transparency, "_self_review", return_value=review):
+             patch.object(transparency, "_self_review", return_value=review), \
+             patch.object(transparency, "_config_changes", return_value=config):
             return transparency._summary()
 
     def test_a_healthy_system_produces_no_alerts(self):
@@ -225,6 +228,17 @@ class TestSummaryOnlyReportsWhatNeedsAttention(unittest.TestCase):
         )
 
         self.assertEqual(result["alerts"], [])
+
+    def test_a_loosened_risk_limit_is_surfaced(self):
+        """「先放寬一下試試看」之後常常沒有人記得改回來。"""
+        result = self._summary(
+            {"naked_count": 0, "unresolved_count": 0},
+            {"calibrated": True},
+            {"critical_count": 0},
+            config={"risk_increase_count": 2},
+        )
+
+        self.assertTrue(any("放寬" in a["message"] for a in result["alerts"]))
 
     def test_reconciliation_criticals_are_surfaced(self):
         result = self._summary(
