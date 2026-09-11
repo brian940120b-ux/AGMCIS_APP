@@ -52,6 +52,8 @@ class ExecutionResult:
     adjustments: List[str] = field(default_factory=list)
     naked_position_closed: bool = False
     fill_price: Optional[float] = None
+    partial: bool = False
+    unfilled_quantity: float = 0.0
 
     def to_dict(self):
         return {
@@ -65,6 +67,8 @@ class ExecutionResult:
             "adjustments": list(self.adjustments),
             "naked_position_closed": self.naked_position_closed,
             "fill_price": self.fill_price,
+            "partial": self.partial,
+            "unfilled_quantity": self.unfilled_quantity,
         }
 
 
@@ -75,6 +79,8 @@ REJECTED_NOT_APPROVED = "REJECTED_NOT_APPROVED"
 SUBMIT_FAILED = "SUBMIT_FAILED"
 NAKED_POSITION_CLOSED = "NAKED_POSITION_CLOSED"
 NAKED_POSITION_STUCK = "NAKED_POSITION_STUCK"
+OPENED_PARTIAL = "OPENED_PARTIAL"
+PARTIAL_REMAINDER_STUCK = "PARTIAL_REMAINDER_STUCK"
 CLOSED = "CLOSED"
 CLOSE_FAILED = "CLOSE_FAILED"
 
@@ -226,10 +232,75 @@ class ExecutionEngine:
         order.average_fill_price = fill.average_price
 
         self._move(order, OrderState.ACCEPTED)
+
+        # ---- 3. 部分成交 ----
+        partial = fill.is_partial()
+
+        if partial:
+            # 部分成交的部位**一樣是真的部位**,一樣需要停損。
+            # 而未成交的剩餘量不能留著沒人管 —— 它可能稍後才成交,
+            # 那時候沒有任何人在看它。
+            logger.warning(
+                "Execution | PARTIAL_FILL | %s | 送出 %s 成交 %s(未成交 %s)",
+                symbol, fill.requested_quantity, fill.filled_quantity,
+                fill.unfilled_quantity,
+            )
+            self._move(order, OrderState.PARTIALLY_FILLED,
+                       reason=f"部分成交,未成交 {fill.unfilled_quantity}")
+
+            cancelled = self._cancel_remainder(order, symbol)
+            if not cancelled:
+                # 撤不掉的掛單是一個會自己長大的部位。這比裸倉更難處理,
+                # 因為連「現在有多少部位」都不確定。
+                logger.critical(
+                    "Execution | PARTIAL_REMAINDER_STUCK | %s | "
+                    "未成交 %s 撤不掉,可能稍後成交且無人監控 | 需要人工介入",
+                    symbol, fill.unfilled_quantity,
+                )
+                return ExecutionResult(
+                    ok=False, order=order, symbol=symbol,
+                    status=PARTIAL_REMAINDER_STUCK,
+                    reason=f"部分成交且剩餘量撤不掉({fill.unfilled_quantity}),"
+                           f"需要人工處理",
+                    partial=True,
+                    unfilled_quantity=fill.unfilled_quantity,
+                )
+
         self._move(order, OrderState.FILLED)
 
-        # ---- 3. 保護性停損:這一步不成立就不准留著這個部位 ----
-        return self._ensure_protected(order, intent, validation)
+        # ---- 4. 保護性停損:這一步不成立就不准留著這個部位 ----
+        result = self._ensure_protected(order, intent, validation)
+        result.partial = partial
+        result.unfilled_quantity = fill.unfilled_quantity if partial else 0.0
+
+        if partial and result.ok:
+            result.status = OPENED_PARTIAL
+            result.reason = (
+                f"部分成交:送出 {fill.requested_quantity} 成交 "
+                f"{fill.filled_quantity},剩餘量已撤銷"
+            )
+
+        return result
+
+    def _cancel_remainder(self, order, symbol):
+        """
+        撤掉未成交的剩餘量。撤不掉回 False。
+
+        broker 沒有實作這個方法時視為**撤不掉** —— 假設它成功會讓
+        一張還活著的掛單靜靜地留在市場上。
+        """
+        try:
+            return bool(self.broker.cancel_remainder(order))
+        except NotImplementedError:
+            logger.error(
+                "Execution | CANCEL_UNSUPPORTED | %s | "
+                "broker 沒有實作 cancel_remainder,無法確認剩餘量已撤銷",
+                symbol,
+            )
+            return False
+        except Exception as exc:
+            logger.exception("Execution | CANCEL_FAILED | %s", symbol)
+            return False
 
     def _ensure_protected(self, order, intent, validation):
         symbol = intent.symbol

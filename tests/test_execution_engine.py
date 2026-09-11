@@ -76,10 +76,11 @@ class FakeBroker(Broker):
     name = "fake"
 
     def __init__(self, fill=None, protected=True, close_result=None,
-                 submit_error=None, close_error=None):
+                 submit_error=None, close_error=None,
+                 cancel_result=True, cancel_error=None):
         self.fill = fill or FillResult(
-            ok=True, filled_quantity=6.0, average_price=100.05,
-            exchange_order_id="X1",
+            ok=True, filled_quantity=6.0, requested_quantity=6.0,
+            average_price=100.05, exchange_order_id="X1",
         )
         self.protected = protected
         self.close_result = close_result or FillResult(
@@ -87,8 +88,11 @@ class FakeBroker(Broker):
         )
         self.submit_error = submit_error
         self.close_error = close_error
+        self.cancel_result = cancel_result
+        self.cancel_error = cancel_error
         self.submitted = []
         self.closed = []
+        self.cancelled = []
 
     def submit_entry(self, order_request, intent, size_usdt, leverage):
         if self.submit_error:
@@ -104,6 +108,12 @@ class FakeBroker(Broker):
             raise self.close_error
         self.closed.append((symbol, reason))
         return self.close_result
+
+    def cancel_remainder(self, order):
+        if self.cancel_error:
+            raise self.cancel_error
+        self.cancelled.append(order.client_order_id)
+        return self.cancel_result
 
     def get_position(self, symbol):
         return None
@@ -468,6 +478,129 @@ class TestOrdersArePersisted(unittest.TestCase):
 
         self.assertTrue(result.ok)
         logger.critical.assert_called()
+
+
+class TestPartialFills(unittest.TestCase):
+    """
+    Phase 12 的狀態機有 PARTIALLY_FILLED,但模擬盤一律全額成交,
+    所以那條路徑從來沒被走過。實盤在流動性不足時一定會遇到。
+
+    兩件事同樣重要:
+      * 部分成交的部位**一樣是真的部位**,一樣需要停損
+      * 未成交的剩餘量不能留著沒人管 —— 它可能稍後才成交
+    """
+
+    def _partial(self, filled=3.0, requested=6.0, **kwargs):
+        return FakeBroker(
+            fill=FillResult(
+                ok=True, filled_quantity=filled, requested_quantity=requested,
+                average_price=100.05, exchange_order_id="X1",
+            ),
+            **kwargs
+        )
+
+    def test_a_partial_fill_is_reported_as_partial(self):
+        broker = self._partial()
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.partial)
+        self.assertEqual(result.status, engine_module.OPENED_PARTIAL)
+        self.assertAlmostEqual(result.unfilled_quantity, 3.0, places=6)
+
+    def test_the_remainder_is_cancelled(self):
+        """一張還活著的掛單可能稍後成交,而那時候沒有人在管它。"""
+        broker = self._partial()
+
+        with patch.object(engine_module, "logger"):
+            build(broker).execute(decision())
+
+        self.assertEqual(len(broker.cancelled), 1)
+
+    def test_a_partially_filled_position_still_needs_a_stop(self):
+        broker = self._partial(protected=False)
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertEqual(result.status, engine_module.NAKED_POSITION_CLOSED)
+        self.assertEqual(len(broker.closed), 1)
+
+    def test_an_uncancellable_remainder_is_escalated(self):
+        """
+        撤不掉的掛單比裸倉更難處理:連「現在有多少部位」都不確定。
+        """
+        broker = self._partial(cancel_result=False)
+
+        with patch.object(engine_module, "logger") as logger:
+            result = build(broker).execute(decision())
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, engine_module.PARTIAL_REMAINDER_STUCK)
+        self.assertIn("人工", result.reason)
+        logger.critical.assert_called()
+
+    def test_a_broker_without_cancel_support_is_treated_as_uncancellable(self):
+        """
+        假設撤單成功會讓一張還活著的掛單靜靜地留在市場上。
+        """
+        broker = self._partial(cancel_error=NotImplementedError())
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertEqual(result.status, engine_module.PARTIAL_REMAINDER_STUCK)
+
+    def test_a_cancel_exception_is_also_treated_as_uncancellable(self):
+        broker = self._partial(cancel_error=ConnectionError("斷線"))
+
+        with patch.object(engine_module, "logger"):
+            result = build(broker).execute(decision())
+
+        self.assertEqual(result.status, engine_module.PARTIAL_REMAINDER_STUCK)
+
+    def test_the_state_machine_records_partially_filled(self):
+        store = FakeStore()
+        broker = self._partial()
+
+        with patch.object(engine_module, "logger"):
+            build(broker, store=store).execute(decision())
+
+        states = [state for _, state in store.saved]
+        self.assertIn("partially_filled", states)
+
+    def test_a_full_fill_is_not_flagged_as_partial(self):
+        result = build().execute(decision())
+
+        self.assertFalse(result.partial)
+        self.assertEqual(result.status, engine_module.OPENED)
+
+    def test_a_rounding_residue_is_not_a_partial_fill(self):
+        """
+        送出 6.0 拿回 5.999999 是浮點與 step size 的殘差,不是部分成交。
+        把它當成部分成交會在每一筆交易上都跑一次撤單流程。
+        """
+        broker = self._partial(filled=5.999999, requested=6.0)
+
+        result = build(broker).execute(decision())
+
+        self.assertFalse(result.partial)
+        self.assertEqual(broker.cancelled, [])
+
+    def test_a_fill_without_a_requested_quantity_is_not_guessed(self):
+        """
+        舊的 broker 不回報 requested_quantity。那種情況下無法判斷是否部分成交,
+        一律當作全額 —— 猜成部分成交會對每一筆都跑撤單。
+        """
+        broker = FakeBroker(fill=FillResult(
+            ok=True, filled_quantity=3.0, average_price=100.0,
+        ))
+
+        result = build(broker).execute(decision())
+
+        self.assertFalse(result.partial)
 
 
 if __name__ == "__main__":

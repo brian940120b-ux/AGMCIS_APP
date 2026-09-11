@@ -15,19 +15,54 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 
+# 未成交比例低於這個值視為精度殘差,不是部分成交。
+PARTIAL_FILL_TOLERANCE = 1e-4
+
+
 @dataclass
 class FillResult:
-    """送單的結果。成交價是**實際成交價**,不是下單時看到的價格。"""
+    """
+    送單的結果。成交價是**實際成交價**,不是下單時看到的價格。
+
+    requested_quantity 是我們送出去的量。它與 filled_quantity 不同時
+    就是部分成交 —— 實盤在流動性不足或價格快速移動時一定會遇到。
+    """
     ok: bool
     filled_quantity: float = 0.0
     average_price: Optional[float] = None
     exchange_order_id: Optional[str] = None
     reason: Optional[str] = None
+    requested_quantity: Optional[float] = None
     raw: Dict = field(default_factory=dict)
 
     @property
     def is_filled(self):
         return self.ok and self.filled_quantity > 0
+
+    @property
+    def unfilled_quantity(self):
+        if self.requested_quantity is None:
+            return 0.0
+        return max(0.0, float(self.requested_quantity) - float(self.filled_quantity))
+
+    def is_partial(self, tolerance=PARTIAL_FILL_TOLERANCE):
+        """
+        部分成交。
+
+        用相對容忍值而不是精確比較:送出 1.0 拿回 0.999999 不是部分成交,
+        那是浮點表示與 step size 的殘差。真正的部分成交差的是可見的量。
+
+        (數量在送出之前已經被 Trading Rules Engine 對齊到 step size,
+         所以交易所不該再改動它 —— 容忍值只是為了吸收浮點誤差。)
+        """
+        if self.requested_quantity is None or not self.is_filled:
+            return False
+
+        requested = float(self.requested_quantity)
+        if requested <= 0:
+            return False
+
+        return self.unfilled_quantity / requested > tolerance
 
 
 class Broker:
@@ -47,6 +82,17 @@ class Broker:
         raise NotImplementedError
 
     def get_position(self, symbol):
+        raise NotImplementedError
+
+    def cancel_remainder(self, order) -> bool:
+        """
+        撤掉一張部分成交訂單的未成交剩餘量。
+
+        回傳 False 代表撤不掉,呼叫端必須把它當成問題 ——
+        一張還活著的掛單可能在稍後成交,而那時候沒有人在管它。
+
+        模擬盤沒有掛單,所以它回 True(沒有東西需要撤)。
+        """
         raise NotImplementedError
 
     # ---- 對帳用 ----
@@ -119,6 +165,7 @@ class PaperBroker(Broker):
         return FillResult(
             ok=True,
             filled_quantity=quantity,
+            requested_quantity=order_request.quantity,
             average_price=trade["entry_price"],
             exchange_order_id=str(trade.get("id")),
             raw=result,
@@ -154,6 +201,15 @@ class PaperBroker(Broker):
 
     def get_position(self, symbol):
         return self._get_position(symbol)
+
+    def cancel_remainder(self, order):
+        """
+        模擬盤沒有掛在市場上的單 —— create_paper_trade 要嘛全額成交要嘛失敗,
+        沒有剩餘量會留在市場上。所以這裡永遠是 True(沒有東西需要撤)。
+
+        實盤必須真的送撤單請求,而且撤不掉要回 False。
+        """
+        return True
 
     # ---- 對帳用 ----
 
