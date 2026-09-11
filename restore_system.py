@@ -15,8 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from db import DB_CONFIG  # noqa: E402
+from db import db_config  # noqa: E402
 
+CONFIG = db_config()
 BACKUP_DIR = Path(os.getenv("BACKUP_DIR", "backups"))
 
 
@@ -38,21 +39,21 @@ def restore(name):
         print(f"找不到備份:{target}")
         return 1
 
-    if not DB_CONFIG["password"]:
+    if not CONFIG["password"]:
         print("FAILED: DB_PASSWORD 未設定")
         return 1
 
     # 還原會覆蓋現有資料,要求明確確認。
-    print(f"即將把 {target.name} 還原到資料庫 {DB_CONFIG['dbname']}@{DB_CONFIG['host']}")
+    print(f"即將把 {target.name} 還原到資料庫 {CONFIG['dbname']}@{CONFIG['host']}")
     print("這會覆蓋現有的交易與帳戶資料。")
     if input("輸入 RESTORE 確認:").strip() != "RESTORE":
         print("已取消")
         return 1
 
-    env = dict(os.environ, PGPASSWORD=DB_CONFIG["password"])
+    env = dict(os.environ, PGPASSWORD=CONFIG["password"])
     command = (
-        f"gunzip -c {target} | psql -h {DB_CONFIG['host']} -p {DB_CONFIG['port']} "
-        f"-U {DB_CONFIG['user']} -d {DB_CONFIG['dbname']}"
+        f"gunzip -c {target} | psql -h {CONFIG['host']} -p {CONFIG['port']} "
+        f"-U {CONFIG['user']} -d {CONFIG['dbname']}"
     )
 
     result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True)

@@ -5,6 +5,9 @@ import numpy as np
 from ta.trend import EMAIndicator, MACD
 from ta.momentum import RSIIndicator
 
+# ⚠️ 資料來源是 Binance,不是實際交易的 BingX。價格與流動性都不符成交環境。
+# 這個檔案的回測結果不可作為策略上線依據 —— 停損停利只比對 close、
+# 不看 high/low,盤中穿刺停損不計,勝率被系統性高估。Phase 7 會重寫。
 exchange = ccxt.binance()
 
 
@@ -195,4 +198,6 @@ def run_backtest():
     print("================================")
 
 
-run_backtest()
+if __name__ == "__main__":
+    # Phase 1:原本這行在模組層直接執行 —— import 這個檔案就會打網路並印報表。
+    run_backtest()

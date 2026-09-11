@@ -23,45 +23,54 @@ strategies = [
 ]
 
 
-print()
-print("========== AGMCIS V9.5 PRO 多幣種回測 ==========")
-
-for symbol in symbols:
+def run_lab():
+    """
+    ⚠️ 這個回測沒有停損、停利、手續費、滑點、Funding 或槓桿,
+    而且每筆押上 100% 資金完全複利 —— 報酬率數字不可作為決策依據。Phase 7 會重寫。
+    """
     print()
-    print(f"----- {symbol} -----")
+    print("========== AGMCIS V9.5 PRO 多幣種回測 ==========")
 
-    try:
-        df = load_data(symbol)
+    for symbol in symbols:
+        print()
+        print(f"----- {symbol} -----")
 
-        results = []
+        try:
+            df = load_data(symbol)
 
-        for name, strategy in strategies:
-            capital = run_strategy(df, strategy)
+            results = []
 
-            return_pct = (
-                (capital - 10000)
-                / 10000
-                * 100
+            for name, strategy in strategies:
+                capital = run_strategy(df, strategy)
+
+                return_pct = (
+                    (capital - 10000)
+                    / 10000
+                    * 100
+                )
+
+                results.append(
+                    (name, return_pct)
+                )
+
+            results.sort(
+                key=lambda x: x[1],
+                reverse=True
             )
 
-            results.append(
-                (name, return_pct)
-            )
+            for rank, result in enumerate(results):
+                print(
+                    f"{rank + 1}. "
+                    f"{result[0]} "
+                    f"{result[1]:.2f}%"
+                )
 
-        results.sort(
-            key=lambda x: x[1],
-            reverse=True
-        )
+        except Exception as e:
+            print(f"{symbol} 回測失敗：{e}")
 
-        for rank, result in enumerate(results):
-            print(
-                f"{rank + 1}. "
-                f"{result[0]} "
-                f"{result[1]:.2f}%"
-            )
+    print()
+    print("==============================================")
 
-    except Exception as e:
-        print(f"{symbol} 回測失敗：{e}")
-
-print()
-print("==============================================")
+if __name__ == "__main__":
+    # Phase 1:原本整段在模組層執行,import 就會打網路跑完整回測。
+    run_lab()

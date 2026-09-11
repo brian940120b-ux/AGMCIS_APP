@@ -16,8 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from db import DB_CONFIG  # noqa: E402
+from db import db_config  # noqa: E402
 
+CONFIG = db_config()
 BACKUP_DIR = Path(os.getenv("BACKUP_DIR", "backups"))
 KEEP_LAST = int(os.getenv("BACKUP_KEEP_LAST", "30"))
 
@@ -26,17 +27,17 @@ def run_backup():
     BACKUP_DIR.mkdir(exist_ok=True)
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    target = BACKUP_DIR / f"{stamp}_{DB_CONFIG['dbname']}.sql.gz"
+    target = BACKUP_DIR / f"{stamp}_{CONFIG['dbname']}.sql.gz"
 
-    if not DB_CONFIG["password"]:
+    if not CONFIG["password"]:
         print("FAILED: DB_PASSWORD 未設定,無法備份資料庫")
         return 1
 
-    env = dict(os.environ, PGPASSWORD=DB_CONFIG["password"])
+    env = dict(os.environ, PGPASSWORD=CONFIG["password"])
 
     command = (
-        f"pg_dump -h {DB_CONFIG['host']} -p {DB_CONFIG['port']} "
-        f"-U {DB_CONFIG['user']} -d {DB_CONFIG['dbname']} | gzip > {target}"
+        f"pg_dump -h {CONFIG['host']} -p {CONFIG['port']} "
+        f"-U {CONFIG['user']} -d {CONFIG['dbname']} | gzip > {target}"
     )
 
     result = subprocess.run(command, shell=True, env=env,

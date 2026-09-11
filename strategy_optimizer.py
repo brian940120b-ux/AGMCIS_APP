@@ -12,10 +12,15 @@ from exchange_universe import get_top_volume_symbols
 
 
 def get_dynamic_symbols(limit=20):
+    """
+    ⚠️ 這會打交易所 API 載入全部市場與 ticker,很慢。
+    Phase 1 之前這個函式在**模組層**被呼叫 —— 任何 import 這個檔案的程式
+    都會被阻塞數十秒。現在改為呼叫時才取得。
+
+    ⚠️ 用「當前」成交量前 N 名回測過去帶有 survivorship bias,
+    結果不可作為策略上線依據。Phase 8 會處理。
+    """
     return [item["symbol"] for item in get_top_volume_symbols(limit=limit)]
-
-
-SYMBOLS = get_dynamic_symbols(limit=20)
 
 
 STRATEGIES = [
@@ -25,11 +30,14 @@ STRATEGIES = [
 ]
 
 
-def get_strategy_optimizer():
+def get_strategy_optimizer(symbols=None, limit=20):
     results = []
     symbol_best = []
 
-    for symbol in SYMBOLS:
+    if symbols is None:
+        symbols = get_dynamic_symbols(limit=limit)
+
+    for symbol in symbols:
         try:
             df = load_data(symbol)
 

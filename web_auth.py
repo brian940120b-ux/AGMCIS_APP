@@ -13,23 +13,21 @@ Phase 0.5 修正兩個問題:
   - 金鑰比對使用 secrets.compare_digest,避免時序側通道。
   - DASHBOARD_KEY 未設定時一律拒絕,不再 fallback 到寫死的預設值。
 """
-import os
 import secrets
 
-from dotenv import load_dotenv
 from fastapi import HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 
-load_dotenv()
+from agmcis.config import settings
 
-COOKIE_NAME = "agmcis_session"
-HEADER_NAME = "X-AGMCIS-KEY"
-COOKIE_MAX_AGE = int(os.getenv("SESSION_COOKIE_MAX_AGE", str(7 * 24 * 3600)))
+COOKIE_NAME = settings.SESSION_COOKIE_NAME
+HEADER_NAME = settings.API_KEY_HEADER
+COOKIE_MAX_AGE = settings.SESSION_COOKIE_MAX_AGE
 
 
 def dashboard_key():
     """未設定就回傳空字串;空金鑰代表「拒絕所有人」而不是「放行所有人」。"""
-    return (os.getenv("DASHBOARD_KEY") or "").strip()
+    return settings.dashboard_key()
 
 
 def key_is_valid(candidate) -> bool:
@@ -75,7 +73,7 @@ def require_api_key(request: Request):
 
 
 def set_session_cookie(response, key):
-    secure = (os.getenv("SESSION_COOKIE_SECURE") or "false").lower() == "true"
+    secure = settings.SESSION_COOKIE_SECURE
     response.set_cookie(
         COOKIE_NAME,
         key,

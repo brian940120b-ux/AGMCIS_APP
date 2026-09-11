@@ -1,82 +1,63 @@
 """
-交易方向的單一定義來源。
+向下相容 shim。
 
-原本方向用中文字串 "做多" / "做空" 散落在 12 個以上模組裡直接比對,
-沒有任何保護 —— 打錯一個字就會靜默變成「不做多也不做空」而 PnL 算成 0。
-這裡集中處理,並同時接受中文與英文寫法,讓舊資料與舊呼叫端都能正常運作。
+方向的實作已移到 agmcis/core/enums.py 的 Direction enum(Phase 1)。
+這裡保留原本的函式介面,讓既有呼叫端不用改 —— 但只有一份實作。
+
+新程式碼請直接用:
+    from agmcis.core.enums import Direction
 """
+from agmcis.core.enums import Direction
 
-LONG = "做多"
-SHORT = "做空"
-WAIT = "觀望"
-
-_LONG_ALIASES = {LONG, "LONG", "BUY", "多", "long", "buy"}
-_SHORT_ALIASES = {SHORT, "SHORT", "SELL", "空", "short", "sell"}
+LONG = Direction.LONG.value
+SHORT = Direction.SHORT.value
+WAIT = Direction.WAIT.value
 
 
 def is_long(signal) -> bool:
-    return signal in _LONG_ALIASES
+    return Direction.parse(signal) is Direction.LONG
 
 
 def is_short(signal) -> bool:
-    return signal in _SHORT_ALIASES
+    return Direction.parse(signal) is Direction.SHORT
 
 
 def is_directional(signal) -> bool:
-    """只有明確的多或空才算可交易方向;其餘(觀望 / None / 未知字串)都不是。"""
-    return is_long(signal) or is_short(signal)
+    direction = Direction.parse(signal)
+    return direction is not None and direction.is_directional
 
 
 def price_change_pct(signal, entry_price: float, exit_price: float) -> float:
-    """
-    回傳「標的價格變動比例」(小數,非百分比),已依方向取正負號。
-    這一層不含槓桿 —— 槓桿只在換算 ROI 與 USDT 損益時才乘上去。
-    """
-    entry_price = float(entry_price)
-    exit_price = float(exit_price)
+    """回傳價格變動比例(小數),已依方向取正負號。不含槓桿。"""
+    direction = Direction.parse(signal)
+    if direction is None:
+        raise ValueError(f"無法辨識的交易方向: {signal!r}")
+    return direction.price_change_pct(entry_price, exit_price)
 
-    if entry_price <= 0:
-        raise ValueError(f"entry_price 必須大於 0,收到 {entry_price}")
 
-    if is_long(signal):
-        return (exit_price - entry_price) / entry_price
-    if is_short(signal):
-        return (entry_price - exit_price) / entry_price
+def _valid_side(signal, entry_price, price, is_stop):
+    direction = Direction.parse(signal)
+    if direction is None or not direction.is_directional or price is None or entry_price is None:
+        return False
+    try:
+        entry_price = float(entry_price)
+        price = float(price)
+    except (TypeError, ValueError):
+        return False
+    if entry_price <= 0 or price <= 0:
+        return False
 
-    raise ValueError(f"無法辨識的交易方向: {signal!r}")
+    below = price < entry_price
+    if direction is Direction.LONG:
+        return below if is_stop else not below
+    return (not below) if is_stop else below
 
 
 def stop_loss_is_valid(signal, entry_price: float, stoploss: float) -> bool:
     """做多的停損必須低於進場價,做空的停損必須高於進場價。"""
-    if stoploss is None or entry_price is None:
-        return False
-    try:
-        entry_price = float(entry_price)
-        stoploss = float(stoploss)
-    except (TypeError, ValueError):
-        return False
-    if entry_price <= 0 or stoploss <= 0:
-        return False
-    if is_long(signal):
-        return stoploss < entry_price
-    if is_short(signal):
-        return stoploss > entry_price
-    return False
+    return _valid_side(signal, entry_price, stoploss, is_stop=True)
 
 
 def take_profit_is_valid(signal, entry_price: float, takeprofit: float) -> bool:
     """做多的停利必須高於進場價,做空的停利必須低於進場價。"""
-    if takeprofit is None or entry_price is None:
-        return False
-    try:
-        entry_price = float(entry_price)
-        takeprofit = float(takeprofit)
-    except (TypeError, ValueError):
-        return False
-    if entry_price <= 0 or takeprofit <= 0:
-        return False
-    if is_long(signal):
-        return takeprofit > entry_price
-    if is_short(signal):
-        return takeprofit < entry_price
-    return False
+    return _valid_side(signal, entry_price, takeprofit, is_stop=False)

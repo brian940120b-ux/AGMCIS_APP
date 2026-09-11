@@ -1,32 +1,12 @@
-import time
-from datetime import datetime
+"""
+agmcis-opportunity service 入口。
 
-from opportunity_scanner import scan_opportunities
+實作已統一到 agmcis/scheduling/(Phase 1),但這個 service 維持原本的職責範圍:
+只跑機會掃描。間隔由 SCHEDULER_OPPORTUNITY_INTERVAL 控制(預設 1800)。
+"""
+import sys
 
-
-INTERVAL_SECONDS = 30 * 60
-
-
-def main():
-    print()
-    print("========== AGMCIS V16.1 Opportunity Runner ==========")
-    print("每 30 分鐘自動掃描一次市場")
-    print("有符合條件的機會才會推送 Telegram")
-    print("按 Ctrl + C 可停止")
-    print("====================================================")
-
-    while True:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        print()
-        print(f"掃描時間：{now}")
-
-        scan_opportunities()
-
-        print("等待 30 分鐘後再次掃描...")
-
-        time.sleep(INTERVAL_SECONDS)
-
+from agmcis.scheduling.runner import JOB_SET_OPPORTUNITY, run_scheduler
 
 if __name__ == "__main__":
-    main()
+    sys.exit(run_scheduler(JOB_SET_OPPORTUNITY))

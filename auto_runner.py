@@ -1,47 +1,15 @@
-import time
-from datetime import datetime
+"""
+自動開倉 + 日報入口(原本是一個獨立的 300 秒迴圈)。
 
-from auto_trader import run_auto_trader
-from daily_report import send_daily_report
+實作已統一到 agmcis/scheduling/(Phase 1),職責範圍維持原本的:
+自動開倉與每日報表。間隔由 SCHEDULER_TRADER_INTERVAL 控制(預設 300)。
 
-INTERVAL_SECONDS = 300  # 300秒 = 5分鐘
-last_report_date = None
+⚠️ 這個入口與 scheduler.py 的完整組合重疊。
+   建議只跑 scheduler.py,不要同時啟用這個。
+"""
+import sys
 
-def main():
-    print()
-    print("========== AGMCIS V11.2 自動排程器 ==========")
-    print("系統會每 5 分鐘自動執行一次模擬交易掃描")
-    print("若要停止，請按 Ctrl + C")
-    print("===========================================")
-
-    while True:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        print()
-        print(f"執行時間：{now}")
-	
-        global last_report_date
-
-        now_dt = datetime.now()
-
-        if now_dt.hour == 8 and last_report_date != now_dt.date():
-            try:
-                send_daily_report()
-                last_report_date = now_dt.date()
-                print("Daily Report 已發送")
-            except Exception as e:
-                print(f"Daily Report 發送失敗：{e}")
-
-        try:
-            run_auto_trader()
-
-        except Exception as e:
-            print(f"自動交易流程發生錯誤：{e}")
-
-        print()
-        print("等待 5 分鐘後再次執行...")
-        time.sleep(INTERVAL_SECONDS)
-
+from agmcis.scheduling.runner import JOB_SET_TRADER, run_scheduler
 
 if __name__ == "__main__":
-    main()
+    sys.exit(run_scheduler(JOB_SET_TRADER))

@@ -1,82 +1,51 @@
 """
-排程器:每輪檢查持倉(TP/SL)再嘗試自動開倉。
+排程器入口。
 
-Phase 0.5 的修正:
-  1. write_status() 原本定義兩次(第二份在 if __name__ 之後),移除重複。
-  2. 狀態檔改記錄真實平倉數與風控 blocker —— 原本 position_monitor 的
-     closed_count 寫死為 0,狀態面板永遠顯示 monitor=0。
-  3. 每輪例外都會寫進狀態檔,不再只留在 log 裡。
+實作在 agmcis/scheduling/(Phase 1)。保留舊函式名稱 run_once / run_loop /
+write_status,讓既有呼叫端不用改。
 
-⚠️ 已知重複:auto_runner.py(300 秒)與 opportunity_runner.py(1800 秒)
-   也各自會觸發開倉。Phase 1 會收斂成單一排程器。
+這個入口跑**完整**任務組合(出場 + trailing + 風控告警 + 自動開倉 +
+機會掃描 + 日報),是建議的最終狀態:
+    只啟用 agmcis(這個),停用 agmcis-position 與 agmcis-opportunity。
+
+過渡期間如果三個 service 都還開著,它們各自只做原本負責的事
+(見 agmcis/scheduling/runner.py 的 JOB_SETS),行為與 Phase 1 之前一致。
 """
-import json
-import time
-from datetime import datetime
+import sys
 
-from auto_trader import run_auto_trader
-from logger_service import logger
-from position_monitor import run_position_monitor
+from agmcis.scheduling.runner import (
+    JOB_SET_ALL,
+    SchedulerRunner,
+    build_jobs,
+    run_scheduler,
+)
 
-STATUS_FILE = "scheduler_status.json"
+_runner = None
 
 
-def write_status(status, monitor_result=None, trader_result=None, error=None):
-    monitor_result = monitor_result or {}
-    trader_result = trader_result or {}
-
-    data = {
-        "status": status,
-        "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "monitor_checked": monitor_result.get("checked", 0),
-        "monitor_closed": monitor_result.get("closed_count", 0),
-        "monitor_skipped": len(monitor_result.get("skipped", [])),
-        "monitor_unprotected": len(monitor_result.get("unprotected", [])),
-        "trader_status": trader_result.get("status"),
-        "trader_reason": trader_result.get("reason"),
-        "error": error,
-    }
-
-    with open(STATUS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-    return data
+def get_runner(job_set=JOB_SET_ALL):
+    global _runner
+    if _runner is None:
+        _runner = SchedulerRunner(build_jobs(job_set))
+    return _runner
 
 
 def run_once():
-    monitor_result = run_position_monitor()
-    trader_result = run_auto_trader()
-
-    write_status("running", monitor_result, trader_result)
-
-    logger.info(
-        "Scheduler | checked=%d closed=%d skipped=%d unprotected=%d | trader=%s%s",
-        monitor_result.get("checked", 0),
-        monitor_result.get("closed_count", 0),
-        len(monitor_result.get("skipped", [])),
-        len(monitor_result.get("unprotected", [])),
-        trader_result.get("status"),
-        f" ({trader_result.get('reason')})" if trader_result.get("reason") else "",
-    )
-
-    return {"monitor": monitor_result, "trader": trader_result}
+    """跑一輪到期的任務。第一次呼叫時所有任務都會被視為到期。"""
+    return get_runner().tick()
 
 
-def run_loop(interval=60):
-    logger.info("Scheduler | START | interval=%ds", interval)
+def run_loop(interval=None, job_set=JOB_SET_ALL):
+    runner = get_runner(job_set)
+    if interval:
+        runner.tick_seconds = interval
+    return runner.run_forever()
 
-    while True:
-        try:
-            run_once()
-        except Exception as exc:
-            logger.exception("Scheduler | ERROR | %s", exc)
-            try:
-                write_status("error", error=str(exc))
-            except Exception:
-                logger.exception("Scheduler | 無法寫入狀態檔")
 
-        time.sleep(interval)
+def write_status(*args, **kwargs):
+    """向下相容。狀態內容現在由排程器自己組裝。"""
+    return get_runner().write_status()
 
 
 if __name__ == "__main__":
-    run_loop(60)
+    sys.exit(run_scheduler(JOB_SET_ALL))
