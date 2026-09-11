@@ -17,7 +17,7 @@ import logging
 import psycopg2
 
 from db import get_connection, transaction
-from direction import price_change_pct, is_directional
+from direction import price_change_pct, is_directional, is_long
 
 logger = logging.getLogger("AGMCIS")
 
@@ -41,8 +41,19 @@ TRADE_COLUMNS = """
     source,
     leverage,
     position_value,
-    pnl_basis
+    pnl_basis,
+    liquidation_price,
+    entry_fee,
+    exit_fee,
+    funding_usdt,
+    gross_pnl_usdt,
+    requested_entry_price,
+    cost_basis
 """
+
+# ⚠️ 這份欄位清單與 _row_to_trade() 的索引是綁死的。
+# Phase 0.5 抓到過一次:leverage 沒有被 SELECT 出來,於是每一筆交易
+# 不管實際槓桿多少都變成預設的 3x。加欄位時兩邊都要改。
 
 
 class DuplicateOpenTradeError(Exception):
@@ -73,6 +84,15 @@ def _row_to_trade(row):
         "leverage": _f(row[15]) or DEFAULT_LEVERAGE,
         "position_value": _f(row[16]),
         "pnl_basis": row[17],
+        # Phase 10 的成本欄位。position_monitor 需要 liquidation_price
+        # 才判斷得出強平 —— 漏掉它強平就永遠不會觸發。
+        "liquidation_price": _f(row[18]),
+        "entry_fee": _f(row[19]),
+        "exit_fee": _f(row[20]),
+        "funding_usdt": _f(row[21]),
+        "gross_pnl_usdt": _f(row[22]),
+        "requested_entry_price": _f(row[23]),
+        "cost_basis": row[24],
     }
 
 
@@ -263,10 +283,16 @@ def get_consecutive_losses():
 # ---------------- 交易寫入 ----------------
 
 def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprofit=None,
-                 leverage=DEFAULT_LEVERAGE, position_value=None, source="MANUAL"):
+                 leverage=DEFAULT_LEVERAGE, position_value=None, source="MANUAL",
+                 requested_entry_price=None, entry_fee=None,
+                 liquidation_price=None, cost_basis=None):
     """
     建立 OPEN 倉位。若該 symbol 已有 OPEN 倉位,資料庫的 unique index 會擋下來,
     這裡轉成 DuplicateOpenTradeError 讓呼叫端明確處理,而不是靜默寫入第二筆。
+
+    Phase 10 起 entry_price 是**實際成交價**(含點差與滑點),
+    requested_entry_price 保留下單當下看到的價格。兩者的差就是進場滑價,
+    分開存才看得出來成本跑到哪裡去了。
     """
     if position_value is None and size_usdt is not None:
         position_value = float(size_usdt) * float(leverage)
@@ -277,33 +303,57 @@ def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprof
                 """
                 INSERT INTO trades (
                     symbol, signal, entry_price, size_usdt, status,
-                    stoploss, takeprofit, leverage, position_value, source, opened_at
+                    stoploss, takeprofit, leverage, position_value, source, opened_at,
+                    requested_entry_price, entry_fee, liquidation_price, cost_basis
                 )
-                VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, %s, CURRENT_TIMESTAMP,
+                        %s, %s, %s, %s)
                 RETURNING id;
                 """,
                 (symbol, signal, entry_price, size_usdt, stoploss, takeprofit,
-                 leverage, position_value, source),
+                 leverage, position_value, source,
+                 requested_entry_price, entry_fee, liquidation_price, cost_basis),
             )
             return cur.fetchone()[0]
     except psycopg2.errors.UniqueViolation as exc:
         raise DuplicateOpenTradeError(f"{symbol} 已有 OPEN 倉位") from exc
 
 
-def close_trade_atomic(symbol, exit_price, close_reason):
+def close_trade_atomic(symbol, exit_price, close_reason, costs=None,
+                       liquidated=False, apply_slippage=True):
     """
     平倉的唯一入口。在單一 transaction 內:
         SELECT ... FOR UPDATE  ->  算損益  ->  UPDATE trades  ->  UPDATE accounts
 
     回傳已平倉的交易 dict;若該 symbol 當下沒有 OPEN 倉位(例如已被另一條路徑平掉)
     則回傳 None,呼叫端據此判斷「這次沒有平到任何東西」,絕不重複調整餘額。
+
+    Phase 10:損益扣掉成本。
+
+        net = gross - 進場手續費 - 出場手續費 - 資金費用 [- 清算費]
+
+    成本在平倉時一次結算,不是在發生的當下逐筆扣。總額正確,時點簡化 ——
+    對「這個策略扣掉成本還剩多少」這個問題沒有影響。
+
+    傳進來的 exit_price 是「看到的價格」。實際成交價在這個 transaction 裡面算 ——
+    方向是從已鎖定的那一列讀出來的,不是再查一次資料庫。
+    再查一次既多一次往返,方向也可能在兩次讀之間被改掉。
+
+    liquidated=True 時不套用滑點:強平是在強平價成交的,
+    再加一次滑點等於把同一件事算兩遍。
+
+    costs 給 None 時**完全不扣成本**,行為與 Phase 10 之前相同。
+    呼叫端一律應該帶成本進來;留這條路只是為了讓純粹算數的測試能單獨驗證損益公式。
     """
     exit_price = float(exit_price)
 
     with transaction() as cur:
         cur.execute(
             """
-            SELECT id, signal, entry_price, size_usdt, leverage
+            SELECT id, signal, entry_price, size_usdt, leverage,
+                   COALESCE(entry_fee, 0), position_value,
+                   EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(opened_at,
+                                                                    CURRENT_TIMESTAMP)))
               FROM trades
              WHERE symbol = %s AND status = 'OPEN'
              ORDER BY id DESC
@@ -317,11 +367,15 @@ def close_trade_atomic(symbol, exit_price, close_reason):
         if row is None:
             return None
 
-        trade_id, signal, entry_price, size_usdt, leverage = row
+        (trade_id, signal, entry_price, size_usdt, leverage,
+         entry_fee, position_value, held_seconds) = row
 
         entry_price = _f(entry_price) or 0.0
         size_usdt = _f(size_usdt) or 0.0
         leverage = _f(leverage) or DEFAULT_LEVERAGE
+        entry_fee = _f(entry_fee) or 0.0
+        notional = _f(position_value) or (size_usdt * leverage)
+        hours_held = max(0.0, (_f(held_seconds) or 0.0) / 3600.0)
 
         if entry_price <= 0:
             raise ValueError(f"{symbol} entry_price 異常 ({entry_price}),拒絕平倉以免算出錯誤損益")
@@ -329,23 +383,51 @@ def close_trade_atomic(symbol, exit_price, close_reason):
         if not is_directional(signal):
             raise ValueError(f"{symbol} 方向無法辨識 ({signal!r}),拒絕平倉")
 
+        requested_exit_price = exit_price
+        if costs is not None and apply_slippage and not liquidated:
+            exit_price = costs.exit_price(exit_price, is_long(signal))
+
         change = price_change_pct(signal, entry_price, exit_price)
-        roi_pct = change * leverage * 100.0
-        pnl_usdt = size_usdt * change * leverage
+        gross_pnl = size_usdt * change * leverage
+
+        exit_fee = 0.0
+        funding = 0.0
+
+        if costs is not None:
+            exit_fee = costs.fee(notional)
+            if liquidated:
+                exit_fee += costs.liquidation_cost(notional)
+            funding = costs.funding_cost(notional, hours_held, is_long(signal))
+
+        pnl_usdt = gross_pnl - entry_fee - exit_fee - funding
+
+        # 虧損不可能超過保證金 —— 強平就是為了這件事
+        if pnl_usdt < -size_usdt:
+            pnl_usdt = -size_usdt
+
+        roi_pct = (pnl_usdt / size_usdt * 100.0) if size_usdt else 0.0
 
         cur.execute(
             """
             UPDATE trades
                SET status = 'CLOSED',
                    exit_price = %s,
+                   requested_exit_price = %s,
                    pnl_pct = %s,
                    pnl_usdt = %s,
+                   gross_pnl_usdt = %s,
+                   exit_fee = %s,
+                   funding_usdt = %s,
                    close_reason = %s,
                    pnl_basis = 'LEVERAGED',
+                   cost_basis = %s,
                    closed_at = CURRENT_TIMESTAMP
              WHERE id = %s;
             """,
-            (exit_price, round(roi_pct, 4), round(pnl_usdt, 4), close_reason, trade_id),
+            (exit_price, requested_exit_price, round(roi_pct, 4),
+             round(pnl_usdt, 4), round(gross_pnl, 4), round(exit_fee, 8),
+             round(funding, 8), close_reason,
+             "WITH_COSTS" if costs is not None else "NO_COSTS", trade_id),
         )
 
         cur.execute("""
@@ -379,8 +461,15 @@ def close_trade_atomic(symbol, exit_price, close_reason):
             "status": "CLOSED",
             "pnl_pct": round(roi_pct, 2),
             "pnl_usdt": round(pnl_usdt, 2),
+            "gross_pnl_usdt": round(gross_pnl, 4),
+            "entry_fee": round(entry_fee, 6),
+            "exit_fee": round(exit_fee, 6),
+            "funding_usdt": round(funding, 6),
+            "hours_held": round(hours_held, 4),
+            "liquidated": bool(liquidated),
             "close_reason": close_reason,
             "pnl_basis": "LEVERAGED",
+            "cost_basis": "WITH_COSTS" if costs is not None else "NO_COSTS",
             "account": {
                 "balance": round(balance, 2),
                 "wins": wins,

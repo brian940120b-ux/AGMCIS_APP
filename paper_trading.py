@@ -10,8 +10,18 @@ Phase 0.5 的修正:
      此時絕不調整餘額。
   4. 補上缺少的 logger import —— 原本 journal 寫入失敗時會拋 NameError 而不是記錄錯誤。
 
-尚未納入(Phase 10 的範圍):手續費、滑點、Funding、強制平倉模擬。
-目前的模擬損益是「不含成本」的上界,不要當成真實可達成的績效。
+Phase 10 納入成本:
+
+  * **成交價含點差與滑點**,而且永遠是不利的一邊。
+    下單看到 100,做多實際成交在 100.06,平倉時再被扣一次。
+  * **進出場手續費**各一次,依名目價值(保證金 × 槓桿)計算,不是依保證金。
+  * **資金費用**依實際持倉時數累計。做多付、做空收(費率為正時)。
+  * **強制平倉**:價格穿過強平價時以強平價出場,另收清算費,虧損上限是保證金。
+
+成本模型與回測**共用同一個 CostModel**。兩邊假設不同,模擬盤就沒辦法
+拿來驗證回測 —— 那正是模擬盤的用途。
+
+歷史資料一律保留原值並標記 cost_basis = LEGACY_NO_COSTS,不回頭改寫。
 """
 from database_service import (
     DuplicateOpenTradeError,
@@ -23,7 +33,8 @@ from database_service import (
     insert_trade,
     update_account,
 )
-from direction import is_directional, stop_loss_is_valid, take_profit_is_valid
+from agmcis.execution import paper_costs
+from direction import is_directional, is_long, stop_loss_is_valid, take_profit_is_valid
 from logger_service import logger
 
 
@@ -104,6 +115,43 @@ def create_paper_trade(
     stoploss = float(stoploss)
     takeprofit = float(takeprofit) if takeprofit is not None else None
 
+    # ---- Phase 10:成交價含成本 ----
+    long_side = is_long(signal)
+    costs = paper_costs.get_cost_model()
+
+    requested_entry_price = entry_price
+    entry_price = paper_costs.fill_price(entry_price, long_side, is_entry=True,
+                                         model=costs)
+
+    if position_value is None:
+        position_value = size_usdt * leverage
+
+    entry_fee = costs.fee(position_value)
+    liquidation_price = paper_costs.liquidation_price(
+        entry_price, leverage, long_side,
+    )
+
+    # 滑價之後停損可能已經在錯邊了 —— 那張單一開就會被停掉。
+    # 這種情況下不開倉才是對的。
+    if not stop_loss_is_valid(signal, entry_price, stoploss):
+        return _fail(
+            f"{symbol} 滑價後停損失效(下單價 {requested_entry_price} -> "
+            f"成交價 {entry_price:.8f},停損 {stoploss})。停損距離太近,拒絕開倉。"
+        )
+
+    # 強平價比停損還近的倉位,實際上根本用不到停損。
+    if liquidation_price is not None:
+        if long_side and liquidation_price >= stoploss:
+            return _fail(
+                f"{symbol} 強平價 {liquidation_price:.8f} 比停損 {stoploss} 更接近進場價,"
+                f"槓桿 {leverage}x 太高,拒絕開倉"
+            )
+        if not long_side and liquidation_price <= stoploss:
+            return _fail(
+                f"{symbol} 強平價 {liquidation_price:.8f} 比停損 {stoploss} 更接近進場價,"
+                f"槓桿 {leverage}x 太高,拒絕開倉"
+            )
+
     try:
         trade_id = insert_trade(
             symbol=symbol,
@@ -115,6 +163,10 @@ def create_paper_trade(
             leverage=leverage,
             position_value=position_value,
             source=source,
+            requested_entry_price=requested_entry_price,
+            entry_fee=entry_fee,
+            liquidation_price=liquidation_price,
+            cost_basis="WITH_COSTS",
         )
     except DuplicateOpenTradeError:
         return _fail(f"{symbol} 已有持倉,不重複開倉")
@@ -126,8 +178,12 @@ def create_paper_trade(
         logger.exception("Journal OPEN failed for %s: %s", symbol, exc)
 
     logger.info(
-        "Paper trade OPEN | %s | %s | entry=%s sl=%s tp=%s size=%s lev=%sx source=%s",
-        symbol, signal, entry_price, stoploss, takeprofit, size_usdt, leverage, source,
+        "Paper trade OPEN | %s | %s | 下單=%s 成交=%.8f sl=%s tp=%s "
+        "size=%s lev=%sx 強平=%s 進場費=%.4f source=%s",
+        symbol, signal, requested_entry_price, entry_price, stoploss, takeprofit,
+        size_usdt, leverage,
+        f"{liquidation_price:.8f}" if liquidation_price else "n/a",
+        entry_fee, source,
     )
 
     return {
@@ -138,16 +194,27 @@ def create_paper_trade(
             "symbol": symbol,
             "signal": signal,
             "entry_price": entry_price,
+            "requested_entry_price": requested_entry_price,
             "size_usdt": size_usdt,
+            "position_value": position_value,
             "leverage": leverage,
             "stoploss": stoploss,
             "takeprofit": takeprofit,
+            "liquidation_price": liquidation_price,
+            "entry_fee": round(entry_fee, 6),
             "status": "OPEN",
         },
     }
 
 
-def close_paper_trade(symbol, exit_price, close_reason="手動平倉"):
+def close_paper_trade(symbol, exit_price, close_reason="手動平倉",
+                      liquidated=False, apply_slippage=True):
+    """
+    exit_price 是「看到的價格」。實際成交價會再被點差與滑點吃掉一層。
+
+    liquidated=True 時另收清算費,而且**不套用滑點** ——
+    強平是在強平價成交的,再加一次滑點會重複計算同一件事。
+    """
     try:
         exit_price = float(exit_price)
     except (TypeError, ValueError):
@@ -156,8 +223,15 @@ def close_paper_trade(symbol, exit_price, close_reason="手動平倉"):
     if exit_price <= 0:
         return _fail(f"{symbol} 出場價必須大於 0")
 
+    # 滑點在 close_trade_atomic 裡面算 —— 方向要從已鎖定的那一列讀,
+    # 不能在這裡先查一次資料庫再拿去用。
     try:
-        closed = close_trade_atomic(symbol, exit_price, close_reason)
+        closed = close_trade_atomic(
+            symbol, exit_price, close_reason,
+            costs=paper_costs.get_cost_model(),
+            liquidated=liquidated,
+            apply_slippage=apply_slippage,
+        )
     except ValueError as exc:
         return _fail(f"{symbol} 平倉被拒:{exc}")
 
@@ -173,9 +247,12 @@ def close_paper_trade(symbol, exit_price, close_reason="手動平倉"):
     account = closed.pop("account")
 
     logger.info(
-        "Paper trade CLOSE | %s | %s | exit=%s roi=%s%% pnl=%s USDT | %s",
-        symbol, closed["signal"], exit_price,
-        closed["pnl_pct"], closed["pnl_usdt"], close_reason,
+        "Paper trade CLOSE | %s | %s | 看到=%s 成交=%s roi=%s%% "
+        "毛利=%s 費用=%s Funding=%s 淨損益=%s USDT | %s",
+        symbol, closed["signal"], exit_price, closed.get("exit_price", exit_price),
+        closed["pnl_pct"], closed.get("gross_pnl_usdt"),
+        round((closed.get("entry_fee") or 0) + (closed.get("exit_fee") or 0), 6),
+        closed.get("funding_usdt"), closed["pnl_usdt"], close_reason,
     )
 
     try:
@@ -206,6 +283,8 @@ def get_paper_summary():
     wins = account["wins"]
     win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
 
+    costs = _cost_summary(closed_trades)
+
     return {
         "balance": round(account["balance"], 2),
         "wins": account["wins"],
@@ -214,4 +293,35 @@ def get_paper_summary():
         "win_rate": round(win_rate, 2),
         "open_trades": open_trades,
         "closed_trades": closed_trades,
+        "costs": costs,
+    }
+
+
+def _cost_summary(closed_trades):
+    """
+    成本總額。**只統計含成本的交易**(cost_basis = WITH_COSTS)。
+
+    把不含成本的歷史資料混進來平均,「加了成本之後績效差多少」
+    這個問題就永遠問不出答案 —— 與 pnl_basis 的處理方式一致。
+    """
+    with_costs = [t for t in closed_trades if t.get("cost_basis") == "WITH_COSTS"]
+    legacy_count = len(closed_trades) - len(with_costs)
+
+    fees = sum((t.get("entry_fee") or 0) + (t.get("exit_fee") or 0)
+               for t in with_costs)
+    funding = sum(t.get("funding_usdt") or 0 for t in with_costs)
+    gross = sum(t.get("gross_pnl_usdt") or 0 for t in with_costs)
+    net = sum(t.get("pnl_usdt") or 0 for t in with_costs)
+
+    return {
+        "trades_with_costs": len(with_costs),
+        "legacy_trades_without_costs": legacy_count,
+        "total_fees": round(fees, 4),
+        "total_funding": round(funding, 4),
+        "gross_pnl": round(gross, 4),
+        "net_pnl": round(net, 4),
+        "cost_drag": round(gross - net, 4),
+        "liquidations": len([
+            t for t in with_costs if t.get("close_reason") == "強制平倉"
+        ]),
     }

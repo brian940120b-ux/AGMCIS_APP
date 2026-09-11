@@ -154,6 +154,23 @@ CACHE_TTL = {
 PAPER_START_BALANCE = env_float("PAPER_START_BALANCE", 10000)
 DEFAULT_POSITION_SIZE_USDT = env_float("DEFAULT_POSITION_SIZE_USDT", 1000)
 
+# ---- 模擬盤成本(Phase 10)----
+#
+# 模擬盤與回測**共用同一套成本模型**(agmcis/backtest/costs.py)。
+# 兩邊用不同的假設,模擬績效就沒辦法拿來驗證回測 —— 而那正是模擬盤的用途。
+#
+# 預設值取 BingX 公開費率的保守側。實際費率依 VIP 等級與掛單/吃單而異,
+# 要精確就把這些環境變數設成自己帳戶的實際值。
+PAPER_MAKER_FEE = env_float("PAPER_MAKER_FEE", 0.0002)
+PAPER_TAKER_FEE = env_float("PAPER_TAKER_FEE", 0.0005)
+PAPER_SLIPPAGE_PCT = env_float("PAPER_SLIPPAGE_PCT", 0.0005)
+PAPER_SPREAD_PCT = env_float("PAPER_SPREAD_PCT", 0.0002)
+PAPER_FUNDING_RATE_8H = env_float("PAPER_FUNDING_RATE_8H", 0.0001)
+PAPER_LIQUIDATION_FEE = env_float("PAPER_LIQUIDATION_FEE", 0.005)
+
+# 強平時保證金大約剩多少比例。與回測引擎同一個保守值。
+PAPER_MAINTENANCE_MARGIN_RATIO = env_float("PAPER_MAINTENANCE_MARGIN_RATIO", 0.10)
+
 
 # ---------------- 交易模式 ----------------
 

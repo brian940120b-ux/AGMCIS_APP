@@ -29,30 +29,91 @@ def closed_ok(symbol="BTC/USDT"):
 
 
 class TestExitReason(unittest.TestCase):
+    """Phase 10 起 _exit_reason 回傳 (原因, 是否強平)。"""
+
+    def _reason(self, *args, **kwargs):
+        return position_monitor._exit_reason(*args, **kwargs)[0]
 
     def test_long_hits_stop_loss(self):
-        self.assertEqual(position_monitor._exit_reason("做多", 96, 97, 106), "自動止損")
+        self.assertEqual(self._reason("做多", 96, 97, 106), "自動止損")
 
     def test_long_hits_take_profit(self):
-        self.assertEqual(position_monitor._exit_reason("做多", 107, 97, 106), "自動止盈")
+        self.assertEqual(self._reason("做多", 107, 97, 106), "自動止盈")
 
     def test_long_inside_range_stays_open(self):
-        self.assertIsNone(position_monitor._exit_reason("做多", 100, 97, 106))
+        self.assertIsNone(self._reason("做多", 100, 97, 106))
 
     def test_short_hits_stop_loss(self):
-        self.assertEqual(position_monitor._exit_reason("做空", 104, 103, 94), "自動止損")
+        self.assertEqual(self._reason("做空", 104, 103, 94), "自動止損")
 
     def test_short_hits_take_profit(self):
-        self.assertEqual(position_monitor._exit_reason("做空", 93, 103, 94), "自動止盈")
+        self.assertEqual(self._reason("做空", 93, 103, 94), "自動止盈")
 
     def test_none_stop_loss_does_not_raise(self):
-        self.assertIsNone(position_monitor._exit_reason("做多", 96, None, 106))
+        self.assertIsNone(self._reason("做多", 96, None, 106))
 
     def test_none_take_profit_does_not_raise(self):
-        self.assertIsNone(position_monitor._exit_reason("做多", 107, 97, None))
+        self.assertIsNone(self._reason("做多", 107, 97, None))
 
     def test_unknown_direction_never_exits(self):
-        self.assertIsNone(position_monitor._exit_reason("觀望", 1, 97, 106))
+        self.assertIsNone(self._reason("觀望", 1, 97, 106))
+
+
+class TestLiquidationOrdering(unittest.TestCase):
+    """
+    Phase 10。順序與回測引擎一致:停損與強平之中,
+    **離進場價較近的那個先觸發**,不是無條件先看強平。
+    """
+
+    def test_a_normal_stop_is_not_reported_as_a_liquidation(self):
+        """做多停損 99、強平 91,價格跌到 85 —— 先經過 99,那是停損。"""
+        reason, liquidated = position_monitor._exit_reason(
+            "做多", 85, 99, None, liquidation_price=91,
+        )
+
+        self.assertEqual(reason, "自動止損")
+        self.assertFalse(liquidated)
+
+    def test_liquidation_wins_when_it_is_closer_than_the_stop(self):
+        """停損放得很遠、槓桿又高時,強平才會先到。"""
+        reason, liquidated = position_monitor._exit_reason(
+            "做多", 90, 80, None, liquidation_price=95,
+        )
+
+        self.assertEqual(reason, position_monitor.LIQUIDATION_REASON)
+        self.assertTrue(liquidated)
+
+    def test_short_liquidation_is_the_lower_of_the_two(self):
+        reason, liquidated = position_monitor._exit_reason(
+            "做空", 110, 120, None, liquidation_price=105,
+        )
+
+        self.assertEqual(reason, position_monitor.LIQUIDATION_REASON)
+        self.assertTrue(liquidated)
+
+    def test_a_position_without_a_stop_can_still_be_liquidated(self):
+        """沒有停損的倉位沒有風險上限,但強平還是會發生。"""
+        reason, liquidated = position_monitor._exit_reason(
+            "做多", 90, None, None, liquidation_price=91,
+        )
+
+        self.assertEqual(reason, position_monitor.LIQUIDATION_REASON)
+        self.assertTrue(liquidated)
+
+    def test_take_profit_still_works_when_a_liquidation_price_exists(self):
+        reason, liquidated = position_monitor._exit_reason(
+            "做多", 107, 97, 106, liquidation_price=91,
+        )
+
+        self.assertEqual(reason, "自動止盈")
+        self.assertFalse(liquidated)
+
+    def test_nothing_triggers_inside_the_safe_range(self):
+        reason, _ = position_monitor._exit_reason(
+            "做多", 100, 97, 106, liquidation_price=91,
+        )
+
+        self.assertIsNone(reason)
 
 
 class TestRunPositionMonitor(unittest.TestCase):

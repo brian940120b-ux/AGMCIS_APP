@@ -57,11 +57,24 @@ def fake_transaction(cursor):
     yield cursor
 
 
+def trade_row(trade_id=7, signal="做多", entry=100.0, size=1000.0, leverage=3.0,
+              entry_fee=0.0, position_value=None, held_seconds=0.0):
+    """
+    close_trade_atomic 的 SELECT 欄位順序。
+    Phase 10 之後多了 entry_fee / position_value / 持倉秒數。
+    """
+    if position_value is None:
+        position_value = size * leverage
+    return (trade_id, signal, entry, size, leverage,
+            entry_fee, position_value, held_seconds)
+
+
 class TestRealizedPnlUsesLeverage(unittest.TestCase):
 
     def _close(self, signal, entry, exit_price, size, leverage, balance=10000.0):
         cursor = FakeCursor(
-            trade_row=(7, signal, entry, size, leverage),
+            trade_row=trade_row(signal=signal, entry=entry, size=size,
+                                leverage=leverage),
             account_row=(balance, 0, 0, 0),
         )
         with patch.object(database_service, "transaction", lambda: fake_transaction(cursor)):
@@ -127,13 +140,14 @@ class TestRealizedPnlUsesLeverage(unittest.TestCase):
         self.assertIsNone(cursor.account_write())
 
     def test_rejects_zero_entry_price(self):
-        cursor = FakeCursor(trade_row=(7, "做多", 0, 1000, 3), account_row=(10000.0, 0, 0, 0))
+        cursor = FakeCursor(trade_row=trade_row(entry=0), account_row=(10000.0, 0, 0, 0))
         with patch.object(database_service, "transaction", lambda: fake_transaction(cursor)):
             with self.assertRaises(ValueError):
                 database_service.close_trade_atomic("BTC/USDT", 110, "測試")
 
     def test_rejects_unknown_direction(self):
-        cursor = FakeCursor(trade_row=(7, "觀望", 100, 1000, 3), account_row=(10000.0, 0, 0, 0))
+        cursor = FakeCursor(trade_row=trade_row(signal="觀望"),
+                            account_row=(10000.0, 0, 0, 0))
         with patch.object(database_service, "transaction", lambda: fake_transaction(cursor)):
             with self.assertRaises(ValueError):
                 database_service.close_trade_atomic("BTC/USDT", 110, "測試")

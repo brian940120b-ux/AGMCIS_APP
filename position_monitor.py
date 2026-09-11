@@ -11,6 +11,15 @@ Phase 0.5 的修正:
 
 position_manager.manage_open_positions() 也改為呼叫這裡的同一份邏輯,
 不再有兩套各自實作的平倉判斷。
+
+Phase 10 加入**強制平倉**。判定順序與回測引擎一致:
+停損與強平之中,**離進場價較近的那個先觸發**,不是無條件先看強平。
+做多停損 99、強平 91 時,價格是先經過 99 的,那筆是正常停損。
+
+⚠️ 已知的樂觀偏誤:這裡比對的是輪詢當下的**單一價格**,不是這段期間的
+high / low。兩次輪詢之間穿刺停損又彈回來的行情,這裡看不到 ——
+實際交易所的觸發單會成交,模擬盤不會。這會讓模擬勝率偏高。
+要修掉需要 WebSocket 逐筆價格(Phase 12 / 13)。
 """
 from database_service import get_open_trades
 from direction import is_long, is_short
@@ -20,23 +29,58 @@ from notifier import notify_close_trade
 from paper_trading import close_paper_trade
 
 
-def _exit_reason(signal, price, stoploss, takeprofit):
-    """回傳平倉原因,沒有觸發條件則回傳 None。stoploss / takeprofit 可為 None。"""
+LIQUIDATION_REASON = "強制平倉"
+
+
+def _adverse_level(signal, stoploss, liquidation_price):
+    """
+    停損與強平之中,離進場價較近的那個會先被觸發。
+
+    回傳 (觸發價, 是否為強平)。兩個都沒有就回 (None, False)。
+    """
+    if stoploss is None and liquidation_price is None:
+        return None, False
+
+    if stoploss is None:
+        return liquidation_price, True
+
+    if liquidation_price is None:
+        return stoploss, False
+
     if is_long(signal):
-        if stoploss is not None and price <= stoploss:
-            return "自動止損"
+        # 做多時價格往下走,先碰到的是**較高**的那個
+        if liquidation_price > stoploss:
+            return liquidation_price, True
+        return stoploss, False
+
+    # 做空時價格往上走,先碰到的是**較低**的那個
+    if liquidation_price < stoploss:
+        return liquidation_price, True
+    return stoploss, False
+
+
+def _exit_reason(signal, price, stoploss, takeprofit, liquidation_price=None):
+    """
+    回傳 (平倉原因, 是否為強平)。沒有觸發條件則回傳 (None, False)。
+    stoploss / takeprofit / liquidation_price 都可為 None。
+    """
+    level, liquidated = _adverse_level(signal, stoploss, liquidation_price)
+
+    if is_long(signal):
+        if level is not None and price <= level:
+            return (LIQUIDATION_REASON if liquidated else "自動止損"), liquidated
         if takeprofit is not None and price >= takeprofit:
-            return "自動止盈"
-        return None
+            return "自動止盈", False
+        return None, False
 
     if is_short(signal):
-        if stoploss is not None and price >= stoploss:
-            return "自動止損"
+        if level is not None and price >= level:
+            return (LIQUIDATION_REASON if liquidated else "自動止損"), liquidated
         if takeprofit is not None and price <= takeprofit:
-            return "自動止盈"
-        return None
+            return "自動止盈", False
+        return None, False
 
-    return None
+    return None, False
 
 
 def run_position_monitor(notify=True):
@@ -52,6 +96,7 @@ def run_position_monitor(notify=True):
         signal = trade.get("signal")
         stoploss = trade.get("stoploss")
         takeprofit = trade.get("takeprofit")
+        liquidation_price = trade.get("liquidation_price")
 
         if not (is_long(signal) or is_short(signal)):
             skipped.append({"symbol": symbol, "reason": f"方向無法辨識 ({signal!r})"})
@@ -76,12 +121,24 @@ def run_position_monitor(notify=True):
         price = float(price)
         checked_symbols.append({"symbol": symbol, "price": price})
 
-        reason = _exit_reason(signal, price, stoploss, takeprofit)
+        reason, liquidated = _exit_reason(
+            signal, price, stoploss, takeprofit, liquidation_price,
+        )
 
         if not reason:
             continue
 
-        result = close_paper_trade(symbol, price, reason)
+        if liquidated:
+            # 強平在強平價成交,不是在輪詢到的那個價格成交。
+            logger.error(
+                "Position Monitor | LIQUIDATION | %s | %s | 強平價=%s 當前價=%s",
+                symbol, signal, liquidation_price, price,
+            )
+            result = close_paper_trade(
+                symbol, liquidation_price, reason, liquidated=True,
+            )
+        else:
+            result = close_paper_trade(symbol, price, reason)
 
         if not result.get("success"):
             if result.get("already_closed"):
@@ -116,6 +173,7 @@ def run_position_monitor(notify=True):
         "checked": len(open_trades),
         "closed_count": len(closed),
         "closed": closed,
+        "liquidated_count": len([c for c in closed if c.get("liquidated")]),
         "checked_symbols": checked_symbols,
         "skipped": skipped,
         "unprotected": unprotected,
