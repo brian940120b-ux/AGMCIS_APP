@@ -312,3 +312,76 @@ def test_an_unreadable_existing_file_is_not_reported_as_valid(tmp_path):
         existing = api_confirm._existing()
 
     assert existing["readable"] is False
+
+
+# ---------------- 首頁與模式頁不能各自判斷 ----------------
+
+def test_the_landing_page_and_the_modes_page_agree():
+    """
+    首頁原本自己寫 `TRADING_MODE == "live"`,只認得 PAPER 與 LIVE。
+    一個 AUTO_TRADING=false 的系統會在首頁顯示 PAPER、在模式頁顯示
+    MANUAL —— 而首頁是第一百零五節說的「第一眼」。
+
+    同一件事在兩個畫面上不一樣,使用者會不知道該相信哪一個。
+    """
+    from unittest.mock import patch
+
+    from api import overview
+    from agmcis.config import settings
+
+    with patch.object(settings, "AUTO_TRADING_ENABLED", False), \
+         patch("api.health.build_health",
+               return_value={"status": "healthy", "components": {}}):
+        status = overview._status()
+        # 兩邊要在**同一組設定下**比較 —— 拉到 with 外面比的話,
+        # modes.current() 看到的是還原後的設定。
+        from_modes_page = modes.current()
+
+    assert status["mode"] == modes.MANUAL
+    assert status["mode"] == from_modes_page
+
+
+def test_the_landing_page_does_not_judge_the_mode_itself():
+    """靜態保證:模式的判斷只有一份。"""
+    from pathlib import Path
+
+    source = Path("api/overview.py").read_text(encoding="utf-8")
+
+    assert "modes.snapshot()" in source
+    # 不再自己比對 TRADING_MODE
+    assert 'mode == "live"' not in source
+    assert 'TRADING_MODE", "paper")).lower()' not in source
+
+
+def test_test_mode_is_not_shown_as_real_money_on_the_landing_page():
+    """
+    測試網送的是真訂單但不是真錢。首頁的紅色警告留給真的 LIVE ——
+    看習慣了就沒有用了。
+    """
+    from unittest.mock import patch
+
+    from api import overview
+    from agmcis.config import settings
+
+    with patch.object(settings, "EXCHANGE_USE_TESTNET", True), \
+         patch.object(settings, "TRADING_MODE", "live"), \
+         patch("api.health.build_health",
+               return_value={"status": "healthy", "components": {}}):
+        status = overview._status()
+
+    assert status["mode"] == modes.TEST
+    assert status["is_live"] is False
+
+
+def test_the_landing_page_carries_the_mode_description():
+    """模式的名字本身沒有資訊。使用者要知道什麼會自動發生。"""
+    from unittest.mock import patch
+
+    from api import overview
+
+    with patch("api.health.build_health",
+               return_value={"status": "healthy", "components": {}}):
+        status = overview._status()
+
+    assert status["mode_description"]
+    assert len(status["all_modes"]) == 4

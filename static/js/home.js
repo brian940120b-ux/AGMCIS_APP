@@ -28,14 +28,20 @@ function renderStatus(status) {
     const badge = document.getElementById("mode_badge");
     const mode = (status.mode || "UNKNOWN").toUpperCase();
 
-    badge.textContent = mode === "LIVE" ? "🔴 LIVE MODE" : `🔵 ${mode} MODE`;
+    /* 四種模式(第九十一節)。真錢只有 LIVE —— 測試網送的是真訂單
+       但不是真錢,所以它不該用同一個紅色。 */
+    const ICON = { MANUAL: "⚪", PAPER: "🔵", TEST: "🟡", LIVE: "🔴" };
+
+    badge.textContent = `${ICON[mode] || "⚪"} ${mode} MODE`;
     badge.className = `mode-badge mode-${mode.toLowerCase()}`;
+    badge.title = status.mode_description || "";
 
     render("system_status",
         `${HEALTH_ICON[status.health] || "⚪"} ${esc((status.health || "unknown").toUpperCase())}`);
     render("exchange", esc(status.exchange));
     render("markets", (status.markets || []).map(esc).join("<br>"));
     render("mode", esc(mode));
+    render("mode_note", esc(status.mode_description || ""));
     render("auto_trading", status.auto_trading ? "🟢 ON" : "⚪ OFF");
 
     /* 降級時把壞掉的元件列出來。只顯示「DEGRADED」而不說哪裡壞了,

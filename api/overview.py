@@ -70,13 +70,26 @@ def build_overview(limit=DEFAULT_SCAN):
 
 
 def _status():
-    """狀態列。模式是這裡最重要的一格 —— 它決定其他數字是不是真錢。"""
+    """
+    狀態列。模式是這裡最重要的一格 —— 它決定其他數字是不是真錢。
+
+    ## 模式走 agmcis/config/modes.py,不在這裡自己判斷
+
+    這裡原本寫 `TRADING_MODE == "live"`,也就是只認得 PAPER 與 LIVE。
+    第九十一節要的是四種:MANUAL / PAPER / TEST / LIVE,而
+    `/modes` 那一頁已經照著做了。
+
+    兩邊各自判斷的話,一個 `AUTO_TRADING=false` 的系統會在首頁顯示
+    PAPER、在模式頁顯示 MANUAL —— 而首頁是第一百零五節說的「第一眼」。
+    同一件事在兩個畫面上不一樣,使用者會不知道該相信哪一個。
+    """
     def run():
         from api.health import build_health
+        from agmcis.config import modes
         from agmcis.safety import safe_live
 
         health = build_health()
-        mode = str(getattr(settings, "TRADING_MODE", "paper")).lower()
+        state = modes.snapshot()
 
         return {
             "online": health["status"] != "unhealthy",
@@ -84,8 +97,12 @@ def _status():
             "components": health["components"],
             "exchange": "BingX",
             "markets": ["Standard Futures", "Perpetual Futures"],
-            "mode": mode.upper(),
-            "is_live": mode == "live",
+            "mode": state["mode"],
+            "mode_description": state["description"],
+            # 真錢在不在動。**只有 LIVE 是 True** —— 測試網送的是真訂單
+            # 但不是真錢,所以它不算(見 modes.py 的 TEST 蓋過 LIVE)。
+            "is_live": state["is_real_money"],
+            "all_modes": state["all_modes"],
             "safe_live": safe_live.snapshot(),
             "auto_trading": bool(getattr(settings, "AUTO_TRADING_ENABLED", False)),
         }
@@ -93,6 +110,7 @@ def _status():
     return _safe("status", run, {
         "online": False, "health": "unknown", "components": {},
         "exchange": "BingX", "mode": "UNKNOWN", "is_live": False,
+        "mode_description": "", "all_modes": [],
     })
 
 
