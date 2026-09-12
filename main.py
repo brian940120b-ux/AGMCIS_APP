@@ -44,6 +44,7 @@ from api.ai import router as ai_router
 from api.analytics import router as analytics_router
 from api.auto_trader import router as auto_trader_router
 from api.dashboard import router as dashboard_router
+from api.health import router as health_router
 from api.equity import router as equity_router
 from api.journal import router as journal_router
 from api.leaderboard import router as leaderboard_router
@@ -74,6 +75,12 @@ for _router in (
     transparency_router,
 ):
     app.include_router(_router, dependencies=PROTECTED)
+
+# /health 刻意**不掛 API 金鑰**。健康檢查是給外部監控用的 ——
+# uptime 監測、負載平衡器、systemd 看門狗都不會帶金鑰。
+# 一個需要金鑰才打得到的健康端點等於沒有健康端點。
+# 它只回狀態不回內容,錯誤細節留在 /api/system_health(需要金鑰)與 log。
+app.include_router(health_router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -132,7 +139,7 @@ def home(request: Request):
     # 讓金鑰不留在瀏覽歷史與 Nginx access log 裡。
     key = request.query_params.get("key")
     if key and key_is_valid(key):
-        return redirect_with_session("/", key)
+        return redirect_with_session("/", key, request)
 
     if not is_authenticated(request):
         return HTMLResponse(LOGIN_PAGE, status_code=401)
@@ -179,7 +186,7 @@ def transparency(request: Request):
     """
     key = request.query_params.get("key")
     if key and key_is_valid(key):
-        return redirect_with_session("/transparency", key)
+        return redirect_with_session("/transparency", key, request)
 
     if not is_authenticated(request):
         return HTMLResponse(LOGIN_PAGE, status_code=401)
@@ -193,7 +200,7 @@ def transparency(request: Request):
 def dashboard_v1(request: Request):
     key = request.query_params.get("key")
     if key and key_is_valid(key):
-        return redirect_with_session("/v1", key)
+        return redirect_with_session("/v1", key, request)
 
     if not is_authenticated(request):
         return HTMLResponse(LOGIN_PAGE, status_code=401)

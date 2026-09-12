@@ -60,6 +60,34 @@ class TestApiSurface(unittest.TestCase):
 
         self.assertEqual(unprotected, [], f"以下端點沒有要求金鑰:{unprotected}")
 
+    def test_health_is_the_only_router_mounted_without_the_key(self):
+        """
+        /health 刻意不需要金鑰(第六十六節)—— 外部監控不會帶金鑰。
+        但那是**唯一**的例外。
+
+        檢查的是 main.py 怎麼掛 router,不是回應的狀態碼:
+        資料庫連不上的環境裡,一個沒有保護的端點也會回 503,
+        那跟「被擋住」長得一模一樣,用狀態碼分不出來。
+
+        新增一個 router 而忘了加 dependencies=PROTECTED,這裡會變紅。
+        """
+        import inspect
+        import re
+
+        source = inspect.getsource(self.main)
+        calls = re.findall(r"app\.include_router\(([^)]*)\)", source, re.S)
+
+        unguarded = [
+            " ".join(call.split())
+            for call in calls
+            if "PROTECTED" not in call
+        ]
+
+        self.assertEqual(
+            unguarded, ["health_router"],
+            f"以下 router 沒有掛金鑰:{unguarded}",
+        )
+
     def test_auto_trader_is_no_longer_a_get(self):
         """GET 依定義不該變更狀態。原本 GET /api/auto_trader 會實際開倉。"""
         paths = self._paths()

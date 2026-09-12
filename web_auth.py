@@ -13,12 +13,15 @@ Phase 0.5 修正兩個問題:
   - 金鑰比對使用 secrets.compare_digest,避免時序側通道。
   - DASHBOARD_KEY 未設定時一律拒絕,不再 fallback 到寫死的預設值。
 """
+import logging
 import secrets
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 
 from agmcis.config import settings
+
+logger = logging.getLogger("agmcis.web_auth")
 
 COOKIE_NAME = settings.SESSION_COOKIE_NAME
 HEADER_NAME = settings.API_KEY_HEADER
@@ -85,10 +88,34 @@ def set_session_cookie(response, key):
     return response
 
 
-def redirect_with_session(target_path, key):
+def redirect_with_session(target_path, key, request=None):
     """驗證通過後把金鑰放進 cookie 並導回乾淨網址,讓金鑰不留在瀏覽紀錄裡。"""
+    _audit_login(request, target_path)
     response = RedirectResponse(url=target_path, status_code=status.HTTP_303_SEE_OTHER)
     return set_session_cookie(response, key)
+
+
+def _audit_login(request, target_path):
+    """
+    登入稽核(第六十五節)。
+
+    只記來源 IP 與目標頁面 —— **不記金鑰本身,也不記它的任何片段**。
+    第十節說得很明白:API Key 不進 Database。一個「只記前四碼」的
+    折衷做法在這裡沒有價值,卻讓金鑰有了第二個存在的地方。
+
+    稽核失敗不擋登入。這一層是觀測,不是門禁。
+    """
+    try:
+        from agmcis.review.decision_log import audit
+
+        source_ip = None
+        if request is not None and getattr(request, "client", None):
+            source_ip = request.client.host
+
+        audit("LOGIN", actor="dashboard", target=target_path,
+              source_ip=source_ip, detail="Dashboard 金鑰驗證通過")
+    except Exception:
+        logger.exception("登入稽核寫入失敗")
 
 
 LOGIN_PAGE = """<html><head><meta charset='utf-8'><title>AGMCIS</title></head>

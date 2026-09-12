@@ -113,8 +113,8 @@
 | 六十二 | AI Agent Dashboard | ⚠️ | `/transparency` 顯示 Agent 投票結果,但**沒有顯示 Agent 目前正在做什麼**(狀態燈/進行中的工作) |
 | 六十三 | Agent Interaction Visualization | ❌ | **沒有**。沒有節點圖、沒有決策時間軸 |
 | 六十四 | Database | ⚠️ | 13 張表。新增 ai_decisions / risk_events / audit_logs / market_regimes / trade_exits。**仍缺 users、strategies、backtests、news 等** —— 那些目前不在交易路徑上 |
-| 六十五 | Audit Log | ⚠️ | `audit_logs` 表 + Kill Switch + 設定變更 + 策略狀態變更。**登入與模式切換還沒接上** |
-| 六十六 | Observability | ⚠️ | 有結構化 log 與 `/api/system_health`。**沒有 Master Prompt 指定的 `/health` 端點**,而且現有健康檢查被 API 金鑰保護,外部監控打不到 |
+| 六十五 | Audit Log | ✅ | 登入、系統暫停 / 恢復、策略狀態變更、Kill Switch、設定變更全部進 `audit_logs`。登入稽核**不記金鑰的任何片段** |
+| 六十六 | Observability | ✅ | `/health` 不需金鑰(外部監控不會帶金鑰),九個元件狀態,unhealthy 回 503。只回狀態不回內容 —— 錯誤細節留在需要金鑰的端點與 log |
 | 六十七 | Testing | ⚠️ | Unit + Integration 完整(969 個測試)。**Simulation Tests 只覆蓋 SL Failure / Partial Fill / Order Rejection;缺 Market Crash、API Timeout、Duplicate Order、Network Disconnect、Database Failure、WebSocket Disconnect** |
 | 六十八 | Failure Recovery | ✅ | 重啟後 `reconciliation` 會先對帳再恢復;client order id 防重複下單 |
 | 六十九 | Data Persistence | ✅ | 訂單、持倉、交易、決策、Agent 投票、風控事件、市況全部進 DB |
@@ -177,8 +177,8 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 67 |
-| ⚠️ 部分做到 | 34 |
+| ✅ 已做到 | 69 |
+| ⚠️ 部分做到 | 32 |
 | ❌ 沒做 | 5 |
 
 ## 缺口排序(由大到小)
@@ -192,7 +192,7 @@
 5. ~~**七十三 + 七十四 + 七十五 + 七十六 — 策略退化偵測**~~ ✅ 已補(`agmcis/strategy/health.py`,31 個測試 + Dashboard 面板)。
 6. ~~**五十五 + 五十七 + 五十八 — Partial TP 與 ATR / 結構型移動停損**~~ ✅ 已補(`agmcis/execution/exit_plan.py`,74 個測試)。
 7. ~~**六十四 + 六十九 + 七十 + 七十一 — 決策持久化**~~ ✅ 已補(`agmcis/review/decision_log.py`,23 個測試)。
-8. **六十六 — `/health`**(維運)
+8. ~~**六十五 + 六十六 — 稽核與 `/health`**~~ ✅ 已補(`api/health.py`,26 個測試)。
 9. **三十七 + 三十三 — Monte Carlo 成本敏感度、回測 Partial Fill / Trailing**(研究可信度)
 10. **二十五 + 二十四 + 三十八 — TA 深度、MTF 階層、更多策略**(研究廣度)
 11. **一百零五 + 九十一 + 六十二 + 六十三 — 使用者體驗**(展示)
