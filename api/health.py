@@ -117,15 +117,29 @@ def _scheduler():
 
 def _websocket():
     """
-    WebSocket 目前只用於 Dashboard 推播,不是 BingX 行情來源。
-    所以它不存在時系統仍然可以交易 —— 回 disabled 而不是 error,
-    因為 error 會讓監控以為有東西壞了。
+    BingX 行情 WebSocket(第四十九節)。
+
+    三種狀態,而且它們的意思不一樣:
+      disabled  沒有啟用。系統走 REST,慢一點但正常。
+      ok        連著而且有在收資料。
+      error     啟用了但**放棄重連**了 —— 這一個必須看得見,
+                因為一個安靜地永遠重連的背景執行緒看起來跟正常運作
+                一模一樣,而使用者會以為自己有即時行情。
     """
     try:
-        from v3.ws.manager import manager
+        from agmcis.exchange.bingx.stream import get_stream
+
+        stream = get_stream()
     except Exception:
         return DISABLED
-    return OK if manager is not None else DISABLED
+
+    if stream is None or not stream.status.running:
+        return DISABLED
+
+    if stream.status.gave_up:
+        return ERROR
+
+    return OK if stream.status.connected else ERROR
 
 
 def build_health():

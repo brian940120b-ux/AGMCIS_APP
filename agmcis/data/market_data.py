@@ -70,11 +70,44 @@ def get_ticker(symbol, market_type=MarketType.PERPETUAL) -> Optional[Dict]:
 
 
 def get_price(symbol, market_type=MarketType.PERPETUAL) -> Optional[float]:
+    """
+    最新價。**WebSocket 優先,REST fallback**(第四十九節)。
+
+    WebSocket 只在報價夠新的時候才算數 —— 過期就當作沒有,
+    退回 REST。斷線時繼續用最後一次收到的價格,是這條路徑最危險的
+    失敗模式:那個價格看起來完全正常,而系統會用它算停損與強平。
+    """
+    streamed = _streamed_price(symbol, market_type)
+    if streamed is not None:
+        return streamed
+
     ticker = get_ticker(symbol, market_type)
     if not ticker:
         return None
     price = ticker.get("price")
     return float(price) if price is not None else None
+
+
+def _streamed_price(symbol, market_type):
+    """
+    WebSocket 的即時價。沒啟動、不新鮮、或出錯一律回 None。
+
+    只用於永續:Standard Futures 沒有走 WebSocket。
+    """
+    if market_type is not MarketType.PERPETUAL:
+        return None
+
+    try:
+        from agmcis.exchange.bingx.stream import get_stream
+
+        stream = get_stream()
+        if stream is None:
+            return None
+        return stream.get_price(symbol)
+    except Exception as exc:
+        # 串流那一層出問題不該讓取價失敗 —— REST 還在。
+        logger.warning("WebSocket 取價失敗,退回 REST | %s | %s", symbol, exc)
+        return None
 
 
 def get_price_checked(symbol, market_type=MarketType.PERPETUAL):

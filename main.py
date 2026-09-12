@@ -11,7 +11,9 @@ Phase 0.5 的修正:
      實際提供服務的一直是 router 版本 —— 改這裡的版本完全沒有效果。
   4. 持倉表格改用每筆交易的真實槓桿,不再一律顯示 3x。
 """
+import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, Request
@@ -33,7 +35,32 @@ from web_auth import (
 
 START_TIME = time.time()
 
-app = FastAPI(title="AGMCIS", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_app):
+    """
+    WebSocket 行情(第四十九節)。預設關閉,由 WEBSOCKET_ENABLED 打開。
+
+    啟動失敗**不會**讓 API 起不來:WebSocket 是加速,不是必要條件。
+    行情走 REST 會慢一點,但系統照樣運作,而 /health 會顯示它的狀態。
+    """
+    try:
+        from agmcis.exchange.bingx.stream import start_stream
+        start_stream()
+    except Exception:
+        logging.getLogger("agmcis").exception(
+            "WebSocket 行情啟動失敗,行情改走 REST",
+        )
+
+    yield
+
+    try:
+        from agmcis.exchange.bingx.stream import stop_stream
+        stop_stream()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="AGMCIS", version="1.0.0", lifespan=lifespan)
 
 templates = Jinja2Templates(directory="templates")
 

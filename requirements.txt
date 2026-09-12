@@ -9,4 +9,5 @@ python-dotenv
 python-multipart
 matplotlib
 feedparser
-psycopg2-binary
+psycopg2-binary# ccxt.pro(WebSocket)隨 ccxt 一起安裝,不需要額外套件。
+# 這一行只是記錄依賴關係,避免有人把 ccxt 換成沒有 pro 的版本。

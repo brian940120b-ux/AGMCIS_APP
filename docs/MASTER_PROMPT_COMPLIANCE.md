@@ -87,7 +87,7 @@
 | 四十六 | Live 初期限制 | ✅ | `agmcis/safety/safe_live.py`。四個實單上限 + SAFE LIVE MODE(預設開啟)。與一般上限取較嚴格的那一個 —— 這一層只能收緊,不能放寬。LIVE GATE 多一項檢查 |
 | 四十七 | Emergency Kill Switch | ✅ | `agmcis/risk/kill_switch.py` 含 audit log |
 | 四十八 | API Rate Limit | ✅ | `agmcis/exchange/rate_limiter.py` + 跨行程 `shared_rate_limit.py`,有限次重試 |
-| 四十九 | WebSocket | ⚠️ | `v3/ws/` 是 Dashboard 推播,**不是 BingX 行情 WebSocket**。行情/訂單/持倉仍全部走 REST 輪詢 |
+| 四十九 | WebSocket | ✅ | `agmcis/exchange/bingx/stream.py` 用 ccxt.pro。**過期的報價等於沒有報價**,退回 REST。重連有上限,放棄時 `/health` 會變 error。預設關閉 |
 | 五十 | 資料品質 | ✅ | `agmcis/data/quality.py` 檢查缺 K、重複、時間戳、離群、Gap、Stale;不合格 → 不交易 |
 
 ## 五十一~六十:新聞、掃描、出場、組合風險

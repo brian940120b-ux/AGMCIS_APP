@@ -295,6 +295,12 @@ MAX_LIVE_LEVERAGE = env_float("MAX_LIVE_LEVERAGE", 2)
 # 每個標的多三次外部呼叫,rate limit 吃緊時可以先關這個。
 AGENT_ENRICHMENT_ENABLED = env_bool("AGENT_ENRICHMENT_ENABLED", True)
 
+# WebSocket 行情(第四十九節)。預設**關閉** ——
+# 它是一條新的、還沒在這個部署上跑過的路徑,而取價是停損判斷的依據。
+# 開啟之後 /health 會顯示它的狀態,過期的報價一律退回 REST。
+WEBSOCKET_ENABLED = env_bool("WEBSOCKET_ENABLED", False)
+WEBSOCKET_MAX_AGE_SECONDS = env_float("WEBSOCKET_MAX_AGE_SECONDS", 15.0)
+
 MIN_SIGNAL_SCORE = env_float("MIN_SIGNAL_SCORE", 70)
 MIN_CONFIDENCE = env_float("MIN_CONFIDENCE", 60)
 
