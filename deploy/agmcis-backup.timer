@@ -1,0 +1,15 @@
+[Unit]
+Description=AGMCIS daily backup
+
+[Timer]
+# UTC 凌晨。挑一個交易最少的時間 —— 備份會鎖表。
+OnCalendar=*-*-* 03:00:00 UTC
+
+# 機器關過機的話,開機後補跑。少一天的備份是真的少了一天。
+Persistent=true
+
+# 隨機延遲,避免每台機器都在整點打資料庫。
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -71,6 +71,7 @@ from api.auto_trader import router as auto_trader_router
 from api.dashboard import router as dashboard_router
 from api.health import router as health_router
 from api.jobs import router as jobs_router
+from api.live_confirmation import router as live_confirmation_router
 from api.overview import router as overview_router
 from api.equity import router as equity_router
 from api.journal import router as journal_router
@@ -106,6 +107,7 @@ for _router in (
     jobs_router,
     trade_panel_router,
     performance_dashboard_router,
+    live_confirmation_router,
 ):
     app.include_router(_router, dependencies=PROTECTED)
 
@@ -218,6 +220,30 @@ def transparency(request: Request):
 
     return templates.TemplateResponse(
         request=request, name="transparency.html", context={},
+    )
+
+
+@app.get("/modes", response_class=HTMLResponse)
+def trading_modes(request: Request):
+    """
+    交易模式與 LIVE 確認(第九十一 / 九十二節)。
+
+    四種模式 MANUAL / PAPER / TEST / LIVE 清楚顯示,而且看得到
+    「為什麼是這一個」—— 模式是從三個設定推導的,不是另外存的值。
+
+    PAPER → LIVE 的七項確認也在這裡。它**不會讓系統開始下實單**:
+    產生的確認檔只是 LIVE SAFETY GATE 其中一項檢查,而且
+    LiveBroker 不存在。最壞的情況是磁碟上多了一個檔案。
+    """
+    key = request.query_params.get("key")
+    if key and key_is_valid(key):
+        return redirect_with_session("/modes", key, request)
+
+    if not is_authenticated(request):
+        return HTMLResponse(LOGIN_PAGE, status_code=401)
+
+    return templates.TemplateResponse(
+        request=request, name="modes.html", context={},
     )
 
 

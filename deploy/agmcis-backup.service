@@ -1,0 +1,23 @@
+# 每日備份(Master Prompt 第八十二節的 Backup)。
+#
+#     sudo cp deploy/agmcis-backup.* /etc/systemd/system/
+#     sudo systemctl enable --now agmcis-backup.timer
+#
+# 用 timer 而不是 cron:systemd 會記錄每一次執行的結果,
+# 而 `systemctl status agmcis-backup` 看得到上一次成功還是失敗。
+# cron 失敗時只會寄一封沒有人在看的信。
+
+[Unit]
+Description=AGMCIS daily backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=agmcis
+WorkingDirectory=/root/AGMCIS_APP
+EnvironmentFile=/root/AGMCIS_APP/.env
+ExecStart=/root/AGMCIS_APP/.venv/bin/python backup_system.py
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agmcis-backup

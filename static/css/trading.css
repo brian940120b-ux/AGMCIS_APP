@@ -152,3 +152,177 @@ label { color: #94a3b8; font-size: 13px; margin-right: 6px; }
 .unreliable {
     color: #fbbf24;
 }
+
+/* ================================================================
+ * 第六十三節:Agent Interaction Visualization
+ *
+ * 第六十三節列了 animated nodes / data streams / glowing connections /
+ * activity indicators / signal pulses,並且加了一句:
+ *
+ *     UI Animation 不得影響交易核心。
+ *
+ * 這一段是**純 CSS**。沒有 JS 計時器、沒有 requestAnimationFrame、
+ * 沒有任何會在主執行緒上跑迴圈的東西 —— 動畫由瀏覽器的合成器處理,
+ * 而交易核心根本不在瀏覽器裡。
+ *
+ * 而且動畫只加在**已經正確的靜態圖上**。一張會動但顯示假流程的圖,
+ * 比一張靜態但正確的圖糟得多:前者會讓人相信一個沒發生的推理過程。
+ * 所以每一個動畫都綁在真實狀態上:
+ *
+ *     只有 PASSED 的關卡會發光      —— 沒過的不會假裝在運作
+ *     只有通過的連線會有資料流動   —— 沒到的那幾段是死的
+ *     BLOCKED 的關卡會脈動一次    —— 它是要人看的
+ *     NOT_RUN 完全不動            —— 執行層在預覽裡永遠沒跑
+ * ================================================================ */
+
+/* ---- 節點:通過的關卡會呼吸 ---- */
+
+.flow-stage {
+    position: relative;
+    overflow: hidden;
+}
+
+.flow-PASSED {
+    animation: node-alive 3s ease-in-out infinite;
+}
+
+@keyframes node-alive {
+    0%, 100% { box-shadow: inset 3px 0 0 -1px rgba(52, 211, 153, 0); }
+    50%      { box-shadow: inset 3px 0 0 -1px rgba(52, 211, 153, 0.9); }
+}
+
+/* 被擋下來的關卡脈動。它是這張圖上唯一需要人看的東西。 */
+.flow-BLOCKED {
+    animation: node-blocked 1.6s ease-in-out infinite;
+}
+
+@keyframes node-blocked {
+    0%, 100% { background: #0f172a; }
+    50%      { background: #1c1708; }
+}
+
+.flow-ERROR {
+    animation: node-error 1.2s ease-in-out infinite;
+}
+
+@keyframes node-error {
+    0%, 100% { background: #0f172a; }
+    50%      { background: #1f1012; }
+}
+
+/* NOT_REACHED 與 NOT_RUN 刻意完全靜止 —— 見上面的說明。 */
+
+/* ---- 活動指示燈 ---- */
+
+.flow-stage .flow-badge::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+    background: #475569;
+}
+
+.flow-PASSED .flow-badge::before {
+    background: #34d399;
+    animation: blink 2s ease-in-out infinite;
+}
+
+.flow-BLOCKED .flow-badge::before {
+    background: #fbbf24;
+    animation: blink 1s ease-in-out infinite;
+}
+
+.flow-ERROR .flow-badge::before {
+    background: #f87171;
+    animation: blink 0.7s ease-in-out infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.25; }
+}
+
+/* ---- 連線:資料流 ---- */
+
+.flow-arrow {
+    position: relative;
+    height: 22px;
+    overflow: hidden;
+}
+
+/* 訊號脈衝。只有**上一關通過**的那一段會有東西在流動 ——
+   由 JS 加上 .live class,依真實狀態決定,不是每一段都亮。 */
+.flow-arrow.live::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -6px;
+    width: 2px;
+    height: 8px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: linear-gradient(180deg,
+        rgba(56, 189, 248, 0) 0%,
+        rgba(56, 189, 248, 0.95) 50%,
+        rgba(56, 189, 248, 0) 100%);
+    animation: stream 1.4s linear infinite;
+}
+
+@keyframes stream {
+    from { transform: translateY(0); }
+    to   { transform: translateY(28px); }
+}
+
+.flow-arrow.live { color: #38bdf8; }
+
+/* ---- 讓使用者關得掉 ---- */
+
+@media (prefers-reduced-motion: reduce) {
+    .flow-PASSED,
+    .flow-BLOCKED,
+    .flow-ERROR,
+    .flow-stage .flow-badge::before,
+    .flow-arrow.live::after {
+        animation: none;
+    }
+}
+
+/* ---- 決策時間軸(第六十三節的 decision timeline) ---- */
+
+.timeline {
+    border-left: 2px solid #1e293b;
+    margin: 10px 0 0 8px;
+    padding-left: 16px;
+}
+
+.timeline-entry {
+    position: relative;
+    padding: 6px 0;
+    font-size: 13px;
+    color: #94a3b8;
+}
+
+.timeline-entry::before {
+    content: "";
+    position: absolute;
+    left: -21px;
+    top: 11px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #334155;
+    border: 2px solid #0f172a;
+}
+
+.timeline-entry.hit::before { background: #34d399; }
+.timeline-entry.stop::before { background: #fbbf24; }
+.timeline-entry.fail::before { background: #f87171; }
+
+.timeline-entry .when {
+    color: #64748b;
+    font-family: ui-monospace, monospace;
+    margin-right: 8px;
+}

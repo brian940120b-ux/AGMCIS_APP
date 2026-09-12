@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGMCIS 交易模式</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/css/transparency.css">
+<link rel="stylesheet" href="/static/css/modes.css">
+</head>
+<body>
+
+<h1>交易模式</h1>
+<p class="muted">
+  <a href="/">← 首頁</a> ·
+  <a href="/trading">交易面板</a> ·
+  <a href="/transparency">透明度面板</a>
+</p>
+
+<!-- ---------------- 第九十一節:四種模式 ---------------- -->
+
+<div id="mode_banner" class="mode-banner">載入中…</div>
+
+<p class="muted">
+  模式是從三個設定**推導**出來的,不是另外存的一個值 ——
+  多一個真相來源,只要其中一個不一致,畫面上顯示的模式就會是錯的。
+  下面的「推導自」看得到那三個。
+</p>
+
+<div id="mode_grid" class="mode-grid"></div>
+
+<div class="card">
+  <h3>推導自</h3>
+  <table class="tp" id="derived"></table>
+  <p class="muted">
+    <b>TEST 蓋過 LIVE。</b>
+    <code>TRADING_MODE=live</code> 加上測試環境是 TEST,不是 LIVE ——
+    沒有真錢在動。反過來判定的話,測試網上的系統會一直顯示紅色警告,
+    而使用者會學會忽略它。
+  </p>
+</div>
+
+<!-- ---------------- 第九十二節:LIVE 確認 ---------------- -->
+
+<h2>切換到 LIVE</h2>
+
+<div class="notice notice-danger">
+  <b>這一頁不會讓系統開始下實單。</b>
+  下面的七項確認產生的是一個**確認檔**,而那只是 LIVE SAFETY GATE
+  其中一項檢查。模擬盤筆數、天數、上線前檢查、提款權限那幾項不是
+  簽名就能通過的,而且 <code>LiveBroker</code> 根本不存在。
+  最壞的情況是磁碟上多了一個檔案。
+</div>
+
+<div id="existing" class="card" hidden></div>
+
+<div class="card">
+  <h3>確認檔的四道保護</h3>
+  <ul class="rules">
+    <li><b>七項全部要確認</b> —— 少一項整份拒絕。</li>
+    <li><b>24 小時後失效</b> —— 「上個月批准過」不等於「現在批准」。</li>
+    <li><b>指名批准金額</b>,而且首次不得超過上限 ——
+        「批准過一次」不等於「批准所有金額」。</li>
+    <li><b>設定改了就作廢</b> —— 確認檔存設定指紋。你批准的是
+        當時那一組設定,不是以後所有的設定。</li>
+  </ul>
+</div>
+
+<div id="wizard">載入中…</div>
+
+<script src="/static/js/modes.js?v=1"></script>
+</body>
+</html>

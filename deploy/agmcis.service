@@ -1,0 +1,58 @@
+# AGMCIS Web(Master Prompt 第八十二節的 Process Manager)。
+#
+#     sudo cp deploy/agmcis*.service /etc/systemd/system/
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now agmcis agmcis-scheduler
+#
+# ⚠️ 這份是**目前正在跑的那一套的參考設定**,不是要你換掉現有的。
+#    第八十二節:不要破壞目前正在運作的 Production。
+#    先 `systemctl cat agmcis` 比對過差異再決定要不要動。
+
+[Unit]
+Description=AGMCIS Web API
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=agmcis
+Group=agmcis
+WorkingDirectory=/root/AGMCIS_APP
+
+# 金鑰走 EnvironmentFile,**不寫在這個檔案裡** ——
+# service 檔會進版控,.env 不會(第十 / 八十四節)。
+EnvironmentFile=/root/AGMCIS_APP/.env
+
+ExecStart=/root/AGMCIS_APP/.venv/bin/uvicorn main:app \
+    --host 127.0.0.1 --port 8000 --workers 2
+
+# 只綁 127.0.0.1。外面走 nginx —— 見 deploy/nginx.conf 的說明。
+
+Restart=always
+RestartSec=5
+
+# 一直重啟一直失敗的話就停下來。無限重啟會讓一個設定錯誤
+# 變成一份寫滿同一行的 log,而真正的原因在最上面那一行。
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# 不緩衝 stdout。緩衝會讓 log 在程序被殺掉時整批消失,
+# 而那通常正是你最需要那些 log 的時候。
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agmcis
+
+# ---- 加固 ----
+#
+# 一個以 root 跑的交易程式,任何遠端執行漏洞都會變成整台機器的問題。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/root/AGMCIS_APP/data /root/AGMCIS_APP/logs
+
+[Install]
+WantedBy=multi-user.target

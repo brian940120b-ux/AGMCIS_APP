@@ -1,0 +1,51 @@
+# AGMCIS 排程器(Master Prompt 第八十二節的 Worker)。
+#
+# ## 為什麼與 Web 分開
+#
+# 同一個程序裡跑兩個東西的話,重啟 Web 會順便打斷排程 ——
+# 而排程正在跑的可能是一次對帳,或是一輪停損檢查。
+#
+# ## 為什麼只能有一個
+#
+# 排程器會開倉、會平倉。跑兩份的話,同一筆停損會被檢查兩次,
+# 而兩次都會嘗試平倉。`ux_trades_open_symbol` 這個唯一索引擋得住
+# 重複開倉,但擋不住重複平倉 —— 所以這裡沒有 workers 參數,
+# 而且**不要用 systemd 的 template unit 起多份**。
+
+[Unit]
+Description=AGMCIS Scheduler (position monitor / exits / reconciliation)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=agmcis
+Group=agmcis
+WorkingDirectory=/root/AGMCIS_APP
+EnvironmentFile=/root/AGMCIS_APP/.env
+
+ExecStart=/root/AGMCIS_APP/.venv/bin/python -m agmcis.scheduling.runner
+
+Restart=always
+RestartSec=10
+
+# 排程器比 Web 更該在反覆失敗時停下來:它會下單,
+# 而一個在錯誤狀態下反覆重啟的下單程式是危險的。
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agmcis-scheduler
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/root/AGMCIS_APP/data /root/AGMCIS_APP/logs
+
+[Install]
+WantedBy=multi-user.target

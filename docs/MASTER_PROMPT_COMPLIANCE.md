@@ -111,7 +111,7 @@
 |---|---|---|---|
 | 六十一 | Performance Dashboard | ✅ | `/trading` 的績效區照第六十一節的四塊排:Account / Trading / Risk / Strategy,並含 Sharpe / Sortino / MFE / MAE / 持倉時間。**樣本不足的策略不參與 Best / Worst 排序**(少於 20 筆);排序用期望值不用總損益 —— 後者偏袒跑得比較多的策略。PF 沒有虧損單時是 None 不是無限大 |
 | 六十二 | AI Agent Dashboard | ✅ | 首頁的 Agent 面板顯示每個 Agent 在做什麼與這一輪的票。活躍數是**實際有意見的**數量,不是寫死的 12/12 |
-| 六十三 | Agent Interaction Visualization | ⚠️ | `/api/agent_flow` 與 `/trading` 的決策鏈把 Agents → Consensus → Supervisor → Risk → Execution 五關逐關顯示:到了沒有、過了沒有、為什麼沒過。**沒有動畫**,而且關卡名稱用系統裡真的存在的那些 —— 把第六十三節示意的 Quant Agent 畫進去但系統裡沒有,是在編造。執行那一格永遠是灰的,預覽不下單 |
+| 六十三 | Agent Interaction Visualization | ✅ | 五關決策鏈 + 動畫。第六十三節列的 animated nodes / data streams / glowing connections / activity indicators / signal pulses / decision timeline 都有,而且**每一個都綁在真實狀態上**:只有通過的關卡會發光、只有上一關通過的那一段連線會流動、被擋下來的會脈動、執行層永遠不動。純 CSS 不佔主執行緒(第六十三節:不得影響交易核心),`prefers-reduced-motion` 會停。關卡名稱用系統裡真的存在的那些 —— 把示意的 Quant Agent 畫進去但系統沒有,是在編造 |
 | 六十四 | Database | ✅ | migration 007–009。ai_decisions / risk_events / audit_logs / market_regimes / trade_exits / strategies / backtests / backtest_runs / news / system_events / jobs 全部建好**而且有東西寫進去** —— 排程的 news_archive、strategy_mirror、回測任務、排程失敗事件。strategies 是**鏡像不是權威**:能不能下單看檔案,資料庫掛掉時「全部看起來是 LIVE」的方向是錯的。缺 users(單人系統,見九十七) |
 | 六十五 | Audit Log | ✅ | 登入、系統暫停 / 恢復、策略狀態變更、Kill Switch、設定變更全部進 `audit_logs`。登入稽核**不記金鑰的任何片段** |
 | 六十六 | Observability | ✅ | `/health` 不需金鑰(外部監控不會帶金鑰),九個元件狀態,unhealthy 回 503。只回狀態不回內容 —— 錯誤細節留在需要金鑰的端點與 log |
@@ -140,7 +140,7 @@
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
 | 八十一 | Environment Separation | ✅ | 五個環境,無法辨識的名稱降級為 development(不是 production)。LIVE 閘門要求 `APP_ENV=production` —— 一台標成 development 的機器送真實訂單代表設定搬錯了 |
-| 八十二 | Docker / Deployment | ⚠️ | Dockerfile + compose(非 root、健康檢查打 `/health`、排程與 Web 分開容器)。**Production 仍在 systemd 上** —— 第八十二節也說「不要破壞目前正在運作的 Production」,切換要是一次有計畫的遷移 |
+| 八十二 | Docker / Deployment | ✅ | 十項全部交代,對照表在 `deploy/README.md`。Nginx(限流 / HSTS / WebSocket upgrade / health 不限流)、HTTPS(certbot + acme 路徑不導向)、systemd 三個 unit(非 root、加固、反覆失敗會停)、備份 timer(關機補跑)、監控文件。**Redis 刻意不用**且說得出門檻:快取是 3-60 秒的行程內字典、任務刻意一次跑一個、跨程序限流已經用 PostgreSQL。Production 仍在 systemd 上 —— 這些是要比對過再放上去的參考設定,不是一鍵部署 |
 | 八十三 | Deployment Strategy | ⚠️ | 五個環境的定義、`docker-compose.staging.yml`、以及 `docs/DEPLOYMENT.md` 寫清楚「不直接覆蓋 Production」具體是哪五步(migration 一律先跑再重啟)。staging 把 `TRADING_MODE` **寫死**成 paper 並用獨立的資料庫 volume —— 共用 production 資料庫的 staging 是第二個 production。**還缺一台實際的機器** |
 | 八十四 | Secrets | ✅ | 全部走環境變數,`test_access_control.py` 釘住 |
 | 八十五 | API Design | ✅ | `/api/backtest` 與 `/api/paper` 做成**任務式**端點(POST 送出 → 拿 job_id → GET `/api/jobs/{id}` 查),不是會逾時的同步請求。一次只跑一個 —— 併發回測會讓停損檢查延遲,而那是拿真錢換一份報告。查詢類再補 `/api/system_events`、`/api/backtests`、`/api/news`、`/api/strategies` |
@@ -154,8 +154,8 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 九十一 | Trading Modes UI | ✅ | 首頁右上角的模式徽章。LIVE 用會脈動的紅框 —— 那不是裝飾,是為了讓「現在是真錢」在餘光裡也看得到 |
-| 九十二 | LIVE Confirmation | ⚠️ | `scripts/live_confirm.py` 逐項問完第九十二節列的七件事(Account / Exchange / Market / Risk / Leverage / Daily Loss / API),每一項顯示**當下的實際值**,最後逐字輸入確認句。簽的是**那一組設定**:確認檔存設定指紋,之後有人改了風控參數就作廢 ——「批准過一次」不等於「批准所有設定」。UI 只顯示唯讀狀態,**刻意不做網頁按鈕**(表達不了 24 小時失效與指名金額)|
+| 九十一 | Trading Modes UI | ✅ | 四種模式 MANUAL / PAPER / TEST / LIVE 在 `/modes` 全部列出並標明現在是哪一個 —— 只顯示現在這一個的話,使用者看不出「我以為在 PAPER 但其實在 MANUAL」。模式是從三個既有設定**推導**的,不是第四個真相來源。**TEST 蓋過 LIVE**:測試網上沒有真錢在動,反過來判定的話使用者會學會忽略紅色警告。LIVE 的橫幅會呼吸 —— 靜態的紅框會被看習慣 |
+| 九十二 | LIVE Confirmation | ✅ | 兩條路徑,同一套驗證:`scripts/live_confirm.py`(CLI)與 `/modes` 的網頁精靈都走 `agmcis/safety/live_confirm.py`,四道保護一個都沒少(七項齊全 / 設定指紋 / 24 小時 / 指名金額且不超過首次上限)。網頁版加一條:**送出時比對前端拿到的指紋**,擋「使用者在確認的過程中設定被改過」。它**不會讓系統下實單** —— 確認檔只是 LIVE GATE 其中一項檢查,而 LiveBroker 不存在,最壞情況是磁碟上多一個檔案 |
 | 九十三 | No Hidden Trading | ✅ | 所有下單進 DB + log + journal;`/transparency` 可查 |
 | 九十四 | No Silent Failure | ✅ | `test_production_safety.py` 以 AST 掃描 `except: pass` |
 | 九十五 | Code Quality | ✅ | God Function 全部處理完:Dashboard Lite(藏著損益公式的第二份拷貝)、`analytics.get_trade_analytics`、`risk_control.get_risk_control_status`(九項限制變成九個可單獨測的函式)、`paper_trading.create_paper_trade`(驗證 / 成本 / 成本後驗證分開)、`auto_trader.run_auto_trader`(逐檔評估拆出來)。`strategy.analyze_symbol` 是**死碼,直接刪掉** —— 拆開一段沒有人呼叫的評分公式只會讓它看起來更值得保留。`tests/test_god_function_split.py` 用**敘述數**(不是行數,註解密度會騙人)擋回歸,例外只有兩個 atomic 交易函式且要寫理由 |
@@ -177,22 +177,30 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 97 |
-| ⚠️ 部分做到 | 9 |
+| ✅ 已做到 | 100 |
+| ⚠️ 部分做到 | 6 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 9 節,以及為什麼
+## 還沒補完的 6 節,以及為什麼
 
-原本的 12 個「❌ 沒做」全部補完了。剩下的 9 個「部分做到」分成兩類。
+原本的 12 個「❌ 沒做」全部補完了。剩下的 6 個全部是同一類:**沒有跑過真實資料或真錢的東西不能宣稱做到。**
 **這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
-### 一、刻意不做(3 節)
+### 一、刻意不做(0 節)
 
-| 節 | 為什麼 |
-|---|---|
-| 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」。五關的決策鏈、投票、理由、棄權原因都看得到,只是不會動 |
-| 八十二 | Production 仍在 systemd 上。Dockerfile 與 compose 都寫好了,但第八十二節也說「不要破壞目前正在運作的 Production」 |
-| 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准的是 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點。狀態看得到,開關要人去 VPS 上跑腳本 |
+原本有四節列在這裡:八(Adapter 拆檔)、六十三(動畫)、
+八十二(Docker / 部署)、九十二(LIVE 網頁確認)。
+
+**那四個是我的判斷,不是規章的要求。** 使用者要求照 106 節做,
+而回頭讀原文之後有兩件事要更正:
+
+  * 第八節本來就寫著「REFACTOR EXISTING CODE」—— 我的顧慮是
+    **怎麼拆**的問題,不是拆不拆的問題。
+  * 第九十二節沒有提到介面。我說它「要求網頁按鈕」是誤讀 ——
+    要求多重確認的是第九十一節,而七個確認畫面加上逐字輸入
+    一句話本來就不是誤觸。
+
+四節都做完了。
 
 ### 二、需要真實環境或真錢才能算數(6 節)
 

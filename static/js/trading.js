@@ -151,6 +151,34 @@ function flowStage(stage) {
     </div>`;
 }
 
+/* 第六十三節的 data streams。
+ *
+ * **只有上一關通過的那一段會流動。** 每一段都亮的話,那張圖就變成
+ * 裝飾 —— 而一張會動但顯示假流程的圖,比一張靜態但正確的圖糟得多:
+ * 前者會讓人相信一個沒發生的推理過程。 */
+function arrow(previousStage) {
+    const flowing = previousStage && previousStage.status === "PASSED";
+    return `<div class="flow-arrow ${flowing ? "live" : ""}">↓</div>`;
+}
+
+/* 決策時間軸(第六十三節)。把五關攤成一條「發生了什麼」的紀錄。 */
+function timeline(stages) {
+    const CLASS = {
+        PASSED: "hit", BLOCKED: "stop", ERROR: "fail",
+        NOT_REACHED: "", NOT_RUN: "",
+    };
+
+    const rows = stages.map((stage, index) => `
+        <div class="timeline-entry ${CLASS[stage.status] || ""}">
+            <span class="when">${String(index + 1).padStart(2, "0")}</span>
+            <b>${esc(stage.label)}</b> —— ${esc(stage.status)}
+            ${stage.detail ? `<br><span class="muted">${esc(stage.detail)}</span>` : ""}
+        </div>`).join("");
+
+    return `<details><summary>決策時間軸</summary>
+        <div class="timeline">${rows}</div></details>`;
+}
+
 async function loadFlow(symbol) {
     if (!symbol) return;
 
@@ -160,9 +188,13 @@ async function loadFlow(symbol) {
         const data = await getJSON(`/api/agent_flow?symbol=${encodeURIComponent(symbol)}`);
         const stages = data.stages || [];
 
-        render("flow", `<div class="flow">${
-            stages.map(flowStage).join('<div class="flow-arrow">↓</div>')
-        }</div><p class="muted">計算於 ${esc(data.as_of)}</p>`);
+        const chain = stages.map((stage, index) =>
+            (index ? arrow(stages[index - 1]) : "") + flowStage(stage)
+        ).join("");
+
+        render("flow", `<div class="flow">${chain}</div>` +
+            timeline(stages) +
+            `<p class="muted">計算於 ${esc(data.as_of)}</p>`);
     } catch (error) {
         render("flow", `<span class="neg">載入失敗:${esc(error.message)}</span>`);
     }
