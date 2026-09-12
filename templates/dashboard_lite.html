@@ -1,0 +1,169 @@
+{#
+  持倉 / 平倉表格。兩張表用同一個 macro —— 原本是兩份幾乎一樣的
+  f-string,而那正是第九十五節列的 Duplicate Logic。
+#}
+{% macro trade_table(rows, table_id=None) %}
+<table {% if table_id %}id="{{ table_id }}"{% endif %}>
+  <tr>
+    <th>幣種</th><th>方向</th><th>槓桿</th><th>倉位價值</th>
+    <th>進場</th><th>現價</th><th>出場</th><th>停損</th><th>停利</th>
+    <th>ROI</th><th>UPNL</th><th>已實現</th><th>狀態</th><th>時間/原因</th>
+  </tr>
+  {% if not rows %}
+  <tr><td colspan="14">目前沒有資料</td></tr>
+  {% endif %}
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.symbol or "-" }}</td>
+    <td>{{ row.direction or "-" }}</td>
+    <td>{{ "%g"|format(row.leverage) if row.leverage else "-" }}x</td>
+    <td>{{ "%.2f"|format(row.notional) if row.notional is not none else "-" }} USDT</td>
+    <td>{{ row.entry if row.entry is not none else "-" }}</td>
+    <td>{{ row.current if row.current is not none else "-" }}</td>
+    <td>{{ row.exit if row.exit is not none else "-" }}</td>
+    {# 沒有停損不是「—」,是一個警告。 #}
+    <td>{{ row.stop_loss if row.stop_loss is not none else "⚠️ 無" }}</td>
+    <td>{{ row.take_profit if row.take_profit is not none else "-" }}</td>
+    {# ROI / UPNL 算不出來時顯示「—」而不是 0:不知道不是打平。 #}
+    <td class="{{ row.sign }}">{{ row.roi_pct ~ "%" if row.roi_pct is not none else "—" }}</td>
+    <td class="{{ row.sign }}">{{ row.upnl_usdt ~ " USDT" if row.upnl_usdt is not none else "—" }}</td>
+    <td class="{{ row.sign }}">{{ row.realized_usdt if row.realized_usdt is not none else "-" }}</td>
+    <td>{{ row.status or "-" }}</td>
+    <td>{{ row.note or "-" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endmacro %}
+
+{#
+  Dashboard Lite(第九十五節)。
+
+  這一頁原本是 main.py 裡一個二十行的 f-string。搬過來的理由不是
+  美觀,是那個 f-string 同時在做三件事:抓現價、算損益、組 HTML ——
+  而「算損益」那一份是系統裡的**第二份公式**。第一份在
+  agmcis/core/models.py。兩份公式只會有一份被修到。
+
+  現在資料在 api/dashboard_rows.py,損益走 Position 的方法,
+  版面在這裡。
+#}
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGMCIS Dashboard</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+
+<h1>AGMCIS Dashboard Lite</h1>
+<p class="muted">Top50 掃描、模擬交易、TP/SL、Telegram 都在背景服務運作。API 即時更新模式。</p>
+<p>
+  <a href="/">← 回首頁</a> ·
+  <a href="/trading">→ 交易面板</a>(開倉預覽、決策鏈、逐策略績效) ·
+  <a href="/transparency">→ 透明度面板</a>(Agent 投票、訂單狀態、對帳差異、成本、規格校準)
+</p>
+<p class="muted">最後更新:{{ generated_at }}</p>
+
+{# 沒有停損的部位沒有虧損上限。它排在所有數字之前,因為它是這一頁上
+   唯一需要**立刻**行動的東西。 #}
+{% if naked_count %}
+<p class="alert alert-critical">
+  ⚠️ 有 {{ naked_count }} 個部位沒有停損。沒有停損的部位沒有虧損上限。
+</p>
+{% endif %}
+
+<div class="grid">
+  <div class="card">帳戶資金<br><b id="balance">{{ balance }} USDT</b></div>
+  <div class="card">總交易<br><b id="trades">{{ total_trades }}</b></div>
+  <div class="card">勝率<br><b id="win_rate">{{ win_rate }}%</b></div>
+  <div class="card">目前持倉<br><b id="open_count">{{ open_rows | length }}</b></div>
+  <div class="card">淨損益<br><b class="{{ net_sign }}">{{ net_pnl }} USDT</b></div>
+  <div class="card">槓桿上限<br><b>{{ max_leverage }}x</b></div>
+  <div class="card">總浮盈虧<br><b id="total_open_upnl">0 USDT</b></div>
+  <div class="card">風險等級<br><b id="risk_level">LOW</b></div>
+  <div class="card">系統狀態<br><b id="system_status">-</b></div>
+  <div class="card">最佳交易<br><b id="best_trade">0</b></div>
+  <div class="card">最差交易<br><b id="worst_trade">0</b></div>
+  <div class="card">Profit Factor<br><b id="profit_factor">0</b></div>
+  <div class="card">已平倉<br><b id="total_closed_trades">0</b></div>
+</div>
+
+<h2>績效分析</h2>
+<div class="grid">
+  <div class="card">💰 已實現收益<br><b id="total_realized">0</b></div>
+  <div class="card">🔥 最大連勝<br><b id="max_win_streak">0</b></div>
+  <div class="card">❄️ 最大連敗<br><b id="max_loss_streak">0</b></div>
+  <div class="card">📊 已平倉交易<br><b id="analytics_closed_trades">0</b></div>
+</div>
+
+<h2>目前持倉</h2>
+{{ trade_table(open_rows, "open_positions_table") }}
+
+<h2>系統健康監控</h2>
+<div class="grid">
+  <div class="card">FastAPI<br><b id="health_api">🟢 OK</b></div>
+  <div class="card">Risk Timer<br><b id="health_risk">🟢 ON</b></div>
+  <div class="card">Daily Report<br><b id="health_report">🟢 ON</b></div>
+  <div class="card">Optimizer<br><b id="health_optimizer">🟢 ON</b></div>
+  <div class="card">最後更新<br><b id="last_update">-</b></div>
+  <div class="card">Uptime<br><b id="uptime">-</b></div>
+</div>
+
+<h2>資金曲線</h2>
+<div class="card"><canvas id="equityChart" height="120"></canvas></div>
+
+<h2>排行榜</h2>
+<div class="grid">
+  <div class="card"><h3>🏆 Top Winners</h3><div id="top_winners">Loading...</div></div>
+  <div class="card"><h3>💀 Top Losers</h3><div id="top_losers">Loading...</div></div>
+</div>
+
+<h2>持倉總覽</h2>
+<div class="grid">
+  <div class="card">🟢 獲利持倉<br><b id="profit_positions">0</b></div>
+  <div class="card">🔴 虧損持倉<br><b id="loss_positions">0</b></div>
+  <div class="card">⚪ 打平持倉<br><b id="flat_positions">0</b></div>
+  <div class="card">📈 最大浮盈<br><b id="max_profit_position">-</b></div>
+  <div class="card">📉 最大浮虧<br><b id="max_loss_position">-</b></div>
+</div>
+
+<h2>目前持倉排行</h2>
+<div class="grid">
+  <div class="card"><h3>🔥 最佳持倉</h3><div id="best_positions">Loading...</div></div>
+  <div class="card"><h3>⚠️ 最差持倉</h3><div id="worst_positions">Loading...</div></div>
+  <div class="card"><h3>🚨 最接近停損</h3><div id="nearest_sl">Loading...</div></div>
+  <div class="card"><h3>🎯 最接近停利</h3><div id="nearest_tp">Loading...</div></div>
+</div>
+
+<h2>🟢 System Health</h2>
+<div class="grid"><div class="card"><div id="system_health">Loading Health...</div></div></div>
+
+<h2>💰 Portfolio Summary</h2>
+<div class="grid"><div class="card"><div id="portfolio_summary">Loading Portfolio...</div></div></div>
+
+<h2>⚙️ Scheduler Status</h2>
+<div class="grid"><div class="card"><div id="scheduler_status">Loading Scheduler...</div></div></div>
+
+<h2>🔥 Top 3 Opportunities</h2>
+<div class="grid"><div class="card"><div id="top_opportunities">Loading Top 3...</div></div></div>
+
+<h2>📈 Market Scanner Top 10</h2>
+<div class="grid"><div class="card"><div id="market_scan">Loading Market Scanner...</div></div></div>
+
+<h2>🤖 AI Decision Center</h2>
+<div class="grid"><div class="card"><div id="ai_decisions">Loading AI...</div></div></div>
+
+<h2>📋 System Logger Health</h2>
+<div class="grid"><div class="card"><div id="logger_health">Loading logs...</div></div></div>
+
+<h2>最近平倉</h2>
+{{ trade_table(closed_rows) }}
+
+<p class="muted">服務:agmcis / agmcis-opportunity / agmcis-position / agmcis-report</p>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/js/api.js?v=76"></script>
+<script src="/static/js/dashboard.js?v=v88_health"></script>
+</body>
+</html>

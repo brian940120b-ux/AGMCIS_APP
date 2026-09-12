@@ -22,9 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from database_service import get_account, get_closed_trades, get_open_trades
-from direction import is_long, is_short
 import risk_limits
-from market_data import get_price
 from web_auth import (
     LOGIN_PAGE,
     is_authenticated,
@@ -119,55 +117,6 @@ app.include_router(health_router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-def tr(rows):
-    """持倉 / 平倉表格。槓桿一律取交易本身的值,不再寫死 3x。"""
-    if not rows:
-        return "<tr><td colspan=14>目前沒有資料</td></tr>"
-
-    out = []
-
-    for t in rows:
-        pnl = t.get("pnl_usdt")
-        symbol = t.get("symbol")
-        signal = t.get("signal")
-        is_open = t.get("status") == "OPEN"
-        current = get_price(symbol) if is_open else t.get("exit_price")
-        entry = float(t.get("entry_price") or 0)
-        size = float(t.get("size_usdt") or 0)
-        lev = float(t.get("leverage") or 1)
-
-        if current and entry > 0:
-            if is_long(signal):
-                change = (float(current) - entry) / entry
-            elif is_short(signal):
-                change = (entry - float(current)) / entry
-            else:
-                change = None
-
-            if change is None:
-                roi = upnl = "-"
-            else:
-                roi = round(change * lev * 100, 2)
-                upnl = round(size * change * lev, 2)
-        else:
-            roi = upnl = "-"
-
-        pnlc = "pos" if (pnl or 0) > 0 else "neg" if (pnl or 0) < 0 else ""
-        notional = round(size * lev, 2)
-
-        out.append(
-            f"<tr><td>{symbol or '-'}</td><td>{signal or '-'}</td>"
-            f"<td>{lev:g}x</td><td>{notional} USDT</td>"
-            f"<td>{t.get('entry_price', '-')}</td><td>{current if current else '-'}</td>"
-            f"<td>{t.get('exit_price', '-')}</td><td>{t.get('stoploss') or '⚠️ 無'}</td>"
-            f"<td>{t.get('takeprofit', '-')}</td>"
-            f"<td class='{pnlc}'>{roi}%</td><td class='{pnlc}'>{upnl} USDT</td>"
-            f"<td class='{pnlc}'>{pnl if pnl is not None else '-'}</td>"
-            f"<td>{t.get('status', '-')}</td>"
-            f"<td>{t.get('close_reason') or t.get('opened_at', '-')}</td></tr>"
-        )
-
-    return "".join(out)
 @app.get("/", response_class=HTMLResponse)
 def landing(request: Request):
     """
@@ -191,6 +140,18 @@ def landing(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def home(request: Request):
+    """
+    Dashboard Lite(第九十五節)。
+
+    這個 handler 原本自己抓現價、自己算 ROI 與未實現損益、自己組一個
+    二十行的 HTML f-string。三件事在同一個函式裡,而且「算損益」那一份
+    是系統裡的**第二份公式** —— 第一份在 agmcis/core/models.py。
+    兩份公式只會有一份被修到,而那種 bug 要等到「畫面上的數字跟
+    Telegram 通知對不起來」才會被發現。
+
+    現在資料在 api/dashboard_rows.py(損益走 Position 的方法),
+    版面在 templates/dashboard_lite.html,這裡只負責把兩邊接起來。
+    """
     # 金鑰從 query string 帶進來時,驗證後存進 HttpOnly cookie 並導回乾淨網址,
     # 讓金鑰不留在瀏覽歷史與 Nginx access log 裡。
     key = request.query_params.get("key")
@@ -200,36 +161,44 @@ def home(request: Request):
     if not is_authenticated(request):
         return HTMLResponse(LOGIN_PAGE, status_code=401)
 
-    a=get_account();o=get_open_trades();c=get_closed_trades();w=a.get("wins",0);l=a.get("losses",0);n=a.get("trades",0);wr=round(w/n*100,2) if n else 0
-    net=round(sum((t.get("pnl_usdt") or 0) for t in c),2)
-    netc="pos" if net>=0 else "neg"
-    max_lev=risk_limits.MAX_LEVERAGE
-    return f"""<html><head><meta charset='utf-8'><title>AGMCIS Dashboard</title><link rel='stylesheet' href='/static/css/dashboard.css'></head><body>
-<h1>AGMCIS Dashboard Lite</h1><p class='muted'>Top50 掃描、模擬交易、TP/SL、Telegram 都在背景服務運作。API 即時更新模式。</p>
-<p><a href='/' style='color:#38bdf8'>← 回首頁</a> · <a href='/trading' style='color:#38bdf8'>→ 交易面板</a>(開倉預覽、決策鏈、逐策略績效) · <a href='/transparency' style='color:#38bdf8'>→ 透明度面板</a>(Agent 投票、訂單狀態、對帳差異、成本、規格校準)</p><p class='muted'>最後更新：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-<div class='grid'><div class='card'>帳戶資金<br><b id='balance'>{a.get('balance')} USDT</b></div><div class='card'>總交易<br><b id='trades'>{n}</b></div><div class='card'>勝率<br><b id='win_rate'>{wr}%</b></div><div class='card'>目前持倉<br><b id='open_count'>{len(o)}</b></div><div class='card'>淨損益<br><b class='{netc}'>{net} USDT</b></div><div class='card'>槓桿上限<br><b>{max_lev:g}x</b></div><div class='card'>總浮盈虧<br><b id='total_open_upnl'>0 USDT</b></div><div class='card'>風險等級<br><b id='risk_level'>LOW</b></div><div class='card'>系統狀態<br><b id='system_status'>-</b></div><div class='card'>最佳交易<br><b id='best_trade'>0</b></div><div class='card'>最差交易<br><b id='worst_trade'>0</b></div><div class='card'>Profit Factor<br><b id='profit_factor'>0</b></div><div class='card'>已平倉<br><b id='total_closed_trades'>0</b></div></div>
-<h2>績效分析</h2><div class="grid"><div class="card">💰 已實現收益<br><b id="total_realized">0</b></div><div class="card">🔥 最大連勝<br><b id="max_win_streak">0</b></div><div class="card">❄️ 最大連敗<br><b id="max_loss_streak">0</b></div><div class="card">📊 已平倉交易<br><b id="analytics_closed_trades">0</b></div></div><h2>目前持倉</h2><table id="open_positions_table"><tr><th>幣種</th><th>方向</th><th>槓桿</th><th>倉位價值</th><th>進場</th><th>現價</th><th>出場</th><th>停損</th><th>停利</th><th>ROI</th><th>UPNL</th><th>已實現</th><th>狀態</th><th>時間/原因</th></tr>{tr(o)}</table>
-<h2>系統健康監控</h2><div class="grid"><div class="card">FastAPI<br><b id="health_api">🟢 OK</b></div><div class="card">Risk Timer<br><b id="health_risk">🟢 ON</b></div><div class="card">Daily Report<br><b id="health_report">🟢 ON</b></div><div class="card">Optimizer<br><b id="health_optimizer">🟢 ON</b></div><div class="card">最後更新<br><b id="last_update">-</b></div><div class="card">Uptime<br><b id="uptime">-</b></div></div><h2>資金曲線</h2><div class="card"><canvas id="equityChart" height="120"></canvas></div><h2>排行榜</h2><div class="grid"><div class="card"><h3>🏆 Top Winners</h3><div id="top_winners">Loading...</div></div><div class="card"><h3>💀 Top Losers</h3><div id="top_losers">Loading...</div></div></div><h2>持倉總覽</h2><div class="grid"><div class="card">🟢 獲利持倉<br><b id="profit_positions">0</b></div><div class="card">🔴 虧損持倉<br><b id="loss_positions">0</b></div><div class="card">⚪ 打平持倉<br><b id="flat_positions">0</b></div><div class="card">📈 最大浮盈<br><b id="max_profit_position">-</b></div><div class="card">📉 最大浮虧<br><b id="max_loss_position">-</b></div></div><h2>目前持倉排行</h2><div class="grid"><div class="card"><h3>🔥 最佳持倉</h3><div id="best_positions">Loading...</div></div><div class="card"><h3>⚠️ 最差持倉</h3><div id="worst_positions">Loading...</div></div><div class="card"><h3>🚨 最接近停損</h3><div id="nearest_sl">Loading...</div></div><div class="card"><h3>🎯 最接近停利</h3><div id="nearest_tp">Loading...</div></div></div>
+    return templates.TemplateResponse(
+        request=request, name="dashboard_lite.html",
+        context=dashboard_context(),
+    )
 
 
-<h2>🟢 System Health</h2>
-<div class="grid">
-<div class="card"><div id="system_health">Loading Health...</div></div>
-</div>
+def dashboard_context():
+    """
+    Dashboard Lite 要顯示的東西。純資料,所以測試不用解析 HTML。
+    """
+    from api.dashboard_rows import build_rows
 
-<h2>💰 Portfolio Summary</h2>
+    account = get_account()
+    open_trades = get_open_trades()
+    closed_trades = get_closed_trades()
 
-<div class="grid">
-<div class="card">
-<div id="portfolio_summary">Loading Portfolio...</div>
-</div>
-</div>
+    total = account.get("trades", 0)
+    wins = account.get("wins", 0)
 
-<h2>⚙️ Scheduler Status</h2>
-<div class="grid"><div class="card"><div id="scheduler_status">Loading Scheduler...</div></div></div>\n<h2>🔥 Top 3 Opportunities</h2><div class="grid"><div class="card"><div id="top_opportunities">Loading Top 3...</div></div></div>
-<h2>📈 Market Scanner Top 10</h2><div class="grid"><div class="card"><div id="market_scan">Loading Market Scanner...</div></div></div>\n<h2>🤖 AI Decision Center</h2><div class="grid"><div class="card"><div id="ai_decisions">Loading AI...</div></div></div>
-<h2>📋 System Logger Health</h2><div class="grid"><div class="card"><div id="logger_health">Loading logs...</div></div></div>\n<h2>最近平倉</h2><table><tr><th>幣種</th><th>方向</th><th>槓桿</th><th>倉位價值</th><th>進場</th><th>現價</th><th>出場</th><th>停損</th><th>停利</th><th>ROI</th><th>UPNL</th><th>已實現</th><th>狀態</th><th>時間/原因</th></tr>{tr(c[-10:])}</table>
-<p class='muted'>服務：agmcis / agmcis-opportunity / agmcis-position / agmcis-report</p><script src='https://cdn.jsdelivr.net/npm/chart.js'></script><script src='/static/js/api.js?v=76'></script><script src='/static/js/dashboard.js?v=v88_health'></script></body></html>"""
+    net = round(sum((t.get("pnl_usdt") or 0) for t in closed_trades), 2)
+    open_rows = build_rows(open_trades)
+
+    return {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "balance": account.get("balance"),
+        "total_trades": total,
+        "win_rate": round(wins / total * 100, 2) if total else 0,
+        "net_pnl": net,
+        "net_sign": "pos" if net >= 0 else "neg",
+        "max_leverage": f"{risk_limits.MAX_LEVERAGE:g}",
+        "open_rows": open_rows,
+        # 最近十筆。整個歷史放進一張同步渲染的表,會讓這一頁隨著
+        # 交易數量線性變慢。
+        "closed_rows": build_rows(closed_trades[-10:]),
+        # 沒有停損的部位排在所有數字之前 —— 它是這一頁上唯一需要
+        # **立刻**行動的東西。
+        "naked_count": sum(1 for row in open_rows if row["naked"]),
+    }
 
 
 @app.get("/transparency", response_class=HTMLResponse)

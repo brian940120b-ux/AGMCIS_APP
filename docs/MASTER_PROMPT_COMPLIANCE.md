@@ -158,7 +158,7 @@
 | 九十二 | LIVE Confirmation | ⚠️ | `scripts/live_confirm.py` 逐項問完第九十二節列的七件事(Account / Exchange / Market / Risk / Leverage / Daily Loss / API),每一項顯示**當下的實際值**,最後逐字輸入確認句。簽的是**那一組設定**:確認檔存設定指紋,之後有人改了風控參數就作廢 ——「批准過一次」不等於「批准所有設定」。UI 只顯示唯讀狀態,**刻意不做網頁按鈕**(表達不了 24 小時失效與指名金額)|
 | 九十三 | No Hidden Trading | ✅ | 所有下單進 DB + log + journal;`/transparency` 可查 |
 | 九十四 | No Silent Failure | ✅ | `test_production_safety.py` 以 AST 掃描 `except: pass` |
-| 九十五 | Code Quality | ⚠️ | `agmcis/` 套件內符合。**根目錄的舊模組仍有 God Function 與重複邏輯** |
+| 九十五 | Code Quality | ⚠️ | `agmcis/` 套件內符合。Dashboard Lite 的 handler 從一個二十行的 f-string 拆成 `api/dashboard_rows.py` + template ——**它藏著損益公式的第二份拷貝**,而兩份公式只會有一份被修到。`analytics.get_trade_analytics` 從 147 行拆成三個純函式。**還剩**:`paper_trading.create_paper_trade`(154 行)、`strategy.analyze_symbol`(132 行)、`risk_control.get_risk_control_status`(116 行)。`database_service` 的兩個 atomic 函式刻意不拆 —— 拆開會破壞交易的原子性 |
 | 九十六 | Coding Rule | ✅ | Phase 0–17 每階段都有 BUILD→TEST→VERIFY→REPORT 報告 |
 | 九十七 | 不要一次重寫 | ✅ | 舊模組用 shim 轉接,沒有大爆炸式重寫 |
 | 九十八 | 每次修改必須說明 | ✅ | `docs/PHASE_*_REPORT.md` |
@@ -213,7 +213,7 @@
 | 節 | 缺什麼 |
 |---|---|
 | 三十 | 12 個 Agent 齊了,但 Macro Agent 只會投 WAIT —— 它沒有總經資料來源,而一個猜方向的總經 Agent 比沒有更糟 |
-| 九十五 | 根目錄舊模組仍有 God Function 與重複邏輯。新路徑全部在 `agmcis/` 底下,舊檔案是 shim,但 shim 背後的 dashboard 相關模組還沒重寫 |
+| 九十五 | Dashboard Lite 與 analytics 拆完了。還剩 `paper_trading.create_paper_trade`、`strategy.analyze_symbol`、`risk_control.get_risk_control_status` 三個長函式 —— 它們都在交易路徑上,拆開的風險高於現在的收益,排在真實資料驗證之後 |
 
 ## 明確不做的事
 
