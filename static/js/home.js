@@ -99,9 +99,8 @@ function opportunityCard(entry) {
     return `<div class="opportunity">
         <h3>${esc(entry.symbol)} ${esc(entry.direction)}</h3>
         <div class="score">
-            分數 ${num(entry.score, 0)} ·
-            信心 ${num(entry.confidence, 0)}% ·
-            市況 ${esc(entry.regime || "未知")}
+            信心 ${num(entry.confidence, 0)}%
+            ${entry.supervisor_vetoed ? '· <b>Supervisor 已否決</b>' : ""}
         </div>
         <details>
             <summary>WHY?</summary>
@@ -114,8 +113,7 @@ function renderOpportunities(data) {
     if (data.no_high_quality_setup) {
         render("opportunities", `<div class="no-setup">
             <b>NO HIGH QUALITY SETUP</b><br>
-            這一輪掃了 ${esc(data.scanned)} 檔,沒有任何一檔的分數達到
-            ${num(data.min_score, 0)}。<br>
+            這一輪掃了 ${esc(data.scanned)} 檔,沒有任何一檔產生可交易的共識。<br>
             這不是系統壞掉 —— 不交易是合法的結論(第二十九節)。
         </div>`);
     } else {
@@ -127,15 +125,14 @@ function renderOpportunities(data) {
     );
 
     render("considered", rest.length
-        ? `<table class="tp"><tr><th>標的</th><th>方向</th><th>分數</th>
+        ? `<table class="tp"><tr><th>標的</th><th>方向</th>
            <th>信心</th><th>沒入選的原因</th></tr>${rest.map(entry => `<tr>
               <td class="nowrap">${esc(entry.symbol)}</td>
               <td class="nowrap">${esc(entry.direction)}</td>
-              <td>${num(entry.score, 0)}</td>
               <td>${num(entry.confidence, 0)}</td>
               <td class="muted">${esc(
                   entry.blocked_reason
-                  || (entry.tradable ? "分數未達門檻" : "沒有可交易的意圖")
+                  || (entry.tradable ? "信心未達門檻" : "沒有可交易的意圖")
               )}</td>
            </tr>`).join("")}</table>`
         : '<span class="muted">沒有其他掃描結果。</span>');

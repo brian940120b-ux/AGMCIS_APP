@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGMCIS 交易面板</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/css/transparency.css">
+<link rel="stylesheet" href="/static/css/trading.css">
+</head>
+<body>
+
+<h1>AGMCIS 交易面板</h1>
+<p class="muted">
+  <a href="/">← 首頁</a> ·
+  <a href="/transparency">透明度面板</a> ·
+  <a href="/dashboard">Dashboard</a>
+</p>
+
+<div class="notice">
+  <b>這一頁不會下單。</b>
+  下面的每一組數字都是走與自動交易完全相同的那條鏈算出來的預覽 ——
+  Agent 共識 → Supervisor → Risk Engine —— 但在送單之前停下來。
+  價格會動,所以每一組數字都標了計算時間。
+</div>
+
+<!-- ---------------- 第八十七節:Trading Panel ---------------- -->
+
+<h2>📋 開倉預覽(第八十七節)</h2>
+<p class="muted">
+  含<b>被風控擋下來的</b>。只列可以開的,會讓「沒有機會」與
+  「有機會但被擋住」在畫面上看起來一樣,而後者才是需要知道的那一種。
+</p>
+<div id="plans">載入中…</div>
+
+<!-- ---------------- 第六十三節:Agent 協作流程 ---------------- -->
+
+<h2>🔗 決策鏈(第六十三節)</h2>
+<p class="muted">
+  這條鏈顯示的是**真的跑過的那一輪**,不是示意圖。
+  每一關到了沒有、過了沒有、為什麼沒過。
+  最後一格永遠是灰的 —— 預覽不送單。
+</p>
+<div class="card">
+  <label for="flow_symbol">標的</label>
+  <select id="flow_symbol"></select>
+  <button id="flow_run" type="button">重新計算</button>
+</div>
+<div id="flow">選一個標的。</div>
+
+<!-- ---------------- 第六十一節:Performance Dashboard ---------------- -->
+
+<h2>📊 績效(第六十一節)</h2>
+
+<h3>Account</h3>
+<div class="grid">
+  <div class="card">Equity<br><b id="acc_equity">-</b></div>
+  <div class="card">Available<br><b id="acc_available">-</b></div>
+  <div class="card">Margin<br><b id="acc_margin">-</b></div>
+  <div class="card">Unrealized PnL<br><b id="acc_upnl">-</b></div>
+  <div class="card">Realized 24h<br><b id="acc_r24">-</b></div>
+  <div class="card">Realized 7d<br><b id="acc_r7">-</b></div>
+</div>
+
+<h3>Trading</h3>
+<p class="muted">
+  樣本不足時這一排會標成不可靠。一份沒說樣本數的勝率,
+  連誠不誠實都判斷不了(第二節)。
+</p>
+<div class="grid">
+  <div class="card">Win Rate<br><b id="tr_win_rate">-</b></div>
+  <div class="card">Profit Factor<br><b id="tr_pf">-</b></div>
+  <div class="card">Expectancy<br><b id="tr_expectancy">-</b></div>
+  <div class="card">Trades<br><b id="tr_trades">-</b></div>
+  <div class="card">Wins<br><b id="tr_wins">-</b></div>
+  <div class="card">Losses<br><b id="tr_losses">-</b></div>
+</div>
+<div id="tr_note" class="muted"></div>
+
+<h3>Risk</h3>
+<p class="muted">
+  Daily / Weekly 是<b>已經用掉的</b>,不是上限。
+  顯示上限會讓一個已經打滿日虧損的帳戶看起來還有空間。
+</p>
+<div class="grid">
+  <div class="card">Max Drawdown<br><b id="rk_dd">-</b></div>
+  <div class="card">Daily PnL<br><b id="rk_daily">-</b></div>
+  <div class="card">Weekly PnL<br><b id="rk_weekly">-</b></div>
+  <div class="card">Exposure<br><b id="rk_exposure">-</b></div>
+  <div class="card">Max Leverage<br><b id="rk_leverage">-</b></div>
+  <div class="card">連續虧損<br><b id="rk_streak">-</b></div>
+</div>
+<div id="rk_blockers" class="muted"></div>
+
+<h3>Strategy</h3>
+<p class="muted">
+  <b>樣本不足的策略不會被選為最佳或最差。</b>
+  一個兩戰兩勝的策略排在第一名,是在鼓勵人去跟一個不存在的優勢。
+  排序用期望值不用總損益 —— 總損益偏袒跑得比較多的策略。
+</p>
+<div class="grid">
+  <div class="card">Best Strategy<br><b id="st_best">-</b></div>
+  <div class="card">Worst Strategy<br><b id="st_worst">-</b></div>
+</div>
+<div class="card"><div id="st_table">載入中…</div></div>
+<div id="st_note" class="muted"></div>
+
+<script src="/static/js/trading.js?v=1"></script>
+</body>
+</html>

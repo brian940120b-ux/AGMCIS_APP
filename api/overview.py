@@ -145,20 +145,32 @@ def _roles(names):
     ]
 
 
-def _opportunities(limit=DEFAULT_SCAN, min_score=None):
+def _opportunities(limit=DEFAULT_SCAN, min_confidence=None):
     """
     TOP 機會(第五十三節)。
 
     **品質不足就不硬選。** 第五十三節寫得很明白:「如果沒有足夠高品質:
     NO HIGH QUALITY SETUP,不要硬選 TOP 3」。一個永遠有三個推薦的系統,
     在沒有機會的時候會推薦三個最不差的 —— 而「最不差」不是「好」。
+
+    ## 排序用信心,不用「分數」
+
+    這一頁走的是 Agent 共識管線,而**那條管線不產生分數**。
+    MIN_SIGNAL_SCORE 是指標管線(agmcis/signal/pipeline.py)的門檻,
+    兩條路徑不同。拿一個不存在的欄位去比對門檻,結果會是
+    「永遠沒有合格的機會」—— 那個畫面跟「系統壞了」長得一樣。
+
+    合格的定義因此是 Agent 共識自己的結論:`tradable`
+    (共識產生了 TradeIntent,代表它的信心過了共識層的門檻)。
+    `MIN_AGENT_CONFIDENCE` 是額外收緊用的,預設 0 —— 不重複設一道
+    共識層已經有的門檻。
     """
     def run():
         from agmcis.signal import agent_pipeline
 
         threshold = (
-            float(min_score) if min_score is not None
-            else float(getattr(settings, "MIN_SIGNAL_SCORE", 70))
+            float(min_confidence) if min_confidence is not None
+            else float(getattr(settings, "MIN_AGENT_CONFIDENCE", 0))
         )
 
         symbols = list(settings.WATCHLIST_SYMBOLS)[:limit]
@@ -167,7 +179,7 @@ def _opportunities(limit=DEFAULT_SCAN, min_score=None):
 
         for symbol in symbols:
             deliberation, report = agent_pipeline.analyse_symbol(symbol)
-            payload = report.to_dict() if report else {}
+            supervisor = report.to_dict() if report else {}
 
             votes = dict(deliberation.votes)
             active_agents = max(
@@ -175,11 +187,9 @@ def _opportunities(limit=DEFAULT_SCAN, min_score=None):
                 sum(1 for v in votes.values() if v != "ABSTAIN"),
             )
 
-            score = payload.get("score")
             rows.append({
                 "symbol": symbol,
                 "direction": deliberation.direction.value,
-                "score": score,
                 "confidence": round(deliberation.confidence, 2),
                 "tradable": deliberation.intent is not None,
                 "blocked_reason": deliberation.blocked_reason,
@@ -196,23 +206,19 @@ def _opportunities(limit=DEFAULT_SCAN, min_score=None):
                     }
                     for o in deliberation.opinions
                 ],
-                "regime": payload.get("regime"),
-                "score_breakdown": payload.get("score_breakdown"),
+                "supervisor_vetoed": bool(supervisor.get("vetoed")),
+                "health_warnings": list(supervisor.get("health_warnings") or []),
             })
 
-        ranked = sorted(
-            rows,
-            key=lambda r: (r["score"] if r["score"] is not None else -1),
-            reverse=True,
-        )
+        ranked = sorted(rows, key=lambda r: r["confidence"], reverse=True)
         qualified = [
             r for r in ranked
-            if r["tradable"] and (r["score"] or 0) >= threshold
+            if r["tradable"] and r["confidence"] >= threshold
         ]
 
         return {
             "scanned": len(rows),
-            "min_score": threshold,
+            "min_confidence": threshold,
             "top": qualified[:3],
             # 沒有合格的機會時,把掃過的全部列出來並標明**它們不合格**。
             # 藏起來會讓人以為系統沒在跑。

@@ -197,6 +197,12 @@ SCHEDULER_RESEARCH_INTERVAL = env_int("SCHEDULER_RESEARCH_INTERVAL", 86400)
 # 就會漏掉中間的。十五分鐘是「不會漏」與「不會一直對別人的伺服器發請求」
 # 之間的折衷。
 SCHEDULER_NEWS_ARCHIVE_INTERVAL = env_int("SCHEDULER_NEWS_ARCHIVE_INTERVAL", 900)
+# 首頁 TOP 機會的額外信心門檻(第五十三節)。
+#
+# 預設 0 —— 共識層自己已經有一道門檻,產生得出 TradeIntent 就代表過了。
+# 在這裡再設一個預設值等於偷偷收緊系統的出手條件,而且那個收緊
+# 不會出現在任何風控紀錄裡。要更保守就明確設它。
+MIN_AGENT_CONFIDENCE = env_float("MIN_AGENT_CONFIDENCE", 0.0)
 # 策略清單鏡像(第六十四節)。這張表只是給人查的,落後一小時無所謂 ——
 # 判斷策略能不能下單走的是檔案,不是這張表。
 SCHEDULER_STRATEGY_MIRROR_INTERVAL = env_int("SCHEDULER_STRATEGY_MIRROR_INTERVAL", 3600)

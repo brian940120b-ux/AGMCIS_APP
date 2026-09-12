@@ -1,0 +1,154 @@
+/*
+ * 交易面板。沿用 dashboard.css 與 transparency.css 的底色。
+ *
+ * 一個視覺原則:**被擋下來的東西要看得出來,但不能藏起來。**
+ * 一張只顯示可以開的單的面板,在系統連續三天被風控擋住的時候
+ * 看起來跟「沒有機會」一模一樣。
+ */
+
+.notice {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border-left: 4px solid #38bdf8;
+    background: #0d2233;
+    color: #bae6fd;
+    border-radius: 6px;
+}
+
+/* ---------------- 開倉預覽 ---------------- */
+
+.plan {
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    background: #0f172a;
+}
+
+.plan-approved { border-left: 4px solid #34d399; }
+.plan-blocked  { border-left: 4px solid #fbbf24; }
+.plan-none     { border-left: 4px solid #475569; }
+.plan-error    { border-left: 4px solid #f87171; }
+
+.plan h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+}
+
+.plan .stage {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: #94a3b8;
+    margin-bottom: 10px;
+}
+
+.plan .reason {
+    color: #fcd34d;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.plan-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+.plan-field {
+    background: #111c2e;
+    border-radius: 5px;
+    padding: 7px 9px;
+}
+
+.plan-field .k {
+    display: block;
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.plan-field .v {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* 沒有數字時的樣子。跟 0 必須看起來不一樣 —— 0 讀起來像結論。 */
+.plan-field .v.none {
+    color: #475569;
+    font-weight: 400;
+}
+
+.dir-LONG  { color: #34d399; }
+.dir-SHORT { color: #f87171; }
+
+/* ---------------- 決策鏈 ---------------- */
+
+.flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.flow-stage {
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 10px 14px;
+    background: #0f172a;
+}
+
+.flow-arrow {
+    text-align: center;
+    color: #334155;
+    font-size: 18px;
+    line-height: 1.2;
+    padding: 2px 0;
+}
+
+.flow-stage .label { font-weight: 600; }
+
+.flow-stage .detail {
+    font-size: 13px;
+    color: #94a3b8;
+    margin-top: 3px;
+}
+
+.flow-PASSED      { border-left: 4px solid #34d399; }
+.flow-BLOCKED     { border-left: 4px solid #fbbf24; }
+.flow-ERROR       { border-left: 4px solid #f87171; }
+.flow-NOT_REACHED { border-left: 4px solid #334155; opacity: 0.55; }
+.flow-NOT_RUN     { border-left: 4px solid #475569; opacity: 0.75; }
+
+.flow-badge {
+    float: right;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #1e293b;
+    color: #94a3b8;
+}
+
+.flow-PASSED  .flow-badge { background: #12251a; color: #6ee7b7; }
+.flow-BLOCKED .flow-badge { background: #2a2312; color: #fcd34d; }
+.flow-ERROR   .flow-badge { background: #2a1215; color: #fca5a5; }
+
+/* ---------------- 表單 ---------------- */
+
+select, button {
+    background: #111c2e;
+    color: #e2e8f0;
+    border: 1px solid #1e293b;
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+button { cursor: pointer; }
+button:hover { border-color: #38bdf8; }
+
+label { color: #94a3b8; font-size: 13px; margin-right: 6px; }
+
+.unreliable {
+    color: #fbbf24;
+}

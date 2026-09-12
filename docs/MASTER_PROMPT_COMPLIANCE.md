@@ -96,7 +96,7 @@
 |---|---|---|---|
 | 五十一 | News Risk | ✅ | `agmcis/risk/news_risk.py`。已排程事件走時間窗封鎖(HIGH 不開新倉 / MEDIUM 倉位減半),未排程衝擊走標題關鍵字。日曆過期在模擬盤只警告,實單由 LIVE GATE 擋 |
 | 五十二 | Opportunity Scanner | ✅ | `exchange_universe.py` 動態取得合約清單 + 流動性/量/波動度過濾,沒有寫死 symbol |
-| 五十三 | TOP 3 | ✅ | 首頁在沒有合格機會時顯示 NO HIGH QUALITY SETUP,並把掃過但沒入選的列出來 —— 讓「沒在跑」與「跑了但沒機會」看起來不一樣 |
+| 五十三 | TOP 3 | ✅ | 首頁在沒有合格機會時顯示 NO HIGH QUALITY SETUP,並把掃過但沒入選的列出來。合格的定義是**共識層自己產生得出 TradeIntent**,不是比對一個 Agent 管線根本不產生的 score —— 那個 bug 讓首頁**永遠**顯示沒有機會,而那個畫面跟系統壞掉長得一樣 |
 | 五十四 | 每個訊號解釋原因 | ✅ | `Signal.reasons` + `/transparency` 顯示每個 Agent 的理由 |
 | 五十五 | Exit Intelligence | ✅ | `agmcis/execution/exit_plan.py`:分批停利、移到成本、移動停損、時間出場走同一條判斷鏈,一次只做一個動作 |
 | 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 與市場結構推導(`trail_structure`),停利用 R 倍數。**參數仍未經回測驗證** —— 預設的 1R/2R/3R 與 30/30/40 是起點不是結論 |
@@ -109,9 +109,9 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 六十一 | Performance Dashboard | ⚠️ | Equity / PnL / Win Rate / PF / Expectancy / Drawdown 有。**缺 Best/Worst Strategy、逐策略勝率與 PF 的 UI** |
+| 六十一 | Performance Dashboard | ✅ | `/trading` 的績效區照第六十一節的四塊排:Account / Trading / Risk / Strategy。**樣本不足的策略不參與 Best / Worst 排序**(少於 20 筆);排序用期望值不用總損益 —— 後者偏袒跑得比較多的策略。PF 沒有虧損單時是 None 不是無限大 |
 | 六十二 | AI Agent Dashboard | ✅ | 首頁的 Agent 面板顯示每個 Agent 在做什麼與這一輪的票。活躍數是**實際有意見的**數量,不是寫死的 12/12 |
-| 六十三 | Agent Interaction Visualization | ⚠️ | 有 Agent 面板與逐 Agent 的 WHY 展開,**沒有動畫節點圖**。動畫在這個系統的優先順序很低 —— 第六十三節自己也說「UI Animation 不得影響交易核心」 |
+| 六十三 | Agent Interaction Visualization | ⚠️ | `/api/agent_flow` 與 `/trading` 的決策鏈把 Agents → Consensus → Supervisor → Risk → Execution 五關逐關顯示:到了沒有、過了沒有、為什麼沒過。**沒有動畫**,而且關卡名稱用系統裡真的存在的那些 —— 把第六十三節示意的 Quant Agent 畫進去但系統裡沒有,是在編造。執行那一格永遠是灰的,預覽不下單 |
 | 六十四 | Database | ✅ | migration 007–009。ai_decisions / risk_events / audit_logs / market_regimes / trade_exits / strategies / backtests / backtest_runs / news / system_events / jobs 全部建好**而且有東西寫進去** —— 排程的 news_archive、strategy_mirror、回測任務、排程失敗事件。strategies 是**鏡像不是權威**:能不能下單看檔案,資料庫掛掉時「全部看起來是 LIVE」的方向是錯的。缺 users(單人系統,見九十七) |
 | 六十五 | Audit Log | ✅ | 登入、系統暫停 / 恢復、策略狀態變更、Kill Switch、設定變更全部進 `audit_logs`。登入稽核**不記金鑰的任何片段** |
 | 六十六 | Observability | ✅ | `/health` 不需金鑰(外部監控不會帶金鑰),九個元件狀態,unhealthy 回 503。只回狀態不回內容 —— 錯誤細節留在需要金鑰的端點與 log |
@@ -145,7 +145,7 @@
 | 八十四 | Secrets | ✅ | 全部走環境變數,`test_access_control.py` 釘住 |
 | 八十五 | API Design | ✅ | `/api/backtest` 與 `/api/paper` 做成**任務式**端點(POST 送出 → 拿 job_id → GET `/api/jobs/{id}` 查),不是會逾時的同步請求。一次只跑一個 —— 併發回測會讓停損檢查延遲,而那是拿真錢換一份報告。查詢類再補 `/api/system_events`、`/api/backtests`、`/api/news`、`/api/strategies` |
 | 八十六 | Frontend Dashboard | ✅ | 首頁 + 完整儀表板 + 透明度面板。Top Opportunities、News、AI Agents 三個區塊都有 |
-| 八十七 | Trading Panel | ⚠️ | 有持倉表格,**沒有開倉前的 Entry/SL/TP/Leverage/Size/R:R 預覽面板** |
+| 八十七 | Trading Panel | ✅ | `/trading` 的開倉預覽走**與自動交易相同的鏈**(`_agent_intent` → `evaluate_intent`),在 Execution Engine 前停下。含被風控擋下的那些。**不下單、不寫決策紀錄** —— 看一眼不是打算。Score 那一格是空的:Agent 管線不產生分數,拿信心冒充會讓系統看起來有兩個獨立指標 |
 | 八十八 | Open Position Panel | ✅ | Dashboard 表格含 Entry/Current/SL/TP/Leverage/Notional/PnL/PnL% |
 | 八十九 | News Center | ✅ | Impact / Direction / 強度 / 相關標的都有。UI 明說**強度是關鍵字命中的強度,不是價格影響機率** |
 | 九十 | System Status UI | ✅ | 首頁狀態列九個元件。降級時把壞掉的元件**列出來** —— 只顯示 DEGRADED 等於要人去翻 log |
@@ -177,13 +177,13 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 93 |
-| ⚠️ 部分做到 | 13 |
+| ✅ 已做到 | 95 |
+| ⚠️ 部分做到 | 11 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 13 節,以及為什麼
+## 還沒補完的 11 節,以及為什麼
 
-原本的 12 個「❌ 沒做」全部補完了。剩下的 13 個「部分做到」分成三類。
+原本的 12 個「❌ 沒做」全部補完了。剩下的 11 個「部分做到」分成三類。
 **這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
 ### 一、刻意不做(4 節)
@@ -191,7 +191,7 @@
 | 節 | 為什麼 |
 |---|---|
 | 八 | BingX Adapter 不拆成 12 個檔。第九十七節:能用就保留。拆檔會動到唯一一條真的會送出訂單的路徑,而那條路徑現在是對的 |
-| 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」。投票、理由、棄權原因都看得到,只是不會動 |
+| 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」。五關的決策鏈、投票、理由、棄權原因都看得到,只是不會動 |
 | 八十二 | Production 仍在 systemd 上。Dockerfile 與 compose 都寫好了,但第八十二節也說「不要破壞目前正在運作的 Production」 |
 | 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准的是 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點。狀態看得到,開關要人去 VPS 上跑腳本 |
 
@@ -208,13 +208,11 @@
 | 一百零四 | 組合風險與相關性的程式碼在 `agmcis/risk/portfolio.py`,但沒有跑過真實的多倉情境 |
 | 一百零六 | 第 1–16 條達成。第 17 條「任何開倉都必須有風險保護」的六步驟緊急保護寫完了,但**沒有在真的下單失敗時觸發過** |
 
-### 三、規模或優先順序(4 節)
+### 三、規模或優先順序(2 節)
 
 | 節 | 缺什麼 |
 |---|---|
 | 三十 | 12 個 Agent 齊了,但 Macro Agent 只會投 WAIT —— 它沒有總經資料來源,而一個猜方向的總經 Agent 比沒有更糟 |
-| 六十一 | 逐策略勝率與 PF 有 API(`/api/strategy_health`),沒有專屬的 UI 頁面 |
-| 八十七 | 開倉前的 Entry / SL / TP 預覽面板。數字都算得出來,缺的是把它們放進一個下單前的畫面 |
 | 九十五 | 根目錄舊模組仍有 God Function 與重複邏輯。新路徑全部在 `agmcis/` 底下,舊檔案是 shim,但 shim 背後的 dashboard 相關模組還沒重寫 |
 
 ## 明確不做的事
