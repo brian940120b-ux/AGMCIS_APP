@@ -19,7 +19,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 一 | 最高任務 | ⚠️ | 市場掃描、MTF、技術/量化分析、Funding、AI Multi-Agent、Long/Short、TP/SL、Sizing、槓桿、回測、Walk Forward、Monte Carlo、Paper、Risk Engine、Kill Switch、Telegram、Dashboard 都有。**缺**:Order Book 分析、Open Interest 分析、Macro / Economic Event、Sentiment 分析、Portfolio Management(見五十九/六十) |
+| 一 | 最高任務 | ✅ | 全部項目都有實作。Order Book / Macro / Sentiment 由 `agmcis/agents/flow.py` 補上;Portfolio Management 見五十九 / 六十 |
 | 二 | 不保證獲利 | ✅ | Lab 對合成資料明說「PASS 沒有意義」;Monte Carlo 會主動警告樣本不足;self_review 會輸出負面結論。沒有任何地方宣稱勝率保證 |
 | 三 | 先分析 Repository | ✅ | `docs/AUDIT_REPORT.md` |
 | 四 | PROJECT AUDIT REPORT | ✅ | 同上,22 項全數回答 |
@@ -34,7 +34,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 十一 | Market Data Engine | ⚠️ | 加上 Mark Price / Index Price(取不到回 None,**不用 last 冒充** —— 強平算的是標記價)。**仍缺**:Long/Short 比、爆倉資料;Order Book 可取得但沒有 Agent 使用 |
+| 十一 | Market Data Engine | ✅ | Mark / Index Price、Long/Short 比、爆倉資料都有(交易所不支援回 None,**不回 1.0**);OrderBookAgent 與 OrderFlow 策略真的在用訂單簿 |
 | 十二 | Trading Rules Engine | ✅ | `agmcis/execution/rules_engine.py`,tick/step/minQty/minNotional 全部套用,且只會讓部位更保守 |
 | 十三 | Order Types | ⚠️ | `OrderType` 七種型別齊全,但實際只走 MARKET;LIMIT / STOP / TRAILING_STOP 沒有被執行路徑使用 |
 | 十四 | Long / Short | ⚠️ | 開多/開空/全平/減倉有。**缺**:Add Position(加倉)、Reverse Position(反手)沒有實作 |
@@ -71,7 +71,7 @@
 | 三十五 | Backtest Metrics | ✅ | 17 項全部都有,含 MFE / MAE / Calmar / Recovery Factor |
 | 三十六 | Walk Forward | ✅ | `agmcis/lab/splits.py` Train/Validation/Test/OOS |
 | 三十七 | Monte Carlo | ✅ | 重抽樣 + `agmcis/lab/cost_sensitivity.py`。成本變動**重跑回測**而不是在結果上加減 —— 成本會改變哪些交易還有得賺、強平價在哪、以及成交價本身 |
-| 三十八 | Strategy Lab | ⚠️ | 九個策略:EMA / Breakout / Momentum / MeanReversion / RSI / MACD / VWAP / Volatility / MarketStructure。**缺 Order Flow** —— 它需要逐筆成交資料,K 棒推不出來 |
+| 三十八 | Strategy Lab | ⚠️ | 十個策略,含 OrderFlow。**但 OrderFlow 是代理指標** —— 真正的 order flow 需要逐筆成交,這裡用訂單簿失衡 + 量能確認近似,所以門檻高、信心上限 65 |
 | 三十九 | 避免 Overfitting | ✅ | `agmcis/lab/scoring.py` 有 OVERFITTED 標記與 Strategy Health Score |
 | 四十 | Strategy Ensemble | ✅ | `agmcis/lab/ensemble.py`,含權重上限 |
 

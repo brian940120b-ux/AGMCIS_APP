@@ -61,8 +61,13 @@ class Strategy(ABC):
     # 那會產生一個名字叫 VWAP 但其實不是 VWAP 的訊號。
     needs_candles = False
 
+    # 這個策略需不需要訂單簿。與 needs_candles 同樣的規則:
+    # 拿不到就 WAIT,不用別的東西湊一個近似值。
+    needs_order_book = False
+
     @abstractmethod
-    def evaluate(self, indicators, regime, candles=None) -> StrategyVerdict:
+    def evaluate(self, indicators, regime, candles=None,
+                 order_book=None) -> StrategyVerdict:
         """
         看一眼市場,回傳看法。不得有副作用,不得碰交易所。
 

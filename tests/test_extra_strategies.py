@@ -365,3 +365,288 @@ class TestTheyAreAllRegistered(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFlowAgents(unittest.TestCase):
+    """
+    資金流 / 情緒 / 總體事件 Agent。它們共同的弱點是資料最容易缺,
+    而缺的時候最容易被誤讀成中性 —— 0 在這些欄位裡的意思分別是
+    「多空平衡」「市場中性」「沒有事件」,那是三個很有信心的判斷。
+    """
+
+    def _context(self, **overrides):
+        from agmcis.agents.base import AgentContext
+
+        base = dict(
+            symbol="BTC/USDT", indicators=indicators(),
+            regime=regime(), price=100.0,
+        )
+        base.update(overrides)
+        return AgentContext(**base)
+
+    # ---- OrderBookAgent ----
+
+    def _book(self, imbalance=0.0, spread_pct=0.02):
+        return {"imbalance": imbalance, "spread_pct": spread_pct,
+                "best_bid": 99.9, "best_ask": 100.1}
+
+    def test_no_order_book_means_abstain_not_neutral(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import OrderBookAgent
+
+        opinion = OrderBookAgent().analyse(self._context(order_book=None))
+
+        self.assertIs(opinion.vote, Vote.ABSTAIN)
+
+    def test_a_strong_bid_imbalance_is_a_long(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import OrderBookAgent
+
+        opinion = OrderBookAgent().analyse(
+            self._context(order_book=self._book(imbalance=0.5)),
+        )
+
+        self.assertIs(opinion.vote, Vote.LONG)
+
+    def test_a_mild_imbalance_abstains(self):
+        """一個 55/45 的訂單簿沒有任何資訊。"""
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import OrderBookAgent
+
+        opinion = OrderBookAgent().analyse(
+            self._context(order_book=self._book(imbalance=0.1)),
+        )
+
+        self.assertIs(opinion.vote, Vote.ABSTAIN)
+
+    def test_a_wide_spread_beats_any_imbalance(self):
+        """
+        再漂亮的失衡,在一個寬價差的市場裡也不值得進場 ——
+        進出各吃一次,優勢會被吃光。
+        """
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import OrderBookAgent
+
+        opinion = OrderBookAgent().analyse(
+            self._context(order_book=self._book(imbalance=0.9, spread_pct=0.5)),
+        )
+
+        self.assertIs(opinion.vote, Vote.WAIT)
+
+    def test_its_confidence_is_capped_because_orders_can_be_pulled(self):
+        from agmcis.agents.flow import OrderBookAgent
+
+        opinion = OrderBookAgent().analyse(
+            self._context(order_book=self._book(imbalance=0.99)),
+        )
+
+        self.assertLessEqual(opinion.confidence, 70.0)
+
+    def test_its_weight_is_low(self):
+        from agmcis.agents.flow import OrderBookAgent
+
+        self.assertLess(OrderBookAgent.weight, 1.0)
+
+    # ---- SentimentAgent ----
+
+    def test_no_sentiment_means_abstain(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import SentimentAgent
+
+        opinion = SentimentAgent().analyse(self._context(sentiment_score=None))
+
+        self.assertIs(opinion.vote, Vote.ABSTAIN)
+
+    def test_extreme_greed_says_wait_not_short(self):
+        """
+        極端情緒是反指標,但「太貪婪了所以要跌」是最貴的一種判斷 ——
+        所以它只說「不要在這裡追多」,不說「做空」。
+        """
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import SentimentAgent
+
+        opinion = SentimentAgent().analyse(self._context(sentiment_score=85.0))
+
+        self.assertIs(opinion.vote, Vote.WAIT)
+
+    def test_extreme_fear_also_says_wait(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import SentimentAgent
+
+        opinion = SentimentAgent().analyse(self._context(sentiment_score=-85.0))
+
+        self.assertIs(opinion.vote, Vote.WAIT)
+
+    def test_neutral_sentiment_abstains(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import SentimentAgent
+
+        opinion = SentimentAgent().analyse(self._context(sentiment_score=10.0))
+
+        self.assertIs(opinion.vote, Vote.ABSTAIN)
+
+    # ---- MacroAgent ----
+
+    def test_macro_only_ever_says_wait(self):
+        """
+        FOMC 前十分鐘的問題不是方向猜錯,是波動大到停損沒有意義 ——
+        那是一個「不要進場」的理由,不是「往哪邊」的理由。
+        """
+        import inspect
+
+        from agmcis.agents.flow import MacroAgent
+
+        source = inspect.getsource(MacroAgent)
+        self.assertNotIn("Vote.LONG", source)
+        self.assertNotIn("Vote.SHORT", source)
+
+    def test_a_blackout_makes_macro_vote_wait_loudly(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import MacroAgent
+        from agmcis.risk.news_risk import NewsRisk
+
+        risk = NewsRisk(
+            blocks_entry=True, level="HIGH", reasons=["FOMC 時間窗內"],
+        )
+        opinion = MacroAgent().analyse(self._context(news_risk=risk))
+
+        self.assertIs(opinion.vote, Vote.WAIT)
+        self.assertGreater(opinion.confidence, 90)
+
+    def test_a_quiet_calendar_abstains(self):
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import MacroAgent
+        from agmcis.risk.news_risk import NewsRisk
+
+        opinion = MacroAgent().analyse(self._context(news_risk=NewsRisk()))
+
+        self.assertIs(opinion.vote, Vote.ABSTAIN)
+
+    def test_a_stale_calendar_abstains_rather_than_blocking(self):
+        """
+        日曆過期在模擬盤只是警告。實單那一側由 LIVE GATE 擋。
+        """
+        from agmcis.agents.base import Vote
+        from agmcis.agents.flow import MacroAgent
+        from agmcis.risk.news_risk import NewsRisk
+
+        opinion = MacroAgent().analyse(
+            self._context(news_risk=NewsRisk(degraded=True)),
+        )
+
+        self.assertIs(opinion.vote, Vote.ABSTAIN)
+
+
+class TestEnrichmentCanBeTurnedOff(unittest.TestCase):
+    """
+    每個標的多三次外部呼叫。rate limit 吃緊時要能關掉,
+    而關掉之後對應的 Agent 必須**棄權**,不是拿到中性值。
+    """
+
+    def test_turning_it_off_gives_none_not_zero(self):
+        from unittest.mock import patch
+
+        from agmcis.config import settings
+        from agmcis.signal import agent_pipeline
+
+        with patch.object(settings, "AGENT_ENRICHMENT_ENABLED", False):
+            payload = agent_pipeline.enrich("BTC/USDT")
+
+        self.assertEqual(set(payload.values()), {None})
+
+    def test_a_failing_source_does_not_break_the_context(self):
+        from unittest.mock import patch
+
+        from agmcis.signal import agent_pipeline
+
+        with patch("agmcis.data.market_data.get_order_book",
+                   side_effect=RuntimeError("掛了")), \
+             patch.object(agent_pipeline, "logger"):
+            payload = agent_pipeline.enrich("BTC/USDT")
+
+        self.assertIsNone(payload["order_book"])
+
+
+class TestOrderFlow(unittest.TestCase):
+    """
+    真正的 order flow 需要逐筆成交。這裡做的是訂單簿失衡 + 量能確認,
+    是一個粗糙的代理 —— 所以它的門檻高、信心上限低,
+    而且要求另一個獨立訊號確認。
+    """
+
+    def _book(self, imbalance=0.5, spread_pct=0.02):
+        return {"imbalance": imbalance, "spread_pct": spread_pct}
+
+    def _indicators(self, volume_ratio=1.5):
+        result = indicators()
+        result.volume = 1000.0 * volume_ratio
+        result.volume_ma20 = 1000.0
+        return result
+
+    def test_no_order_book_means_wait(self):
+        from agmcis.strategy.extra import OrderFlow
+
+        verdict = OrderFlow().evaluate(indicators(), regime(), order_book=None)
+
+        self.assertIs(verdict.direction, Direction.WAIT)
+
+    def test_a_strong_imbalance_with_volume_is_a_long(self):
+        from agmcis.strategy.extra import OrderFlow
+
+        verdict = OrderFlow().evaluate(
+            self._indicators(), regime(), order_book=self._book(0.6),
+        )
+
+        self.assertIs(verdict.direction, Direction.LONG)
+
+    def test_an_imbalance_without_volume_is_treated_as_a_spoof(self):
+        """
+        沒有成交量支撐的訂單簿失衡,更可能是掛單牆而不是真的買盤 ——
+        而掛單牆會在價格接近時消失。
+        """
+        from agmcis.strategy.extra import OrderFlow
+
+        verdict = OrderFlow().evaluate(
+            self._indicators(volume_ratio=0.6), regime(),
+            order_book=self._book(0.9),
+        )
+
+        self.assertIs(verdict.direction, Direction.WAIT)
+        self.assertIn("掛單牆", verdict.reasons[0])
+
+    def test_a_wide_spread_blocks_it(self):
+        from agmcis.strategy.extra import OrderFlow
+
+        verdict = OrderFlow().evaluate(
+            self._indicators(), regime(), order_book=self._book(0.9, spread_pct=0.5),
+        )
+
+        self.assertIs(verdict.direction, Direction.WAIT)
+
+    def test_a_moderate_imbalance_waits(self):
+        from agmcis.strategy.extra import OrderFlow
+
+        verdict = OrderFlow().evaluate(
+            self._indicators(), regime(), order_book=self._book(0.2),
+        )
+
+        self.assertIs(verdict.direction, Direction.WAIT)
+
+    def test_its_confidence_is_capped(self):
+        from agmcis.strategy.extra import OrderFlow
+
+        verdict = OrderFlow().evaluate(
+            self._indicators(), regime(), order_book=self._book(0.99),
+        )
+
+        self.assertLessEqual(verdict.confidence, 65.0)
+
+    def test_it_declares_that_it_needs_an_order_book(self):
+        from agmcis.strategy.extra import OrderFlow
+
+        self.assertTrue(OrderFlow.needs_order_book)
+
+    def test_it_is_registered(self):
+        from agmcis.strategy.registry import StrategyRegistry
+
+        self.assertIn("order_flow", StrategyRegistry().names)

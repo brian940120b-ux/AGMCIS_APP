@@ -130,11 +130,14 @@ class StrategyRegistry:
         self._strategies.append(strategy)
         return self
 
-    def evaluate_all(self, indicators, regime, strategies=None, candles=None):
+    def evaluate_all(self, indicators, regime, strategies=None, candles=None,
+                     order_book=None):
         verdicts = []
         for strategy in (self._strategies if strategies is None else strategies):
             try:
-                verdicts.append(strategy.evaluate(indicators, regime, candles))
+                verdicts.append(
+                    strategy.evaluate(indicators, regime, candles, order_book)
+                )
             except Exception as exc:
                 # 單一策略出錯不該讓整輪掛掉,但一定要記錄
                 logger.exception(
@@ -143,7 +146,7 @@ class StrategyRegistry:
                 verdicts.append(strategy.wait(f"策略錯誤: {exc}"))
         return verdicts
 
-    def consensus(self, indicators, regime, candles=None):
+    def consensus(self, indicators, regime, candles=None, order_book=None):
         """
         集成所有策略的看法。
 
@@ -175,7 +178,8 @@ class StrategyRegistry:
             )
 
         verdicts = self.evaluate_all(
-            indicators, regime, strategies=enabled, candles=candles,
+            indicators, regime, strategies=enabled,
+            candles=candles, order_book=order_book,
         )
         serialised = [v.to_dict() for v in verdicts]
 

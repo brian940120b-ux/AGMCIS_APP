@@ -397,4 +397,10 @@ ENVIRONMENT_AGENTS = [VolatilityAgent, RegimeAgent, FundingAgent]
 
 MANAGEMENT_AGENTS = [PositionRiskAgent, ExitAgent, NewsAgent]
 
-ALL_AGENT_CLASSES = DIRECTIONAL_AGENTS + ENVIRONMENT_AGENTS + MANAGEMENT_AGENTS
+# 資金流 / 情緒 / 總體事件(第一 / 十一節)。它們看的是價格以外的東西,
+# 而且共同的弱點是資料最容易缺 —— 缺的時候一律棄權,見 flow.py。
+from agmcis.agents.flow import FLOW_AGENTS   # noqa: E402
+
+ALL_AGENT_CLASSES = (
+    DIRECTIONAL_AGENTS + ENVIRONMENT_AGENTS + MANAGEMENT_AGENTS + FLOW_AGENTS
+)

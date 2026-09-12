@@ -54,7 +54,7 @@ class RsiReversion(Strategy):
     OVERSOLD = 30.0
     OVERBOUGHT = 70.0
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         if not self.suits(regime):
             return self.wait(f"RSI 反轉不在 {regime.regime.value} 出手")
 
@@ -118,7 +118,7 @@ class MacdCross(Strategy):
     # 柱狀體佔價格的比例。超過這個就算「已經走了一段」。
     FRESH_HIST_PCT = 0.3
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         if not self.suits(regime):
             return self.wait(f"MACD 轉折不在 {regime.regime.value} 出手")
 
@@ -183,7 +183,7 @@ class VwapReversion(Strategy):
     # 偏離多少才算顯著(佔 VWAP 的百分比)
     MIN_DEVIATION_PCT = 1.0
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         if not self.suits(regime):
             return self.wait(f"VWAP 回歸不在 {regime.regime.value} 出手")
 
@@ -246,7 +246,7 @@ class VolatilityBreakout(Strategy):
     # 通道寬度佔價格的比例低於這個就算壓縮
     SQUEEZE_WIDTH_PCT = 2.0
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         width = indicators.bb_width_pct
         price = indicators.price
         upper, lower = indicators.bb_upper, indicators.bb_lower
@@ -312,7 +312,7 @@ class MarketStructure(Strategy):
     suitable_regimes = TRENDING
     needs_candles = True
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         if not self.suits(regime):
             return self.wait(f"市場結構策略不在 {regime.regime.value} 出手")
 
@@ -394,3 +394,96 @@ EXTRA_STRATEGIES = [
     RsiReversion, MacdCross, VwapReversion,
     VolatilityBreakout, MarketStructure,
 ]
+
+
+class OrderFlow(Strategy):
+    """
+    訂單流(第三十八節)。
+
+    ## 先講清楚它不是什麼
+
+    真正的 order flow 需要**逐筆成交**:誰主動吃了誰的掛單、
+    買方主動成交量減賣方主動成交量(volume delta)。那個資料
+    K 棒與訂單簿快照都推不出來,而 BingX 的公開 API 也不提供。
+
+    這裡做的是**訂單簿失衡 + 量能確認**的組合,它是 order flow 的
+    一個粗糙代理。兩個已知的問題:
+
+      1. **掛單可以撤。** 厚的買盤可能在價格接近時消失 ——
+         而且那正是一種常見的操縱手法。
+      2. **快照是一瞬間。** 兩次輪詢之間發生的事完全看不到。
+
+    所以它的信心上限壓在 65,而且要求量能同時確認 ——
+    一個沒有成交量支撐的訂單簿失衡,更可能是掛單牆而不是真的買盤。
+
+    ## 為什麼還是做
+
+    因為「拿不到最好的資料」不等於「什麼都不看」。訂單簿失衡在
+    極端值時確實有資訊,而把它明確標成代理指標、壓低權重、
+    要求另一個獨立訊號確認,比假裝沒有這個維度好。
+    """
+    name = "order_flow"
+    needs_order_book = True
+
+    # 失衡要非常明顯才出手。0.4 = 買賣盤大約 70/30。
+    STRONG_IMBALANCE = 0.40
+
+    # 價差寬到這個程度,進出成本會吃掉這種短線交易的全部優勢。
+    MAX_SPREAD_PCT = 0.15
+
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
+        if not order_book:
+            return self.wait("沒有訂單簿,算不出訂單流")
+
+        imbalance = order_book.get("imbalance")
+        spread_pct = order_book.get("spread_pct")
+
+        if imbalance is None:
+            return self.wait("訂單簿沒有可用的失衡數字")
+
+        if spread_pct is not None and spread_pct > self.MAX_SPREAD_PCT:
+            return self.wait(
+                f"價差 {spread_pct:.3f}% 過寬,短線交易的優勢會被進出成本吃光"
+            )
+
+        if abs(imbalance) < self.STRONG_IMBALANCE:
+            return self.wait(f"訂單簿失衡 {imbalance:+.2f} 不夠極端")
+
+        # 量能必須同時確認。沒有成交量支撐的訂單簿失衡,
+        # 更可能是掛單牆而不是真的買盤 —— 而掛單牆會在價格接近時消失。
+        volume_ratio = indicators.volume_ratio
+        if volume_ratio is None:
+            return self.wait("沒有量能資料,無法確認訂單簿失衡是不是真的")
+
+        if volume_ratio < 1.0:
+            return self.wait(
+                f"訂單簿失衡 {imbalance:+.2f} 但量能只有 {volume_ratio:.2f} 倍 —— "
+                f"更像掛單牆而不是真的買盤"
+            )
+
+        direction = Direction.LONG if imbalance > 0 else Direction.SHORT
+        bid_pct = (1 + imbalance) / 2 * 100
+
+        reasons = [
+            f"訂單簿 {bid_pct:.0f}% 在買方(失衡 {imbalance:+.2f})",
+            f"量能 {volume_ratio:.2f} 倍於均量",
+        ]
+        if spread_pct is not None:
+            reasons.append(f"價差 {spread_pct:.3f}%")
+
+        # 上限 65:掛單可以撤,而且快照看不到兩次輪詢之間發生的事。
+        confidence = min(65.0, 40 + abs(imbalance) * 40)
+
+        # 訂單簿訊號的時效很短,所以停損跟停利都放得比較近。
+        stop_loss, take_profit = self.atr_levels(
+            indicators, direction, stop_mult=1.0, target_mult=1.5,
+        )
+
+        return StrategyVerdict(
+            strategy=self.name, direction=direction,
+            confidence=confidence, reasons=reasons,
+            stop_loss=stop_loss, take_profit=take_profit,
+        )
+
+
+EXTRA_STRATEGIES.append(OrderFlow)

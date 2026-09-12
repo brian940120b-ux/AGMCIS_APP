@@ -290,6 +290,11 @@ MAX_LIVE_DAILY_LOSS_USDT = env_float("MAX_LIVE_DAILY_LOSS_USDT", 20)
 MAX_LIVE_TRADES_PER_DAY = env_int("MAX_LIVE_TRADES_PER_DAY", 3)
 MAX_LIVE_LEVERAGE = env_float("MAX_LIVE_LEVERAGE", 2)
 
+# 訂單簿 / 多空比 / 情緒 / 事件風險的額外抓取。
+# 關掉的時候對應的 Agent 會棄權(不是「資料是中性的」)。
+# 每個標的多三次外部呼叫,rate limit 吃緊時可以先關這個。
+AGENT_ENRICHMENT_ENABLED = env_bool("AGENT_ENRICHMENT_ENABLED", True)
+
 MIN_SIGNAL_SCORE = env_float("MIN_SIGNAL_SCORE", 70)
 MIN_CONFIDENCE = env_float("MIN_CONFIDENCE", 60)
 

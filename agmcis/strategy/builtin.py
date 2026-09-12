@@ -25,7 +25,7 @@ class TrendFollowing(Strategy):
         Regime.BEAR.value, Regime.STRONG_BEAR.value,
     })
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         if not self.suits(regime):
             return self.wait(f"順勢策略不在 {regime.regime.value} 出手")
 
@@ -82,7 +82,7 @@ class Breakout(Strategy):
     """
     name = "breakout"
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         price = indicators.price
         upper, lower = indicators.bb_upper, indicators.bb_lower
 
@@ -127,7 +127,7 @@ class Momentum(Strategy):
     """動能。MACD 柱狀圖與 RSI 同向,且不在極端區。"""
     name = "momentum"
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         hist, rsi = indicators.macd_hist, indicators.rsi
 
         if hist is None or rsi is None:
@@ -171,7 +171,7 @@ class MeanReversion(Strategy):
     name = "mean_reversion"
     suitable_regimes = frozenset({Regime.RANGE.value})
 
-    def evaluate(self, indicators, regime, candles=None):
+    def evaluate(self, indicators, regime, candles=None, order_book=None):
         if not self.suits(regime):
             return self.wait(
                 f"均值回歸只在盤整市出手,目前 {regime.regime.value}"

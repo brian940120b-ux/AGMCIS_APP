@@ -114,6 +114,8 @@ class BingXAdapter(ExchangeAdapter):
         self._factory = exchange_factory
         self._instances = {}
         self._markets_cache = {}
+        # 交易所明說不支援的端點。只問一次,見 _optional()。
+        self._unsupported = set()
         self._sleep = sleep
         self.max_retries = max_retries or settings.EXCHANGE_MAX_RETRIES
         self.backoff_seconds = (
@@ -265,11 +267,30 @@ class BingXAdapter(ExchangeAdapter):
         }
 
     def _optional(self, fn_name, *args, market_type=MarketType.PERPETUAL, **kwargs):
-        """輔助資料:失敗回 None 而不是拋例外。"""
+        """
+        輔助資料:失敗回 None 而不是拋例外。
+
+        **交易所明說不支援的端點只問一次。** ccxt 對某些端點會直接拋
+        NotSupported,而那不會因為重試而改變 —— 每一輪掃描都重試一次
+        等於每個標的浪費兩次退避,而且 log 會被同一行警告淹沒到
+        真正的問題看不見。
+
+        注意這只記住「不支援」,不記住「暫時失敗」:網路錯誤下一次
+        可能就好了,把它也記起來會讓一次網路抖動變成永久失能。
+        """
+        if fn_name in self._unsupported:
+            return None
+
         try:
             return self._call(fn_name, *args, market_type=market_type, **kwargs)
         except ExchangeUnavailableError as exc:
-            logger.warning("[bingx] %s unavailable: %s", fn_name, exc)
+            if "not_supported" in str(exc) or "NotSupported" in str(exc):
+                self._unsupported.add(fn_name)
+                logger.warning(
+                    "[bingx] %s 這個交易所不支援,之後不再嘗試", fn_name,
+                )
+            else:
+                logger.warning("[bingx] %s unavailable: %s", fn_name, exc)
             return None
 
     # ---------------- 市場資訊 ----------------
@@ -461,6 +482,85 @@ class BingXAdapter(ExchangeAdapter):
             # > 0 代表買盤較厚,< 0 代表賣盤較厚。範圍 -1 ~ 1。
             "imbalance": ((bid_volume - ask_volume) / total) if total > 0 else None,
             "timestamp": raw.get("timestamp"),
+        }
+
+    def get_long_short_ratio(self, symbol, market_type=MarketType.PERPETUAL):
+        """
+        多空持倉人數比(第十一節)。
+
+        ccxt 對 BingX 沒有標準化這個端點,而且它是不是存在依交易所版本
+        而異。**取不到就回 None** —— 這個數字最常見的誤用是「沒有資料時
+        當成 1.0(多空平衡)」,那會讓一個完全沒有情緒資訊的時刻
+        看起來像一個確定中性的時刻。
+
+        > 1 代表做多的人比較多。極端值通常是反指標:大家都站同一邊的
+        時候,那一邊的停損就是燃料。
+        """
+        raw = self._optional(
+            "fetch_long_short_ratio_history",
+            self.to_market_symbol(symbol, market_type),
+            market_type=market_type,
+        )
+
+        if not raw:
+            return None
+
+        latest = raw[-1] if isinstance(raw, list) else raw
+        if not isinstance(latest, dict):
+            return None
+
+        ratio = _as_float(latest.get("longShortRatio")) or _as_float(
+            (latest.get("info") or {}).get("longShortRatio")
+        )
+
+        if ratio is None:
+            return None
+
+        return {
+            "symbol": symbol,
+            "ratio": ratio,
+            "timestamp": latest.get("timestamp"),
+        }
+
+    def get_liquidations(self, symbol, limit=50, market_type=MarketType.PERPETUAL):
+        """
+        近期爆倉(第十一節)。取不到回 None。
+
+        爆倉資料的價值不在總量,在**方向**:一串多單爆倉代表下方的
+        槓桿被清掉了,那通常是反彈的前提。但這個資料在多數交易所是
+        延遲的,所以它是背景資訊,不是進場訊號。
+        """
+        raw = self._optional(
+            "fetch_liquidations",
+            self.to_market_symbol(symbol, market_type),
+            None, limit,
+            market_type=market_type,
+        )
+
+        if not raw:
+            return None
+
+        events = [
+            {
+                "price": _as_float(item.get("price")),
+                "amount": _as_float(item.get("baseValue") or item.get("amount")),
+                "side": item.get("side"),
+                "timestamp": item.get("timestamp"),
+            }
+            for item in raw
+            if isinstance(item, dict)
+        ]
+
+        longs = sum(1 for e in events if e["side"] == "sell")
+        shorts = sum(1 for e in events if e["side"] == "buy")
+
+        return {
+            "symbol": symbol,
+            "count": len(events),
+            # 多單爆倉是被強制賣出,所以 side 是 sell。
+            "long_liquidations": longs,
+            "short_liquidations": shorts,
+            "events": events[-10:],
         }
 
     # ---------------- 衍生品資料 ----------------

@@ -77,6 +77,19 @@ class AgentContext:
     news_impact: Optional[float] = None
     btc_indicators: Optional[object] = None
 
+    # 訂單簿(第十一節)。dict 或 None ——
+    # 取不到就是 None,不是一個「平衡」的預設值。
+    order_book: Optional[Dict] = None
+    # 多空持倉比。> 1 代表做多的人比較多。
+    long_short_ratio: Optional[float] = None
+    # 近期爆倉統計。
+    liquidations: Optional[Dict] = None
+    # 消息面情緒:-100 到 100。與 news_impact 的差別是它看的是
+    # **整體市場**而不是這一檔 —— 全市場恐慌時個別標的的好消息不算數。
+    sentiment_score: Optional[float] = None
+    # 重大事件風險(agmcis/risk/news_risk.py 的 NewsRisk)。
+    news_risk: Optional[object] = None
+
     # 已有部位(沒有就是 None)。給管理型 Agent 用。
     position: Optional[Dict] = None
 

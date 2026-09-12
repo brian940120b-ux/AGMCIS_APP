@@ -101,7 +101,10 @@ def analyse_symbol(symbol, timeframe=DEFAULT_TIMEFRAME, limit=DEFAULT_LIMIT,
     # ---- 4. 策略集成 ----
     # 把原始 K 棒一起傳進去:需要它的策略(VWAP、市場結構)不能用
     # 指標湊一個近似值 —— 那會產生一個名字對但內容不對的訊號。
-    consensus = registry.consensus(indicators, regime, candles=_candles(df))
+    consensus = registry.consensus(
+        indicators, regime, candles=_candles(df),
+        order_book=_order_book(symbol),
+    )
 
     if not consensus.is_actionable:
         signal = wait_signal(consensus.blocked_reason or "沒有共識", price=price)
@@ -263,4 +266,22 @@ def _candles(frame):
         ]
     except Exception:
         logger.warning("K 棒轉換失敗,需要 K 棒的策略這一輪會棄權")
+        return None
+
+
+def _order_book(symbol):
+    """
+    訂單簿。取不到回 None —— 需要它的策略會 WAIT,而那是正確的:
+    一個用別的東西湊出來的「訂單流」訊號不是訂單流訊號。
+    """
+    from agmcis.config import settings
+
+    if not getattr(settings, "AGENT_ENRICHMENT_ENABLED", True):
+        return None
+
+    try:
+        from agmcis.data.market_data import get_order_book
+        return get_order_book(symbol)
+    except Exception as exc:
+        logger.warning("訊號管線 | %s 取不到訂單簿 | %s", symbol, exc)
         return None

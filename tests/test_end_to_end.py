@@ -110,6 +110,13 @@ class Boundaries:
                   return_value={"symbol": "X", "funding_rate": self.funding_rate}),
             patch("agmcis.exchange.trading_rules.get_registry",
                   return_value=rules_registry),
+            # 加分項的資料源全部關掉:這個測試驗的是整條鏈路接得起來,
+            # 不是「訂單簿抓不抓得到」。不關的話它會真的去打 BingX,
+            # 把一個離線測試變成一個依賴網路的測試。
+            patch("agmcis.signal.agent_pipeline.enrich", return_value={
+                "order_book": None, "long_short_ratio": None,
+                "sentiment_score": None, "news_risk": None,
+            }),
             patch("database_service.get_open_trade", return_value=None),
             patch("paper_trading.insert_trade", side_effect=self._insert),
         ]
@@ -187,7 +194,13 @@ class TestTheWholeChainFitsTogether(unittest.TestCase):
     def test_every_agent_produces_an_opinion_without_crashing(self):
         _, (deliberation, _), _ = self._deliberate()
 
-        self.assertEqual(len(deliberation.opinions), 12)
+        from agmcis.agents.registry import get_registry
+
+        # 不寫死數量:Agent 會增加,而這個測試要驗的是
+        # 「每一個都產出意見而且沒有炸掉」,不是「剛好有幾個」。
+        self.assertEqual(
+            len(deliberation.opinions), len(get_registry().names),
+        )
         self.assertEqual(deliberation.errors, [])
 
     def test_a_bullish_market_produces_a_long_intent(self):
@@ -214,7 +227,11 @@ class TestTheWholeChainFitsTogether(unittest.TestCase):
         """歸因資料必須在這一刻就帶上 —— 事後推不回來。"""
         _, (deliberation, _), _ = self._deliberate()
 
-        self.assertEqual(len(deliberation.intent.agent_votes), 12)
+        from agmcis.agents.registry import get_registry
+
+        self.assertEqual(
+            len(deliberation.intent.agent_votes), len(get_registry().names),
+        )
         self.assertIsNotNone(deliberation.intent.market_regime)
 
 
@@ -315,7 +332,11 @@ class TestIntentThroughRiskAndExecution(unittest.TestCase):
         # 成交價含滑點,比下單價差
         self.assertGreater(stored["entry_price"], stored["requested_entry_price"])
         # Phase 15:歸因
-        self.assertEqual(len(stored["agent_votes"]), 12)
+        from agmcis.agents.registry import get_registry
+
+        self.assertEqual(
+            len(stored["agent_votes"]), len(get_registry().names),
+        )
         self.assertIsNotNone(stored["market_regime"])
 
     def test_the_liquidation_price_is_further_than_the_stop(self):

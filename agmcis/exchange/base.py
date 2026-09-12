@@ -100,6 +100,20 @@ class ExchangeAdapter(ABC):
         """失敗回傳 None。Standard Futures 沒有資金費率,應回傳 None。"""
 
     @abstractmethod
+    def get_long_short_ratio(self, symbol: str, market_type=None) -> Optional[Dict]:
+        """
+        多空持倉比。交易所不支援就回 None。
+
+        **不要回 1.0 當預設值。** 「沒有資料」與「多空平衡」是兩件事,
+        而後者是一個確定的判斷。
+        """
+        return None
+
+    def get_liquidations(self, symbol: str, limit: int = 50,
+                         market_type=None) -> Optional[Dict]:
+        """近期爆倉。交易所不支援就回 None。"""
+        return None
+
     def get_open_interest(self, symbol: str, market_type: MarketType) -> Optional[Dict]:
         """失敗回傳 None。"""
 
