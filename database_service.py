@@ -56,7 +56,9 @@ TRADE_COLUMNS = """
     confidence,
     original_stoploss,
     tp_stage,
-    realized_partial_usdt
+    realized_partial_usdt,
+    max_favourable_pct,
+    max_adverse_pct
 """
 
 # ⚠️ 這份欄位清單與 _row_to_trade() 的索引是綁死的。
@@ -111,7 +113,46 @@ def _row_to_trade(row):
         "original_stoploss": _f(row[29]),
         "tp_stage": int(row[30] or 0),
         "realized_partial_usdt": _f(row[31]) or 0.0,
+        # MFE / MAE(第三十節 Agent 10)。**None 代表沒有量測過**,
+        # 不是 0 —— migration 010 之前開的倉沒有這兩個數字,
+        # 而把它們當成 0 會讓「這筆從來沒有浮虧」變成統計事實。
+        "max_favourable_pct": _f(row[32]),
+        "max_adverse_pct": _f(row[33]),
     }
+
+
+def update_excursion(trade_id, favourable_pct=None, adverse_pct=None):
+    """
+    更新一筆未平倉交易的 MFE / MAE(第三十節 Agent 10)。
+
+    **只往極端方向走。** 用 GREATEST / LEAST 而不是直接覆寫,
+    理由是這個函式每一輪都會被呼叫,而部位回檔的時候新值會比舊值小 ——
+    直接覆寫會讓 MFE 變成「最後一次量到的浮盈」,那不是 MFE。
+
+    COALESCE 處理第一次寫入(欄位還是 NULL)。
+
+    回傳有沒有真的更新到。找不到那筆(已平倉、或 id 不對)回 False —— 
+    不拋例外,因為呼叫端是每分鐘跑一次的監控,而一筆剛好在這一輪
+    被平掉的交易不是錯誤。
+    """
+    if favourable_pct is None and adverse_pct is None:
+        return False
+
+    with transaction() as cur:
+        cur.execute(
+            """
+            UPDATE trades SET
+                max_favourable_pct = GREATEST(
+                    COALESCE(max_favourable_pct, %s), %s),
+                max_adverse_pct = LEAST(
+                    COALESCE(max_adverse_pct, %s), %s)
+            WHERE id = %s AND status = 'OPEN'
+            RETURNING id;
+            """,
+            (favourable_pct, favourable_pct,
+             adverse_pct, adverse_pct, int(trade_id)),
+        )
+        return cur.fetchone() is not None
 
 
 # ---------------- 帳戶 ----------------

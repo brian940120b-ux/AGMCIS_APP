@@ -35,6 +35,9 @@ OK = "ok"
 ERROR = "error"
 DISABLED = "disabled"
 UNKNOWN = "unknown"
+# 「還能用但快不能用了」。degraded 與 error 分開,是因為前者
+# 需要的是安排時間去處理,後者需要的是現在就去看。
+DEGRADED = "degraded"
 
 # 這幾項壞掉代表系統不能交易。其他項目壞掉只是降級。
 CRITICAL_COMPONENTS = ("database", "risk_engine", "trading_engine")
@@ -142,6 +145,33 @@ def _websocket():
     return OK if stream.status.connected else ERROR
 
 
+def _news_calendar():
+    """
+    事件日曆(第五十一節)。三種狀態:
+
+      ok        日曆新鮮,消息面那一層有在保護。
+      degraded  快過期,或有幾筆事件解析不了。
+      error     過期 / 不存在 / 壞掉 —— **消息面風險現在沒有在保護
+                任何東西**,而系統其他部分看起來完全正常。
+
+    這一項不在 CRITICAL_COMPONENTS 裡:日曆過期不代表不能交易,
+    代表少一層保護。實單那一側由 LIVE SAFETY GATE 擋。
+    """
+    try:
+        from agmcis.risk import calendar_watch
+
+        state = calendar_watch.inspect_calendar()
+    except Exception as exc:
+        logger.warning("Health | news_calendar | %s: %s", type(exc).__name__, exc)
+        return ERROR
+
+    if state["status"] == calendar_watch.OK:
+        return OK
+    if state["status"] == calendar_watch.EXPIRING:
+        return DEGRADED
+    return ERROR
+
+
 def build_health():
     components = {
         "api": OK,                       # 能跑到這裡,API 就是活的
@@ -153,14 +183,18 @@ def build_health():
         "agent_engine": _check("agent_engine", _agent_engine),
         "scheduler": _check("scheduler", _scheduler),
         "websocket": _websocket(),
+        "news_calendar": _news_calendar(),
     }
 
     failed = [name for name, state in components.items() if state == ERROR]
     critical = [name for name in failed if name in CRITICAL_COMPONENTS]
+    # 「還能用但快不能用了」。它不算 failed(監控不該為它半夜叫人),
+    # 但整體狀態要降級 —— 一個回 healthy 的系統沒有人會去看細節。
+    degraded = [name for name, state in components.items() if state == DEGRADED]
 
     if critical:
         status = "unhealthy"
-    elif failed:
+    elif failed or degraded:
         status = "degraded"
     else:
         status = "healthy"
@@ -177,6 +211,7 @@ def build_health():
         "components": components,
         "failed": failed,
         "critical_failed": critical,
+        "degraded": degraded,
     }
 
 

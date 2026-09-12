@@ -74,6 +74,35 @@
   <div class="card">Trades<br><b id="tr_trades">-</b></div>
   <div class="card">Wins<br><b id="tr_wins">-</b></div>
   <div class="card">Losses<br><b id="tr_losses">-</b></div>
+  <div class="card">Avg Win<br><b id="tr_avg_win">-</b></div>
+  <div class="card">Avg Loss<br><b id="tr_avg_loss">-</b></div>
+</div>
+
+<h4>風險調整後(第三十節 Agent 10)</h4>
+<p class="muted">
+  Sharpe 的無風險利率當 0 —— 期貨保證金不會拿去買國債,那個減項在這裡
+  沒有對應的機會成本。Sortino 的分母只算下檔波動:往上的波動不是風險。
+  兩者都需要至少 20 筆才算,不足時顯示「—」。
+</p>
+<div class="grid">
+  <div class="card">Sharpe<br><b id="tr_sharpe">-</b></div>
+  <div class="card">Sortino<br><b id="tr_sortino">-</b></div>
+  <div class="card">平均持倉<br><b id="tr_hold_avg">-</b></div>
+  <div class="card">持倉中位數<br><b id="tr_hold_median">-</b></div>
+</div>
+
+<h4>MFE / MAE</h4>
+<p class="muted">
+  MFE 是這筆交易最多曾經賺到多少,MAE 是最多曾經虧到多少。
+  <b>虧損單的 MAE 只比停損多一點點,代表停損設得太緊</b>;
+  獲利單的 MFE 遠大於實際獲利,代表利潤被吐回去了。
+  只有 migration 010 之後開的倉有這兩個數字 —— 沒量到的**不算成 0**。
+</p>
+<div class="grid">
+  <div class="card">平均 MFE<br><b id="tr_mfe">-</b></div>
+  <div class="card">平均 MAE<br><b id="tr_mae">-</b></div>
+  <div class="card">最差 MAE<br><b id="tr_worst_mae">-</b></div>
+  <div class="card">有量到<br><b id="tr_measured">-</b></div>
 </div>
 <div id="tr_note" class="muted"></div>
 
@@ -105,6 +134,6 @@
 <div class="card"><div id="st_table">載入中…</div></div>
 <div id="st_note" class="muted"></div>
 
-<script src="/static/js/trading.js?v=1"></script>
+<script src="/static/js/trading.js?v=2"></script>
 </body>
 </html>

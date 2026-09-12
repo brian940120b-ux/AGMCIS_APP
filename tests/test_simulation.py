@@ -505,7 +505,8 @@ class TestWebsocketDisconnect(unittest.TestCase):
              patch.object(health, "_risk_engine", lambda: True), \
              patch.object(health, "_trading_engine", lambda: True), \
              patch.object(health, "_agent_engine", lambda: True), \
-             patch.object(health, "_scheduler", lambda: True):
+             patch.object(health, "_scheduler", lambda: True), \
+             patch.object(health, "_news_calendar", lambda: health.OK):
             payload = health.build_health()
 
         self.assertEqual(payload["status"], "healthy")

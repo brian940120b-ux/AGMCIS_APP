@@ -106,26 +106,24 @@ def _account():
 # ---------------- Trading ----------------
 
 def _trading(trades):
+    """
+    第六十一節的 Trading 區塊,加上第三十節 Agent 10 要的
+    Sharpe / Sortino / MFE / MAE / Holding Time。
+
+    那五項原本只有回測算得出來,而回測答不出
+    「真正發生過的交易,報酬對得起它的波動嗎」。
+    """
     def run():
-        from agmcis.review.attribution import Bucket, closed_with_pnl
+        from agmcis.review import live_metrics
 
-        rows = closed_with_pnl(trades)
-
-        total = Bucket(key="all")
-        for trade in rows:
-            total.add(float(trade["pnl_usdt"]))
-
-        payload = total.to_dict()
+        payload = live_metrics.compute(trades)
         payload["mode"] = str(getattr(settings, "TRADING_MODE", "paper")).upper()
-        # 這一份的樣本夠不夠下結論。第二節:誠實的 55-65% 勝過造假的 75%,
-        # 而一份沒說樣本數的勝率,連誠不誠實都判斷不了。
-        payload["reliable"] = total.reliable
         return payload
 
     return _safe("trading", run, {
         "trades": 0, "wins": 0, "losses": 0, "win_rate": None,
-        "profit_factor": None, "expectancy": None, "net_pnl": None,
-        "reliable": False,
+        "profit_factor": None, "expectancy_usdt": None, "net_pnl": None,
+        "sharpe": None, "sortino": None, "reliable": False,
     })
 
 

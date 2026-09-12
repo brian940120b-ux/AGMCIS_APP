@@ -58,7 +58,7 @@
 | 二十七 | Signal Score | ✅ | `agmcis/signal/scorer.py` 0–100,權重可調且缺資料時分母縮減(不是給 0 分) |
 | 二十八 | Confidence | ✅ | `ConfidenceBand` 六級與 Master Prompt 完全一致 |
 | 二十九 | 不要強迫交易 | ✅ | `Direction.WAIT` 是合法結論;`Vote.ABSTAIN` 與 `Vote.WAIT` 分離 |
-| 三十 | Multi-Agent 架構 | ⚠️ | 有 12 個 Agent,但**角色與 Master Prompt 指定的 12 個不同**。缺 Quant Research、Sentiment、Execution、Portfolio Manager、Performance Analyst 這五個角色;Self Review 與 Supervisor 存在但不在 Agent registry 裡 |
+| 三十 | Multi-Agent 架構 | ✅ | 15 個投票 Agent + 6 個刻意**不是** Agent 的子系統。對照表在 `docs/AGENT_ROLES.md`,而且有測試在盯它沒說謊。Risk Manager / Execution / Supervisor / Portfolio / Quant Research / Performance Analyst 不投票:把 Risk Engine 變成一票,就是把第十九節的否決權降級成十五分之一的意見。Agent 10 缺的 Sharpe / Sortino / MFE / MAE / Holding Time 全部補上(`agmcis/review/live_metrics.py` + migration 010)|
 
 ## 三十一~四十:投票、回測、Lab
 
@@ -94,7 +94,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 五十一 | News Risk | ✅ | `agmcis/risk/news_risk.py`。已排程事件走時間窗封鎖(HIGH 不開新倉 / MEDIUM 倉位減半),未排程衝擊走標題關鍵字。日曆過期在模擬盤只警告,實單由 LIVE GATE 擋 |
+| 五十一 | News Risk | ✅ | `agmcis/risk/news_risk.py`。已排程事件走時間窗封鎖(HIGH 不開新倉 / MEDIUM 倉位減半),未排程衝擊走標題關鍵字。**日曆過期會主動說話**(`calendar_watch` 排程 + `/health` + Telegram,只在轉態時發),而不是等到想開實單被閘門擋住才發現。`scripts/calendar.py` 讓維護是一行指令,而且任何寫入都會重蓋時間戳 |
 | 五十二 | Opportunity Scanner | ✅ | `exchange_universe.py` 動態取得合約清單 + 流動性/量/波動度過濾,沒有寫死 symbol |
 | 五十三 | TOP 3 | ✅ | 首頁在沒有合格機會時顯示 NO HIGH QUALITY SETUP,並把掃過但沒入選的列出來。合格的定義是**共識層自己產生得出 TradeIntent**,不是比對一個 Agent 管線根本不產生的 score —— 那個 bug 讓首頁**永遠**顯示沒有機會,而那個畫面跟系統壞掉長得一樣 |
 | 五十四 | 每個訊號解釋原因 | ✅ | `Signal.reasons` + `/transparency` 顯示每個 Agent 的理由 |
@@ -109,7 +109,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 六十一 | Performance Dashboard | ✅ | `/trading` 的績效區照第六十一節的四塊排:Account / Trading / Risk / Strategy。**樣本不足的策略不參與 Best / Worst 排序**(少於 20 筆);排序用期望值不用總損益 —— 後者偏袒跑得比較多的策略。PF 沒有虧損單時是 None 不是無限大 |
+| 六十一 | Performance Dashboard | ✅ | `/trading` 的績效區照第六十一節的四塊排:Account / Trading / Risk / Strategy,並含 Sharpe / Sortino / MFE / MAE / 持倉時間。**樣本不足的策略不參與 Best / Worst 排序**(少於 20 筆);排序用期望值不用總損益 —— 後者偏袒跑得比較多的策略。PF 沒有虧損單時是 None 不是無限大 |
 | 六十二 | AI Agent Dashboard | ✅ | 首頁的 Agent 面板顯示每個 Agent 在做什麼與這一輪的票。活躍數是**實際有意見的**數量,不是寫死的 12/12 |
 | 六十三 | Agent Interaction Visualization | ⚠️ | `/api/agent_flow` 與 `/trading` 的決策鏈把 Agents → Consensus → Supervisor → Risk → Execution 五關逐關顯示:到了沒有、過了沒有、為什麼沒過。**沒有動畫**,而且關卡名稱用系統裡真的存在的那些 —— 把第六十三節示意的 Quant Agent 畫進去但系統裡沒有,是在編造。執行那一格永遠是灰的,預覽不下單 |
 | 六十四 | Database | ✅ | migration 007–009。ai_decisions / risk_events / audit_logs / market_regimes / trade_exits / strategies / backtests / backtest_runs / news / system_events / jobs 全部建好**而且有東西寫進去** —— 排程的 news_archive、strategy_mirror、回測任務、排程失敗事件。strategies 是**鏡像不是權威**:能不能下單看檔案,資料庫掛掉時「全部看起來是 LIVE」的方向是錯的。缺 users(單人系統,見九十七) |
@@ -177,13 +177,13 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 95 |
-| ⚠️ 部分做到 | 11 |
+| ✅ 已做到 | 96 |
+| ⚠️ 部分做到 | 10 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 11 節,以及為什麼
+## 還沒補完的 10 節,以及為什麼
 
-原本的 12 個「❌ 沒做」全部補完了。剩下的 11 個「部分做到」分成三類。
+原本的 12 個「❌ 沒做」全部補完了。剩下的 10 個「部分做到」分成兩類。
 **這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
 ### 一、刻意不做(4 節)
@@ -208,12 +208,6 @@
 | 一百零三 | 前六項達成。**Operationally Safe 要跑過真錢才算數** |
 | 一百零四 | 組合風險與相關性的程式碼在 `agmcis/risk/portfolio.py`,但沒有跑過真實的多倉情境 |
 | 一百零六 | 第 1–16 條達成。第 17 條「任何開倉都必須有風險保護」的六步驟緊急保護寫完了,但**沒有在真的下單失敗時觸發過** |
-
-### 三、規模或優先順序(1 節)
-
-| 節 | 缺什麼 |
-|---|---|
-| 三十 | 12 個 Agent 齊了,但 Macro Agent 只會投 WAIT —— 它沒有總經資料來源,而一個猜方向的總經 Agent 比沒有更糟 |
 
 ## 這些缺口要怎麼補
 

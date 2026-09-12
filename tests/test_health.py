@@ -32,6 +32,9 @@ def all_ok():
         "_trading_engine": lambda: True,
         "_agent_engine": lambda: True,
         "_scheduler": lambda: True,
+        # 事件日曆不走 _check()(它自己回三態,不是布林值),
+        # 所以要單獨換掉。
+        "_news_calendar": lambda: health.OK,
     }
 
 

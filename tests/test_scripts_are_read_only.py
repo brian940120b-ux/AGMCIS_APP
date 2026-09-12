@@ -37,6 +37,7 @@ READ_ONLY_SCRIPTS = [
 WRITES_BY_DESIGN = {
     "migrate.py": "跑資料庫 migration",
     "live_confirm.py": "寫 LIVE 確認檔(第九十二節)",
+    "calendar.py": "維護事件日曆(第五十一節)",
 }
 
 FORBIDDEN_CALLS = {

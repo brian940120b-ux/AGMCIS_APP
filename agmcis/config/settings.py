@@ -206,6 +206,9 @@ MIN_AGENT_CONFIDENCE = env_float("MIN_AGENT_CONFIDENCE", 0.0)
 # 策略清單鏡像(第六十四節)。這張表只是給人查的,落後一小時無所謂 ——
 # 判斷策略能不能下單走的是檔案,不是這張表。
 SCHEDULER_STRATEGY_MIRROR_INTERVAL = env_int("SCHEDULER_STRATEGY_MIRROR_INTERVAL", 3600)
+# 事件日曆保鮮監控(第五十一節)。日曆的有效期以天計,每小時檢查一次
+# 綽綽有餘 —— 重點不是即時,是「不要等到想開實單那天才發現它過期」。
+SCHEDULER_CALENDAR_WATCH_INTERVAL = env_int("SCHEDULER_CALENDAR_WATCH_INTERVAL", 3600)
 EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
 
 # 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,

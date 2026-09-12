@@ -191,15 +191,33 @@ function loadTrading(trading) {
     set("tr_win_rate", fmt(trading.win_rate), "%");
     /* PF 沒有虧損單時是 null,不是無限大。顯示「—」而不是「∞」。 */
     set("tr_pf", fmt(trading.profit_factor, 3));
-    set("tr_expectancy", fmt(trading.expectancy, 4));
+    set("tr_expectancy", fmt(trading.expectancy_usdt, 4));
     set("tr_trades", trading.trades);
     set("tr_wins", trading.wins);
     set("tr_losses", trading.losses);
+    set("tr_avg_win", fmt(trading.avg_win), " USDT");
+    set("tr_avg_loss", fmt(trading.avg_loss), " USDT");
+
+    /* Sharpe / Sortino 樣本不足時是 null。三筆算出來的 Sharpe 是一個
+       數字但不是一個結論 —— 顯示「—」比顯示 2.4 誠實。 */
+    set("tr_sharpe", fmt(trading.sharpe, 3));
+    set("tr_sortino", fmt(trading.sortino, 3));
+    set("tr_hold_avg", fmt(trading.avg_holding_hours, 1), " 小時");
+    set("tr_hold_median", fmt(trading.median_holding_hours, 1), " 小時");
+
+    set("tr_mfe", fmt(trading.avg_mfe_pct), "%");
+    set("tr_mae", fmt(trading.avg_mae_pct), "%");
+    set("tr_worst_mae", fmt(trading.worst_mae_pct), "%");
+    /* 十筆裡只有兩筆有 MFE 的時候,那個平均值不代表這個系統。 */
+    set("tr_measured", trading.measured === undefined ? null
+        : `${trading.measured} / ${trading.total}`);
 
     render("tr_note", trading.reliable
-        ? `模式 ${esc(trading.mode || "?")}。樣本足夠。`
+        ? `模式 ${esc(trading.mode || "?")}。樣本足夠(至少 ${
+            esc(trading.min_sample)} 筆)。`
         : `<span class="unreliable">模式 ${esc(trading.mode || "?")}。
-           <b>樣本不足,這一排的數字不足以下結論。</b></span>`);
+           <b>樣本不足(少於 ${esc(trading.min_sample)} 筆),
+           這幾排的數字不足以下結論。</b></span>`);
 }
 
 function loadRisk(risk) {

@@ -26,8 +26,35 @@ git pull
 .venv/bin/python scripts/migrate.py
 ```
 
-Migration 現在到 `009_research_tables.sql`。**先跑 migration 再重啟
+Migration 現在到 `010_excursions.sql`。**先跑 migration 再重啟
 服務** —— 新程式碼配舊 schema 會在第一次查詢時炸掉。
+
+010 加的是 MFE / MAE 兩欄(第三十節 Agent 10)。跑完之後
+position_monitor 會開始記錄每一筆持倉「最多曾經賺到多少 / 虧到多少」,
+而那兩個數字回答一個總損益答不出來的問題:**停損是不是設得太緊。**
+Migration 之前開的倉沒有這些數字,統計會把它們排除而不是當成 0。
+
+```
+.venv/bin/python scripts/calendar.py
+```
+
+事件日曆的狀態(第五十一節)。**現在一定是紅的** —— 檔案還沒建立。
+日曆是人工維護的:FOMC 的日期是公布的不是算出來的,CPI 與 NFP 會因為
+假日與日光節約時間移動,所以我不會替你生一份。從官方來源複製:
+
+    FOMC       federalreserve.gov 的 FOMC calendar
+    CPI / PPI  bls.gov 的 release schedule
+    NFP        bls.gov 的 Employment Situation release schedule
+
+然後一筆一筆加(時間用 UTC):
+
+```
+.venv/bin/python scripts/calendar.py --add "FOMC 利率決議" <UTC時間> HIGH --before 60 --after 90
+```
+
+日曆沒建立或過期(超過七天)時,消息面風險那一層**沒有在保護任何東西**——
+FOMC 當天系統會照常開倉。排程每小時檢查一次,狀態改變時會發 Telegram,
+`/health` 也看得到。
 
 ```
 .venv/bin/python scripts/verify_bingx.py --write-specs

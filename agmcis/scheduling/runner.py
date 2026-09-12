@@ -274,6 +274,24 @@ def _job_news_archive():
     )
 
 
+def _job_calendar_watch():
+    """
+    事件日曆保鮮(第五十一節)。
+
+    日曆是人工維護的,而它過期之後系統會安靜地少一層保護:
+    Macro Agent 從「沒有事件」變成「不知道有沒有事件」而棄權,
+    但那在投票畫面上看起來一樣。這個工作讓那件事會主動說話。
+    """
+    from agmcis.risk.calendar_watch import run_calendar_watch
+
+    return Job(
+        name="calendar_watch",
+        run=run_calendar_watch,
+        interval_seconds=settings.SCHEDULER_CALENDAR_WATCH_INTERVAL,
+        tags=["risk"],
+    )
+
+
 def _job_strategy_mirror():
     """
     策略清單鏡像(第六十四節)。
@@ -409,14 +427,14 @@ JOB_SETS = {
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_rate_limit_cleanup, _job_config_audit, _job_drift_monitor,
         _job_pending_orders, _job_research_loop, _job_news_archive,
-        _job_strategy_mirror, _job_auto_trader, _job_opportunity_scanner,
-        _job_daily_report,
+        _job_strategy_mirror, _job_calendar_watch, _job_auto_trader,
+        _job_opportunity_scanner, _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_rate_limit_cleanup, _job_config_audit, _job_drift_monitor,
-        _job_pending_orders,
+        _job_pending_orders, _job_calendar_watch,
     ],
     JOB_SET_OPPORTUNITY: [_job_opportunity_scanner],
     JOB_SET_TRADER: [_job_auto_trader, _job_daily_report],

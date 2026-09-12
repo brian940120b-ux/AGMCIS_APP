@@ -175,6 +175,80 @@ def _intrabar_range(symbol):
     return max(highs), min(lows), (float(first_open) if first_open else None)
 
 
+def _excursion(signal, entry_price, leverage, high, low, price):
+    """
+    這一輪的最大有利 / 不利偏移(%,已含槓桿)。
+
+    用 K 棒的 high / low 而不是輪詢當下的價格 —— 兩次輪詢之間走到過
+    的極端值才是 MFE / MAE 想量的東西。與停損判定用同一份資料,
+    所以兩者不會互相矛盾(價格「碰到過」停損但 MAE 說沒有)。
+
+    拿不到 K 棒時退回單一價格:量到的會比真實值保守
+    (MFE 偏小、MAE 偏小),而保守的方向在這裡是安全的 ——
+    它會讓「停損設得太緊」這個結論比較不容易成立,不會反過來。
+
+    回傳 (有利%, 不利%)。算不出來回 (None, None) —— 不是 (0, 0),
+    因為 0 代表「量過而且是零」。
+    """
+    try:
+        entry = float(entry_price)
+        lev = float(leverage or 1)
+    except (TypeError, ValueError):
+        return None, None
+
+    if entry <= 0:
+        return None, None
+
+    best = high if high is not None else price
+    worst = low if low is not None else price
+
+    if is_long(signal):
+        favourable = (float(best) - entry) / entry
+        adverse = (float(worst) - entry) / entry
+    elif is_short(signal):
+        # 做空的有利方向是價格往下,所以 best 與 worst 對調。
+        favourable = (entry - float(worst)) / entry
+        adverse = (entry - float(best)) / entry
+    else:
+        return None, None
+
+    # 有利不會是負的、不利不會是正的 —— 一根完全在進場價之上的
+    # K 棒,對做多而言 MAE 是 0(從來沒有虧過),不是一個正數。
+    return (
+        round(max(favourable, 0.0) * lev * 100, 6),
+        round(min(adverse, 0.0) * lev * 100, 6),
+    )
+
+
+def _track_excursion(trade, signal, high, low, price):
+    """
+    把這一輪的偏移寫進資料庫。
+
+    **失敗不影響停損檢查。** 這是一個統計欄位,而停損是保護 ——
+    一個因為寫不了統計而跳過停損檢查的監控,比沒有統計糟得多。
+    """
+    trade_id = trade.get("id")
+    if trade_id is None:
+        return
+
+    favourable, adverse = _excursion(
+        signal, trade.get("entry_price"), trade.get("leverage"),
+        high, low, price,
+    )
+    if favourable is None:
+        return
+
+    try:
+        from database_service import update_excursion
+        update_excursion(trade_id, favourable, adverse)
+    except Exception as exc:
+        # migration 010 還沒跑的環境會走到這裡。不能安靜(第九十四節)。
+        logger.warning(
+            "Position Monitor | EXCURSION_WRITE_FAILED | %s | %s: %s",
+            trade.get("symbol"), type(exc).__name__, exc,
+        )
+
+
 def run_position_monitor(notify=True):
     open_trades = get_open_trades()
 
@@ -220,6 +294,11 @@ def run_position_monitor(notify=True):
             "high": high, "low": low,
             "intrabar": high is not None,
         })
+
+        # MFE / MAE(第三十節 Agent 10)。在出場判定**之前**記 ——
+        # 一筆這一輪被停損的交易,它的 MAE 也要含這一輪的極端值,
+        # 否則「停損是不是設得太緊」那個問題會少掉最關鍵的一筆資料。
+        _track_excursion(trade, signal, high, low, price)
 
         reason, liquidated, fill = _exit_reason(
             signal, price, stoploss, takeprofit, liquidation_price,
