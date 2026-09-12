@@ -193,6 +193,13 @@ SCHEDULER_DRIFT_MONITOR_INTERVAL = env_int("SCHEDULER_DRIFT_MONITOR_INTERVAL", 3
 # 研究循環。一天一次就夠 —— 它的輸入是自我檢討,
 # 而自我檢討的輸入是已平倉交易,那個數字不會在幾小時內有意義地改變。
 SCHEDULER_RESEARCH_INTERVAL = env_int("SCHEDULER_RESEARCH_INTERVAL", 86400)
+# 新聞歸檔(第六十四節)。RSS 來源只給最近幾則,抓得比那個更新速度慢
+# 就會漏掉中間的。十五分鐘是「不會漏」與「不會一直對別人的伺服器發請求」
+# 之間的折衷。
+SCHEDULER_NEWS_ARCHIVE_INTERVAL = env_int("SCHEDULER_NEWS_ARCHIVE_INTERVAL", 900)
+# 策略清單鏡像(第六十四節)。這張表只是給人查的,落後一小時無所謂 ——
+# 判斷策略能不能下單走的是檔案,不是這張表。
+SCHEDULER_STRATEGY_MIRROR_INTERVAL = env_int("SCHEDULER_STRATEGY_MIRROR_INTERVAL", 3600)
 EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
 
 # 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,

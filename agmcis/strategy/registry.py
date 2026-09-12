@@ -121,6 +121,11 @@ class StrategyRegistry:
         return enabled, disabled
 
     @property
+    def strategies(self):
+        """註冊的策略物件。回傳複本 —— 外面拿到的清單改了不該影響註冊表。"""
+        return list(self._strategies)
+
+    @property
     def names(self):
         return [s.name for s in self._strategies]
 

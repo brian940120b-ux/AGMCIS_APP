@@ -37,7 +37,7 @@
 | 十一 | Market Data Engine | ✅ | Mark / Index Price、Long/Short 比、爆倉資料都有(交易所不支援回 None,**不回 1.0**);OrderBookAgent 與 OrderFlow 策略真的在用訂單簿 |
 | 十二 | Trading Rules Engine | ✅ | `agmcis/execution/rules_engine.py`,tick/step/minQty/minNotional 全部套用,且只會讓部位更保守 |
 | 十三 | Order Types | ✅ | MARKET 立即成交;LIMIT / STOP / TAKE_PROFIT 進 `agmcis/execution/pending.py` 的掛單簿,由排程檢查觸價。掛單有有效期 —— 一張掛三天的單當初的訊號早就過期了 |
-| 十四 | Long / Short | ⚠️ | 開多/開空/全平/減倉有。**缺**:Add Position(加倉)、Reverse Position(反手)沒有實作 |
+| 十四 | Long / Short | ✅ | 開多/開空/全平/減倉/加倉/反手都有。反手是**先平再開**,平不掉就不開 —— 一個「開了新倉但舊倉還在」的反手,是同時持有兩個方向 |
 | 十五 | Order State Machine | ✅ | `agmcis/execution/state_machine.py`,含 UNKNOWN 不得重下單的規則;`test_execution_engine.py` 釘住 |
 | 十六 | Client Order ID | ✅ | `agmcis/execution/client_order_id.py` |
 | 十七 | Position Reconciliation | ✅ | `agmcis/execution/reconciliation.py` + `orders` / `order_events` 表 |
@@ -112,7 +112,7 @@
 | 六十一 | Performance Dashboard | ⚠️ | Equity / PnL / Win Rate / PF / Expectancy / Drawdown 有。**缺 Best/Worst Strategy、逐策略勝率與 PF 的 UI** |
 | 六十二 | AI Agent Dashboard | ✅ | 首頁的 Agent 面板顯示每個 Agent 在做什麼與這一輪的票。活躍數是**實際有意見的**數量,不是寫死的 12/12 |
 | 六十三 | Agent Interaction Visualization | ⚠️ | 有 Agent 面板與逐 Agent 的 WHY 展開,**沒有動畫節點圖**。動畫在這個系統的優先順序很低 —— 第六十三節自己也說「UI Animation 不得影響交易核心」 |
-| 六十四 | Database | ⚠️ | 13 張表。新增 ai_decisions / risk_events / audit_logs / market_regimes / trade_exits。**仍缺 users、strategies、backtests、news 等** —— 那些目前不在交易路徑上 |
+| 六十四 | Database | ✅ | migration 007–009。ai_decisions / risk_events / audit_logs / market_regimes / trade_exits / strategies / backtests / backtest_runs / news / system_events / jobs 全部建好**而且有東西寫進去** —— 排程的 news_archive、strategy_mirror、回測任務、排程失敗事件。strategies 是**鏡像不是權威**:能不能下單看檔案,資料庫掛掉時「全部看起來是 LIVE」的方向是錯的。缺 users(單人系統,見九十七) |
 | 六十五 | Audit Log | ✅ | 登入、系統暫停 / 恢復、策略狀態變更、Kill Switch、設定變更全部進 `audit_logs`。登入稽核**不記金鑰的任何片段** |
 | 六十六 | Observability | ✅ | `/health` 不需金鑰(外部監控不會帶金鑰),九個元件狀態,unhealthy 回 503。只回狀態不回內容 —— 錯誤細節留在需要金鑰的端點與 log |
 | 六十七 | Testing | ✅ | `tests/test_simulation.py` 覆蓋第六十七節列的九種情況。它們問的不是「算得對不對」,是**「這個東西壞掉時系統往哪一邊倒」** |
@@ -143,7 +143,7 @@
 | 八十二 | Docker / Deployment | ⚠️ | Dockerfile + compose(非 root、健康檢查打 `/health`、排程與 Web 分開容器)。**Production 仍在 systemd 上** —— 第八十二節也說「不要破壞目前正在運作的 Production」,切換要是一次有計畫的遷移 |
 | 八十三 | Deployment Strategy | ⚠️ | 五個環境的定義與 compose 都在,**staging 實際上還沒架起來** |
 | 八十四 | Secrets | ✅ | 全部走環境變數,`test_access_control.py` 釘住 |
-| 八十五 | API Design | ⚠️ | 補上 `/api/signals`、`/api/positions`、`/api/risk`、`/api/trade_journal`、`/api/decisions`、`/api/why/{id}`。**缺 `/api/backtest` 與 `/api/paper`** —— 那兩個是長時間的動作,做成 HTTP 端點會變成一個會逾時的請求,目前走腳本 |
+| 八十五 | API Design | ✅ | `/api/backtest` 與 `/api/paper` 做成**任務式**端點(POST 送出 → 拿 job_id → GET `/api/jobs/{id}` 查),不是會逾時的同步請求。一次只跑一個 —— 併發回測會讓停損檢查延遲,而那是拿真錢換一份報告。查詢類再補 `/api/system_events`、`/api/backtests`、`/api/news`、`/api/strategies` |
 | 八十六 | Frontend Dashboard | ✅ | 首頁 + 完整儀表板 + 透明度面板。Top Opportunities、News、AI Agents 三個區塊都有 |
 | 八十七 | Trading Panel | ⚠️ | 有持倉表格,**沒有開倉前的 Entry/SL/TP/Leverage/Size/R:R 預覽面板** |
 | 八十八 | Open Position Panel | ✅ | Dashboard 表格含 Entry/Current/SL/TP/Leverage/Notional/PnL/PnL% |
@@ -177,50 +177,45 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 84 |
-| ⚠️ 部分做到 | 22 |
+| ✅ 已做到 | 93 |
+| ⚠️ 部分做到 | 13 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 22 節,以及為什麼
+## 還沒補完的 13 節,以及為什麼
 
-原本的 12 個缺口全部補完了。剩下的 22 個「部分做到」分成三類:
+原本的 12 個「❌ 沒做」全部補完了。剩下的 13 個「部分做到」分成三類。
+**這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
 ### 一、刻意不做(4 節)
 
 | 節 | 為什麼 |
 |---|---|
-| 八 | BingX Adapter 不拆成 12 個檔。第九十七節:能用就保留 |
-| 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點 |
-| 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」,而動畫在這個系統的優先順序很低 |
-| 八十二 | Production 仍在 systemd 上。第八十二節也說「不要破壞目前正在運作的 Production」 |
+| 八 | BingX Adapter 不拆成 12 個檔。第九十七節:能用就保留。拆檔會動到唯一一條真的會送出訂單的路徑,而那條路徑現在是對的 |
+| 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」。投票、理由、棄權原因都看得到,只是不會動 |
+| 八十二 | Production 仍在 systemd 上。Dockerfile 與 compose 都寫好了,但第八十二節也說「不要破壞目前正在運作的 Production」 |
+| 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准的是 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點。狀態看得到,開關要人去 VPS 上跑腳本 |
 
-### 二、需要外部資料或真實環境才能做(7 節)
+### 二、需要真實環境或真錢才能算數(5 節)
+
+這五節的程式碼都寫完了。它們留在 ⚠️ 是因為**沒有跑過真實資料或真錢的東西不能宣稱做到**
+(第二節、第九十九節)。
+
+| 節 | 還缺什麼 |
+|---|---|
+| 三十八 | OrderFlow 是**代理指標**。真正的 order flow 需要逐筆成交,這裡用訂單簿失衡 + 量能確認近似,所以門檻高、信心上限 65。要升級需要 BingX 的逐筆資料 |
+| 五十六 | 1R / 2R / 3R 與 30/30/40 是**起點不是結論**。要用真實 K 棒回測才知道該調成什麼 —— 而這個容器連不到 BingX |
+| 八十三 | staging 環境還沒實際架起來。設定分離做完了(五個環境),但沒有第二台機器 |
+| 一百零四 | 組合風險與相關性的程式碼在 `agmcis/risk/portfolio.py`,但沒有跑過真實的多倉情境 |
+| 一百零六 | 第 1–16 條達成。第 17 條「任何開倉都必須有風險保護」的六步驟緊急保護寫完了,但**沒有在真的下單失敗時觸發過** |
+
+### 三、規模或優先順序(4 節)
 
 | 節 | 缺什麼 |
 |---|---|
-| 十一 | Long/Short 比、爆倉資料 —— BingX 不一定提供;Order Book 可取得但沒有 Agent 使用 |
-| 三十八 | Order Flow 策略 —— 需要逐筆成交資料,K 棒推不出來 |
-| 四十九 | BingX 行情 WebSocket —— 目前的 WebSocket 只用於 Dashboard 推播 |
-| 五十六 | TP/SL 參數還沒經過回測驗證。1R/2R/3R 與 30/30/40 是起點不是結論 |
-| 八十三 | staging 環境還沒實際架起來 |
-| 一百零四 | Portfolio 分支的實盤驗證 |
-| 一百零六 | 第十五條「任何開倉都必須有風險保護」的實盤驗證 |
-
-### 三、規模或優先順序問題(11 節)
-
-| 節 | 缺什麼 |
-|---|---|
-| 一 | Order Book 分析、Macro Event、Sentiment 分析 |
-| 十三 | LIMIT / STOP / TRAILING_STOP 訂單型別定義好了但執行層只走 MARKET |
-| 十四 | 加倉(Add Position)與反手(Reverse Position) |
-| 四十二 | Self Learning 沒有正式的 PROPOSE CHANGE 流程物件 |
-| 六十一 | 逐策略勝率與 PF 的 UI |
-| 六十四 | users / strategies / backtests / news 等表(目前不在交易路徑上) |
-| 七十七 | Research Loop 沒有串成自動循環 |
-| 八十五 | `/api/backtest` 與 `/api/paper`(長時間動作,做成 HTTP 會逾時) |
-| 八十七 | 開倉前的 Entry/SL/TP 預覽面板 |
-| 九十五 | 根目錄舊模組仍有 God Function 與重複邏輯 |
-| 一百零三 | 全部達成,但「Operationally Safe」要跑過真錢才算數 |
+| 三十 | 12 個 Agent 齊了,但 Macro Agent 只會投 WAIT —— 它沒有總經資料來源,而一個猜方向的總經 Agent 比沒有更糟 |
+| 六十一 | 逐策略勝率與 PF 有 API(`/api/strategy_health`),沒有專屬的 UI 頁面 |
+| 八十七 | 開倉前的 Entry / SL / TP 預覽面板。數字都算得出來,缺的是把它們放進一個下單前的畫面 |
+| 九十五 | 根目錄舊模組仍有 God Function 與重複邏輯。新路徑全部在 `agmcis/` 底下,舊檔案是 shim,但 shim 背後的 dashboard 相關模組還沒重寫 |
 
 ## 明確不做的事
 

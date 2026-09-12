@@ -957,3 +957,237 @@ def get_audit_logs(limit=50):
         "before_value": row[3], "after_value": row[4], "detail": row[5],
         "created_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
     } for row in rows]
+
+
+# ---------------- 研究與觀測用的表(第六十四節)----------------
+#
+# ⚠️ 這一批**不在下單路徑上**。交易照樣會發生,只是沒有地方查
+#    歷史研究紀錄。所以讀取端全部容忍表不存在 —— 一個還沒跑
+#    migration 的環境不該因此無法交易。
+
+def insert_news(items):
+    """
+    存新聞。同一則會在多次輪詢裡重複出現,靠標題的唯一索引擋掉。
+
+    存下來是為了事後能回答「那天到底發生了什麼」——
+    RSS 來源不保留歷史,當下沒存就永遠拿不回來了。
+
+    回傳實際新增幾筆。
+    """
+    if not items:
+        return 0
+
+    inserted = 0
+    with transaction() as cur:
+        for item in items:
+            title = (item.get("title") or "").strip()
+            if not title:
+                continue
+
+            cur.execute(
+                """
+                INSERT INTO news
+                    (title, source, url, sentiment, impact, score,
+                     affected_symbols)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (md5(title)) DO NOTHING
+                RETURNING id;
+                """,
+                (
+                    title, item.get("source"), item.get("url"),
+                    item.get("sentiment") or item.get("direction"),
+                    item.get("impact"), item.get("score"),
+                    Json(item.get("affected_symbols"))
+                    if item.get("affected_symbols") else None,
+                ),
+            )
+            if cur.fetchone() is not None:
+                inserted += 1
+
+    return inserted
+
+
+def insert_system_event(event_type, severity="INFO", source=None,
+                        detail=None, payload=None):
+    """
+    系統事件。與 audit_logs 的差別:那張表記「誰做了什麼」,
+    這張記「發生了什麼」。
+    """
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO system_events
+                (event_type, severity, source, detail, payload)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (event_type, severity, source, detail,
+             Json(payload) if payload else None),
+        )
+        return cur.fetchone()[0]
+
+
+def get_system_events(limit=50):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT event_type, severity, source, detail, created_at "
+            "FROM system_events ORDER BY id DESC LIMIT %s;",
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+
+    return [{
+        "event_type": row[0], "severity": row[1], "source": row[2],
+        "detail": row[3],
+        "created_at": row[4].strftime("%Y-%m-%d %H:%M:%S") if row[4] else None,
+    } for row in rows]
+
+
+def upsert_strategy(name, status, description=None, suitable_regimes=None,
+                    needs_candles=False, needs_order_book=False):
+    """
+    策略註冊表。
+
+    ⚠️ **生命週期狀態的權威來源仍然是檔案**
+    (agmcis/strategy/health.py)。理由:資料庫掛掉時
+    「所有策略看起來都是 LIVE」是錯誤的方向。
+
+    這張表是給人查的鏡像,不是判斷依據 —— 沒有任何程式碼會讀它
+    來決定策略能不能下單。
+    """
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO strategies
+                (name, status, description, suitable_regimes,
+                 needs_candles, needs_order_book, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (name) DO UPDATE SET
+                status = EXCLUDED.status,
+                description = EXCLUDED.description,
+                suitable_regimes = EXCLUDED.suitable_regimes,
+                needs_candles = EXCLUDED.needs_candles,
+                needs_order_book = EXCLUDED.needs_order_book,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id;
+            """,
+            (name, status, description,
+             Json(list(suitable_regimes)) if suitable_regimes else None,
+             bool(needs_candles), bool(needs_order_book)),
+        )
+        return cur.fetchone()[0]
+
+
+def insert_backtest(run_id, metrics, strategy=None, symbol=None,
+                    timeframe=None, candles=None, config=None,
+                    verdict=None, synthetic=False):
+    """
+    一次回測的結果。
+
+    `synthetic=True` 代表 K 棒是合成的 —— 那時候任何 PASS 都只證明
+    管線接得起來,不證明策略有優勢。這個欄位讓它們不會混進
+    「策略有沒有優勢」的統計。
+    """
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO backtests
+                (run_id, strategy, symbol, timeframe, candles,
+                 config, metrics, verdict, synthetic)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (run_id) DO NOTHING
+            RETURNING id;
+            """,
+            (run_id, strategy, symbol, timeframe, candles,
+             Json(config) if config else None,
+             Json(metrics) if metrics else None,
+             verdict, bool(synthetic)),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def get_backtests(limit=20, strategy=None, include_synthetic=False):
+    """
+    歷史回測。**預設排除合成資料的結果** ——
+    把它們混進來會讓「這個策略通過過幾次」變成一個沒有意義的數字。
+    """
+    conn = get_connection()
+    clauses, params = [], []
+
+    if strategy:
+        clauses.append("strategy = %s")
+        params.append(strategy)
+    if not include_synthetic:
+        clauses.append("synthetic = FALSE")
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(int(limit))
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT run_id, strategy, symbol, timeframe, candles, "
+            f"metrics, verdict, synthetic, created_at "
+            f"FROM backtests {where} ORDER BY id DESC LIMIT %s;",
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+    return [{
+        "run_id": row[0], "strategy": row[1], "symbol": row[2],
+        "timeframe": row[3], "candles": row[4], "metrics": row[5],
+        "verdict": row[6], "synthetic": row[7],
+        "created_at": row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else None,
+    } for row in rows]
+
+
+def get_news(limit=30):
+    """
+    歸檔的新聞。**這是紀錄,不是訊號** —— 消息面風險走
+    agmcis/risk/news_risk.py,那條路徑不讀這張表。
+    """
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT title, source, url, sentiment, impact, score, "
+            "affected_symbols, created_at "
+            "FROM news ORDER BY id DESC LIMIT %s;",
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+
+    return [{
+        "title": row[0], "source": row[1], "url": row[2],
+        "sentiment": row[3], "impact": row[4],
+        "score": float(row[5]) if row[5] is not None else None,
+        "affected_symbols": row[6],
+        "created_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
+    } for row in rows]
+
+
+def get_strategies():
+    """
+    策略鏡像。
+
+    ⚠️ **不要拿這個判斷策略能不能下單。** 權威來源是檔案
+    (agmcis/strategy/health.py)—— 資料庫掛掉時
+    「所有策略看起來都是 LIVE」是錯誤的方向。
+
+    `updated_at` 讓鏡像落後多久看得見。
+    """
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT name, status, description, suitable_regimes, "
+            "needs_candles, needs_order_book, updated_at "
+            "FROM strategies ORDER BY name;"
+        )
+        rows = cur.fetchall()
+
+    return [{
+        "name": row[0], "status": row[1], "description": row[2],
+        "suitable_regimes": row[3],
+        "needs_candles": row[4], "needs_order_book": row[5],
+        "updated_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
+    } for row in rows]

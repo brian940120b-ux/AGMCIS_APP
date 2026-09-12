@@ -72,6 +72,7 @@ from api.analytics import router as analytics_router
 from api.auto_trader import router as auto_trader_router
 from api.dashboard import router as dashboard_router
 from api.health import router as health_router
+from api.jobs import router as jobs_router
 from api.overview import router as overview_router
 from api.equity import router as equity_router
 from api.journal import router as journal_router
@@ -102,6 +103,7 @@ for _router in (
     system_health_router,
     transparency_router,
     overview_router,
+    jobs_router,
 ):
     app.include_router(_router, dependencies=PROTECTED)
 

@@ -392,6 +392,152 @@ def _audit_logs(limit=30):
     return _safe("audit_logs", run, {"entries": []})
 
 
+@router.get("/api/system_events")
+def api_system_events(limit: int = Query(50, ge=1, le=200)):
+    return _system_events(limit=limit)
+
+
+def _system_events(limit=50):
+    """
+    系統事件(第六十四節)。與稽核紀錄的分工:
+    audit_logs 記「誰做了什麼」,這裡記「發生了什麼」——
+    排程工作壞掉、恢復、系統啟動。
+
+    這兩種東西混在同一張表會讓「誰改的」變得很難查,
+    因為程式產生的事件數量遠大於人做的動作。
+    """
+    def run():
+        from database_service import get_system_events
+        events = get_system_events(limit=limit)
+        return {
+            "events": events,
+            "error_count": sum(
+                1 for e in events if e.get("severity") in ("ERROR", "CRITICAL")
+            ),
+        }
+
+    return _safe("system_events", run, {"events": [], "error_count": 0})
+
+
+@router.get("/api/backtests")
+def api_backtests(limit: int = Query(20, ge=1, le=100),
+                  strategy: str = Query(None),
+                  include_synthetic: bool = Query(False)):
+    return _backtests(
+        limit=limit, strategy=strategy, include_synthetic=include_synthetic,
+    )
+
+
+def _backtests(limit=20, strategy=None, include_synthetic=False):
+    """
+    歷史回測(第六十四節)。
+
+    **預設排除合成資料的結果。** 合成 K 棒跑出來的 PASS 只證明
+    管線接得起來,不證明策略有優勢 —— 把它們混進來,
+    「這個策略通過過幾次」就變成一個沒有意義的數字。
+    要看的話 include_synthetic=true,而回傳的每一列都帶著標記。
+    """
+    def run():
+        from database_service import get_backtests
+        rows = get_backtests(
+            limit=limit, strategy=strategy,
+            include_synthetic=include_synthetic,
+        )
+        return {
+            "backtests": rows,
+            "include_synthetic": bool(include_synthetic),
+            # live 管線才是會下單的那一個。一個舊策略的 PASS
+            # 讀起來會跟它一樣,除非把數量分開講。
+            "live_pipeline_count": sum(
+                1 for r in rows
+                if (r.get("config") or {}).get("is_live_pipeline")
+            ),
+        }
+
+    return _safe("backtests", run, {
+        "backtests": [], "include_synthetic": bool(include_synthetic),
+        "live_pipeline_count": 0,
+    })
+
+
+@router.get("/api/news")
+def api_news(limit: int = Query(30, ge=1, le=200)):
+    return _news(limit=limit)
+
+
+def _news(limit=30):
+    """
+    歸檔的新聞(第六十四節)。
+
+    ⚠️ 這是**紀錄**,不是訊號。消息面風險走
+    agmcis/risk/news_risk.py,那條路徑自己抓標題、自己判斷,
+    不讀這張表。這裡只回答「那天到底發生了什麼」。
+    """
+    def run():
+        from database_service import get_news
+        rows = get_news(limit=limit)
+        return {
+            "news": rows,
+            "shock_count": sum(1 for r in rows if r.get("impact") == "SHOCK"),
+        }
+
+    return _safe("news", run, {"news": [], "shock_count": 0})
+
+
+@router.get("/api/strategies")
+def api_strategies():
+    return _strategies()
+
+
+def _strategies():
+    """
+    策略清單(第六十四節的 strategies 表)。
+
+    ⚠️ **這張表是鏡像,不是權威來源。** 判斷策略能不能下單走的是檔案
+    (agmcis/strategy/health.py),理由是資料庫掛掉時
+    「所有策略看起來都是 LIVE」是錯誤的方向。
+
+    所以這裡同時回兩份:資料庫裡的鏡像,與現在真正生效的那一份。
+    兩邊不一致代表鏡像落後了(排程一小時推一次)——
+    把差異列出來,不要只顯示其中一邊。
+    """
+    def run():
+        from agmcis.strategy.mirror import snapshot
+
+        live = {row["name"]: row["status"] for row in snapshot()}
+
+        mirrored, error = {}, None
+        try:
+            from database_service import get_strategies
+            mirrored = {row["name"]: row["status"] for row in get_strategies()}
+        except Exception as exc:
+            # 鏡像讀不到不影響「現在生效的是什麼」——
+            # 那一份是從檔案來的。
+            error = f"{type(exc).__name__}: {exc}"
+            logger.warning("策略鏡像讀取失敗 | %s", error)
+
+        stale = sorted(
+            name for name, status in live.items()
+            if name in mirrored and mirrored[name] != status
+        )
+
+        return {
+            # 生效中的那一份。UI 要顯示的是這個。
+            "effective": [
+                {"name": name, "status": status}
+                for name, status in sorted(live.items())
+            ],
+            "mirror_error": error,
+            "stale_in_mirror": stale,
+            "missing_from_mirror": sorted(set(live) - set(mirrored)),
+        }
+
+    return _safe("strategies", run, {
+        "effective": [], "mirror_error": None,
+        "stale_in_mirror": [], "missing_from_mirror": [],
+    })
+
+
 @router.get("/api/live_gate")
 def api_live_gate():
     return _live_gate()

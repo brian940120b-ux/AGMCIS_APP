@@ -42,20 +42,58 @@ class SchedulerRunner:
             if not job.is_due(now):
                 continue
 
+            was_failing = job.last_error is not None
+
             try:
                 result = job.run()
                 job.mark_success(result, now)
                 ran[job.name] = result
                 self._log_job(job, result)
+
+                if was_failing:
+                    self._event(
+                        "SCHEDULER_JOB_RECOVERED", "INFO", job.name,
+                        f"{job.name} 在 {job.error_count} 次失敗後恢復",
+                    )
             except Exception as exc:
                 job.mark_failure(exc, now)
                 ran[job.name] = {"error": str(exc)}
                 self.logger.exception("Scheduler | %s | FAILED | %s", job.name, exc)
 
+                # 只在「從正常變成失敗」時記事件。一個每分鐘失敗一次的
+                # 任務會在一天內寫進一千四百列,而那一千四百列講的是
+                # 同一件事 —— 值得記的是它什麼時候開始壞、什麼時候好。
+                if not was_failing:
+                    self._event(
+                        "SCHEDULER_JOB_FAILED", "ERROR", job.name,
+                        f"{type(exc).__name__}: {exc}",
+                    )
+
         if ran:
             self.write_status()
 
         return ran
+
+    def _event(self, event_type, severity, source, detail, payload=None):
+        """
+        寫一列系統事件(第六十四節的 system_events 表)。
+
+        這張表不在下單路徑上,而且寫入的時機正好是「有東西壞了」——
+        那時候壞掉的很可能就是資料庫本身。所以寫不進去只寫 log,
+        不往上拋:一個因為記不了「排程壞了」而讓排程器掛掉的機制,
+        比沒有這個機制更糟。
+        """
+        try:
+            from database_service import insert_system_event
+            insert_system_event(
+                event_type, severity=severity, source=source,
+                detail=detail, payload=payload,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Scheduler | EVENT_WRITE_FAILED | %s | %s: %s",
+                event_type, type(exc).__name__, exc,
+            )
 
     def _log_job(self, job, result):
         if isinstance(result, dict):
@@ -115,6 +153,11 @@ class SchedulerRunner:
         enabled = [j.name for j in self.jobs if j.enabled]
         self.logger.info(
             "Scheduler | START | tick=%ds | jobs=%s", self.tick_seconds, ", ".join(enabled),
+        )
+        self._event(
+            "SCHEDULER_START", "INFO", "scheduler",
+            f"tick={self.tick_seconds}s jobs={len(enabled)}",
+            payload={"jobs": enabled, "tick_seconds": self.tick_seconds},
         )
         self.write_status()
 
@@ -208,6 +251,43 @@ def _job_research_loop():
         name="research_loop",
         run=run_research_loop,
         interval_seconds=settings.SCHEDULER_RESEARCH_INTERVAL,
+        tags=["research"],
+    )
+
+
+def _job_news_archive():
+    """
+    新聞歸檔(第六十四節)。
+
+    它**不影響任何交易決策** —— 消息面風險走的是
+    agmcis/risk/news_risk.py,那條路徑自己抓標題、自己判斷,
+    不讀這張表。這個工作只負責把讀過的東西留下來,
+    因為 RSS 來源不保留歷史。
+    """
+    from agmcis.data.news_archive import archive_news
+
+    return Job(
+        name="news_archive",
+        run=archive_news,
+        interval_seconds=settings.SCHEDULER_NEWS_ARCHIVE_INTERVAL,
+        tags=["research"],
+    )
+
+
+def _job_strategy_mirror():
+    """
+    策略清單鏡像(第六十四節)。
+
+    鏡像會落後一個週期,而那是刻意的:狀態變更的路徑上多一個
+    資料庫寫入,等於多一個「策略停不下來」的失敗點。
+    判斷能不能下單走的永遠是檔案。
+    """
+    from agmcis.strategy.mirror import mirror_strategies
+
+    return Job(
+        name="strategy_mirror",
+        run=mirror_strategies,
+        interval_seconds=settings.SCHEDULER_STRATEGY_MIRROR_INTERVAL,
         tags=["research"],
     )
 
@@ -328,7 +408,9 @@ JOB_SETS = {
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_rate_limit_cleanup, _job_config_audit, _job_drift_monitor,
-        _job_pending_orders, _job_research_loop, _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
+        _job_pending_orders, _job_research_loop, _job_news_archive,
+        _job_strategy_mirror, _job_auto_trader, _job_opportunity_scanner,
+        _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
