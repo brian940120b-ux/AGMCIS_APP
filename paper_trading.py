@@ -31,6 +31,7 @@ from database_service import (
     get_open_trades,
     get_trades,
     insert_trade,
+    reduce_trade_atomic,
     update_account,
 )
 from agmcis.execution import paper_costs
@@ -222,6 +223,59 @@ def create_paper_trade(
             "entry_fee": round(entry_fee, 6),
             "status": "OPEN",
         },
+    }
+
+
+def reduce_paper_trade(symbol, fraction, exit_price, stage,
+                       reason="分批停利"):
+    """
+    分批平倉。部位縮掉 fraction,那一部分的損益當場結算入帳,
+    原本的交易列**繼續是 OPEN**。
+
+    這不是一筆新的交易。統計上把每一次分批都算成一筆已平倉交易,
+    勝率會衝到接近 100%(你永遠先收 TP1,虧的還開著)——
+    詳見 database_service.reduce_trade_atomic 的說明。
+    """
+    try:
+        exit_price = float(exit_price)
+    except (TypeError, ValueError):
+        return _fail(f"{symbol} 分批出場價異常 ({exit_price!r}),拒絕分批平倉")
+
+    if exit_price <= 0:
+        return _fail(f"{symbol} 分批出場價必須大於 0")
+
+    try:
+        result = reduce_trade_atomic(
+            symbol, fraction, exit_price, stage, reason,
+            costs=paper_costs.get_cost_model(symbol),
+        )
+    except ValueError as exc:
+        return _fail(f"{symbol} 分批平倉被拒:{exc}")
+
+    if result is None:
+        # 沒有倉位,或這個 stage 已經收過。兩者都不是錯誤。
+        return {
+            "success": False,
+            "message": f"{symbol} 沒有可分批平倉的持倉,或 TP{stage} 已經收過",
+            "already_done": True,
+        }
+
+    account = result.pop("account")
+
+    try:
+        from journal_service import log_close
+        log_close(
+            symbol, result["signal"], exit_price,
+            result["pnl_usdt"], None, f"{reason}(TP{stage})",
+        )
+    except Exception as exc:
+        logger.exception("Journal PARTIAL failed for %s: %s", symbol, exc)
+
+    return {
+        "success": True,
+        "message": f"分批平倉成功(TP{stage},收 {fraction:.0%})",
+        "exit": result,
+        "account": account,
     }
 
 

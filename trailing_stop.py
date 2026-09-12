@@ -1,80 +1,31 @@
 """
-Tier Trailing Stop。
+向下相容 shim。
 
-Phase 0.5 的修正:ROI 改用每筆交易的真實槓桿,不再一律當成 3x。
-槓桿算錯會直接讓 trailing 的觸發門檻整個偏掉。
+實作已移到 agmcis/execution/exit_plan.py。
+
+原本這裡是一套依 ROI 分級的百分比移動停損(ROI 20% 跟 2%、10% 跟 3%、
+5% 跟 4%)。它有兩個問題:
+
+  1. **只有百分比。** 第五十八節要求 ATR、百分比、結構型三種。
+     百分比停損在低波動標的上跟得太鬆、在高波動標的上跟得太緊,
+     因為它完全不知道這檔平常動多少。
+
+  2. **它看 ROI,而 ROI 含槓桿。** 同樣的價格變動,5 倍槓桿的 ROI 是
+     2 倍槓桿的 2.5 倍,所以同一檔標的會因為開倉時的槓桿不同而套用
+     不同的跟蹤距離 —— 那跟市場沒有關係。
+
+新的實作用 R 倍數(停損距離的倍數)當基準,而且分批停利、移到成本價、
+移動停損、時間出場走同一條判斷鏈,一次只做一個動作。
+
+新程式碼請直接用:
+    from agmcis.execution.exit_plan import run_exit_plans
 """
-from database_service import get_open_trades, update_trade_stoploss
-from direction import is_long, is_short
-from logger_service import logger
-from market_data import get_price
-from notifier import send_telegram
+from agmcis.execution.exit_plan import run_exit_plans
 
-def get_gap_percent(roi):
-    if roi >= 20:
-        return 2
-    if roi >= 10:
-        return 3
-    if roi >= 5:
-        return 4
-    return None
 
-def apply_trailing_stop():
-    trades = get_open_trades()
+def apply_trailing_stop(*args, **kwargs):
+    """舊名稱。行為已經不同了 —— 見模組說明。"""
+    return run_exit_plans(*args, **kwargs)
 
-    for t in trades:
-        symbol = t.get("symbol")
-        signal = t.get("signal")
-        entry = float(t.get("entry_price") or 0)
-        stoploss = float(t.get("stoploss") or 0)
 
-        if entry <= 0 or stoploss <= 0:
-            continue
-
-        price = get_price(symbol)
-        if not price:
-            continue
-
-        price = float(price)
-
-        leverage = float(t.get("leverage") or 1)
-
-        if is_long(signal):
-            roi = (price - entry) / entry * 100 * leverage
-            gap = get_gap_percent(roi)
-            if gap is None:
-                continue
-            new_stoploss = round(price * (1 - gap / 100), 6)
-            should_update = new_stoploss > stoploss
-
-        elif is_short(signal):
-            roi = (entry - price) / entry * 100 * leverage
-            gap = get_gap_percent(roi)
-            if gap is None:
-                continue
-            new_stoploss = round(price * (1 + gap / 100), 6)
-            should_update = new_stoploss < stoploss
-
-        else:
-            continue
-
-        roi = round(roi, 2)
-
-        if should_update:
-            update_trade_stoploss(symbol, new_stoploss)
-
-            send_telegram(
-                f"🔁 AGMCIS V52 Tier Trailing Stop\n\n"
-                f"幣種：{symbol}\n"
-                f"方向：{signal}\n"
-                f"現價：{price}\n"
-                f"ROI：{roi}%\n"
-                f"Trailing Gap：{gap}%\n"
-                f"原停損：{stoploss}\n"
-                f"新停損：{new_stoploss}"
-            )
-
-            logger.info("Trailing Stop | %s | SL %s -> %s | ROI=%s%% gap=%s%%", symbol, stoploss, new_stoploss, roi, gap)
-
-if __name__ == "__main__":
-    apply_trailing_stop()
+__all__ = ["apply_trailing_stop", "run_exit_plans"]

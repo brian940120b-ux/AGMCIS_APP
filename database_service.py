@@ -53,7 +53,10 @@ TRADE_COLUMNS = """
     agent_votes,
     market_regime,
     strategy,
-    confidence
+    confidence,
+    original_stoploss,
+    tp_stage,
+    realized_partial_usdt
 """
 
 # ⚠️ 這份欄位清單與 _row_to_trade() 的索引是綁死的。
@@ -103,6 +106,11 @@ def _row_to_trade(row):
         "market_regime": row[26],
         "strategy": row[27],
         "confidence": _f(row[28]),
+        # 第五十七節的分批停利。original_stoploss 是建倉當下的停損 ——
+        # 出場計畫的 R 倍數必須用它,用現在的停損算會讓目標一路往上飄。
+        "original_stoploss": _f(row[29]),
+        "tp_stage": int(row[30] or 0),
+        "realized_partial_usdt": _f(row[31]) or 0.0,
     }
 
 
@@ -317,21 +325,227 @@ def insert_trade(symbol, signal, entry_price, size_usdt, stoploss=None, takeprof
                     symbol, signal, entry_price, size_usdt, status,
                     stoploss, takeprofit, leverage, position_value, source, opened_at,
                     requested_entry_price, entry_fee, liquidation_price, cost_basis,
-                    agent_votes, market_regime, strategy, confidence
+                    agent_votes, market_regime, strategy, confidence,
+                    original_stoploss, original_position_value
                 )
                 VALUES (%s, %s, %s, %s, 'OPEN', %s, %s, %s, %s, %s, CURRENT_TIMESTAMP,
-                        %s, %s, %s, %s, %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
                 """,
                 (symbol, signal, entry_price, size_usdt, stoploss, takeprofit,
                  leverage, position_value, source,
                  requested_entry_price, entry_fee, liquidation_price, cost_basis,
                  Json(agent_votes) if agent_votes else None,
-                 market_regime, strategy, confidence),
+                 market_regime, strategy, confidence,
+                 # 建倉當下的停損與名目。停損會被移動、名目會被分批縮小,
+                 # 但 R 倍數與「這筆原本多大」都要用原始值算。
+                 stoploss, position_value),
             )
             return cur.fetchone()[0]
     except psycopg2.errors.UniqueViolation as exc:
         raise DuplicateOpenTradeError(f"{symbol} 已有 OPEN 倉位") from exc
+
+
+def reduce_trade_atomic(symbol, fraction, exit_price, stage, reason,
+                        costs=None, apply_slippage=True):
+    """
+    分批平倉(Master Prompt 第五十七節)。在單一 transaction 內把部位
+    縮掉 `fraction`,把那一部分的損益結算入帳,原本那一列**繼續是 OPEN**。
+
+    ## 為什麼不產生新的一列
+
+    如果每一次分批都變成一筆「已平倉交易」,勝率會衝到接近 100% ——
+    你永遠先收 TP1,而虧的那些還開著。那個數字不是勝率,是
+    「分批停利的第一階達成率」,兩者長得一樣但意思完全不同。
+
+    所以:
+      * 分批不動 accounts 的 trades / wins / losses,只動 balance。
+      * 已實現的部分記在 trades.realized_partial_usdt。
+      * 最後一腿平倉時,close_trade_atomic() 會把它加回去,
+        整筆交易才算一筆。
+
+    ## 冪等
+
+    stage 由 trade_exits 上的唯一索引擋住。一次重試或一次排程重疊
+    不會把 TP1 收兩次 —— 重複的 stage 會回 None(不是例外),
+    因為「已經收過了」不是錯誤。
+
+    回傳結算結果 dict;沒有 OPEN 倉位或 stage 已收過時回 None。
+    """
+    fraction = float(fraction)
+    if not 0 < fraction < 1:
+        raise ValueError(
+            f"分批比例必須介於 0 與 1 之間,收到 {fraction} —— "
+            f"要全平請用 close_trade_atomic()"
+        )
+
+    exit_price = float(exit_price)
+    if exit_price <= 0:
+        raise ValueError(f"{symbol} 分批出場價必須大於 0")
+
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT id, signal, entry_price, size_usdt, leverage,
+                   COALESCE(entry_fee, 0), position_value,
+                   EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(opened_at,
+                                                                    CURRENT_TIMESTAMP))),
+                   COALESCE(realized_partial_usdt, 0),
+                   COALESCE(tp_stage, 0),
+                   COALESCE(original_position_value, position_value)
+              FROM trades
+             WHERE symbol = %s AND status = 'OPEN'
+             ORDER BY id DESC
+             LIMIT 1
+               FOR UPDATE;
+            """,
+            (symbol,),
+        )
+        row = cur.fetchone()
+
+        if row is None:
+            return None
+
+        (trade_id, signal, entry_price, size_usdt, leverage,
+         entry_fee, position_value, held_seconds,
+         realized_partial, current_stage, original_notional) = row
+
+        entry_price = _f(entry_price) or 0.0
+        size_usdt = _f(size_usdt) or 0.0
+        leverage = _f(leverage) or DEFAULT_LEVERAGE
+        entry_fee = _f(entry_fee) or 0.0
+        notional = _f(position_value) or (size_usdt * leverage)
+        realized_partial = _f(realized_partial) or 0.0
+        current_stage = int(current_stage or 0)
+        hours_held = max(0.0, (_f(held_seconds) or 0.0) / 3600.0)
+
+        if entry_price <= 0:
+            raise ValueError(
+                f"{symbol} entry_price 異常 ({entry_price}),拒絕分批平倉"
+            )
+
+        if not is_directional(signal):
+            raise ValueError(f"{symbol} 方向無法辨識 ({signal!r}),拒絕分批平倉")
+
+        if int(stage) <= current_stage:
+            # 已經收過了。這不是錯誤 —— 重試與排程重疊都會走到這裡。
+            logger.info(
+                "Partial exit skipped | %s | stage %s 已經收過(目前 %s)",
+                symbol, stage, current_stage,
+            )
+            return None
+
+        requested_exit_price = exit_price
+        if costs is not None and apply_slippage:
+            exit_price = costs.exit_price(exit_price, is_long(signal))
+
+        closed_margin = size_usdt * fraction
+        closed_notional = notional * fraction
+
+        change = price_change_pct(signal, entry_price, exit_price)
+        gross_pnl = closed_margin * change * leverage
+
+        # 進場手續費按比例分攤到這一腿。剩下的留給後面的腿 ——
+        # 全部算在第一腿會讓 TP1 看起來比實際差,TP3 比實際好。
+        leg_entry_fee = entry_fee * fraction
+        leg_exit_fee = costs.fee(closed_notional) if costs is not None else 0.0
+        leg_funding = (
+            costs.funding_cost(closed_notional, hours_held, is_long(signal))
+            if costs is not None else 0.0
+        )
+
+        leg_pnl = gross_pnl - leg_entry_fee - leg_exit_fee - leg_funding
+
+        # 這一腿的虧損不可能超過它自己那一份保證金
+        if leg_pnl < -closed_margin:
+            leg_pnl = -closed_margin
+
+        cur.execute(
+            """
+            INSERT INTO trade_exits
+                (trade_id, symbol, stage, fraction, exit_price,
+                 closed_notional, gross_pnl_usdt, fee_usdt, pnl_usdt, reason)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (trade_id, stage) DO NOTHING
+            RETURNING id;
+            """,
+            (trade_id, symbol, int(stage), fraction, exit_price,
+             round(closed_notional, 8), round(gross_pnl, 4),
+             round(leg_entry_fee + leg_exit_fee + leg_funding, 8),
+             round(leg_pnl, 4), reason),
+        )
+
+        if cur.fetchone() is None:
+            # 唯一索引擋下來了 —— 另一條路徑同時收了同一個 stage。
+            logger.info(
+                "Partial exit skipped | %s | stage %s 已存在", symbol, stage,
+            )
+            return None
+
+        cur.execute(
+            """
+            UPDATE trades
+               SET size_usdt = %s,
+                   position_value = %s,
+                   entry_fee = %s,
+                   tp_stage = %s,
+                   realized_partial_usdt = %s
+             WHERE id = %s;
+            """,
+            (round(size_usdt - closed_margin, 8),
+             round(notional - closed_notional, 8),
+             round(entry_fee - leg_entry_fee, 8),
+             int(stage),
+             round(realized_partial + leg_pnl, 4),
+             trade_id),
+        )
+
+        cur.execute("""
+            SELECT balance, wins, losses, trades
+              FROM accounts
+             ORDER BY id DESC
+             LIMIT 1;
+        """)
+        acc = cur.fetchone()
+        balance, wins, losses, trades_count = (
+            (float(acc[0]), int(acc[1]), int(acc[2]), int(acc[3]))
+            if acc else (10000.0, 0, 0, 0)
+        )
+
+        # **只動餘額。** trades / wins / losses 一律不動 —— 見上面的說明。
+        balance += leg_pnl
+        _write_account(cur, balance, wins, losses, trades_count)
+
+        logger.info(
+            "Partial exit | %s | stage %s | 收 %.0f%% @ %s | 損益 %s USDT | %s",
+            symbol, stage, fraction * 100, exit_price, round(leg_pnl, 4), reason,
+        )
+
+        return {
+            "id": trade_id,
+            "symbol": symbol,
+            "signal": signal,
+            "stage": int(stage),
+            "fraction": fraction,
+            "exit_price": exit_price,
+            "requested_exit_price": requested_exit_price,
+            "closed_notional": round(closed_notional, 8),
+            "closed_margin": round(closed_margin, 8),
+            "gross_pnl_usdt": round(gross_pnl, 4),
+            "pnl_usdt": round(leg_pnl, 4),
+            "fee_usdt": round(leg_entry_fee + leg_exit_fee, 8),
+            "funding_usdt": round(leg_funding, 8),
+            "remaining_size_usdt": round(size_usdt - closed_margin, 8),
+            "remaining_notional": round(notional - closed_notional, 8),
+            "realized_partial_usdt": round(realized_partial + leg_pnl, 4),
+            "reason": reason,
+            "account": {
+                "balance": round(balance, 2),
+                "wins": wins,
+                "losses": losses,
+                "trades": trades_count,
+            },
+        }
 
 
 def close_trade_atomic(symbol, exit_price, close_reason, costs=None,
@@ -368,7 +582,9 @@ def close_trade_atomic(symbol, exit_price, close_reason, costs=None,
             SELECT id, signal, entry_price, size_usdt, leverage,
                    COALESCE(entry_fee, 0), position_value,
                    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(opened_at,
-                                                                    CURRENT_TIMESTAMP)))
+                                                                    CURRENT_TIMESTAMP))),
+                   COALESCE(realized_partial_usdt, 0),
+                   COALESCE(original_position_value, position_value)
               FROM trades
              WHERE symbol = %s AND status = 'OPEN'
              ORDER BY id DESC
@@ -383,7 +599,10 @@ def close_trade_atomic(symbol, exit_price, close_reason, costs=None,
             return None
 
         (trade_id, signal, entry_price, size_usdt, leverage,
-         entry_fee, position_value, held_seconds) = row
+         entry_fee, position_value, held_seconds,
+         realized_partial, original_notional) = row
+
+        realized_partial = _f(realized_partial) or 0.0
 
         entry_price = _f(entry_price) or 0.0
         size_usdt = _f(size_usdt) or 0.0
@@ -420,7 +639,19 @@ def close_trade_atomic(symbol, exit_price, close_reason, costs=None,
         if pnl_usdt < -size_usdt:
             pnl_usdt = -size_usdt
 
-        roi_pct = (pnl_usdt / size_usdt * 100.0) if size_usdt else 0.0
+        # 分批停利已經實現的部分要算進這一筆交易的總損益。
+        # 不加進來的話,一筆「TP1 收了 +80、剩下的虧 -20」會被記成 -20,
+        # 而它其實是一筆賺 60 的交易 —— 勝率與期望值都會被記反。
+        final_leg_pnl = pnl_usdt
+        pnl_usdt = pnl_usdt + realized_partial
+
+        # ROI 的分母是**原始**保證金,不是剩下那一部分的保證金。
+        # 用剩餘保證金當分母,分批收得越多 ROI 看起來越誇張。
+        original_notional = _f(original_notional) or (size_usdt * leverage)
+        original_margin = (
+            original_notional / leverage if leverage else size_usdt
+        )
+        roi_pct = (pnl_usdt / original_margin * 100.0) if original_margin else 0.0
 
         cur.execute(
             """
@@ -456,7 +687,8 @@ def close_trade_atomic(symbol, exit_price, close_reason, costs=None,
             (float(acc[0]), int(acc[1]), int(acc[2]), int(acc[3])) if acc else (10000.0, 0, 0, 0)
         )
 
-        balance += pnl_usdt
+        # 餘額只加**這一腿**的損益 —— 分批的部分在當時就已經入帳了。
+        balance += final_leg_pnl
         trades_count += 1
         if pnl_usdt > 0:
             wins += 1

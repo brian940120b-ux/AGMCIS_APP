@@ -98,10 +98,10 @@
 | 五十二 | Opportunity Scanner | ✅ | `exchange_universe.py` 動態取得合約清單 + 流動性/量/波動度過濾,沒有寫死 symbol |
 | 五十三 | TOP 3 | ⚠️ | 有排名(TOP_N=5),但**沒有「品質不足就不硬選」的門檻** |
 | 五十四 | 每個訊號解釋原因 | ✅ | `Signal.reasons` + `/transparency` 顯示每個 Agent 的理由 |
-| 五十五 | Exit Intelligence | ⚠️ | 有 ExitAgent 與 `exit_manager`,判斷 TP/SL/訊號失效。**缺 Partial TP、Time Exit、Trailing 整合** |
-| 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 推導,但沒有依市場結構 / 支撐壓力調整,也沒有回測驗證過的參數 |
-| 五十七 | Partial Take Profit | ❌ | **完全沒有**。沒有 TP1/TP2/TP3,沒有 TP1 後移動停損到成本價 |
-| 五十八 | Trailing Stop | ⚠️ | `trailing_stop.py` 只有百分比式。**缺 ATR Trailing、Structure Trailing**,而且沒有接進 `agmcis/` 執行路徑 |
+| 五十五 | Exit Intelligence | ✅ | `agmcis/execution/exit_plan.py`:分批停利、移到成本、移動停損、時間出場走同一條判斷鏈,一次只做一個動作 |
+| 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 與市場結構推導(`trail_structure`),停利用 R 倍數。**參數仍未經回測驗證** —— 預設的 1R/2R/3R 與 30/30/40 是起點不是結論 |
+| 五十七 | Partial Take Profit | ✅ | TP1/TP2/TP3 + TP1 後移到成本價(含手續費緩衝)。分批**不算一筆已平倉交易** —— 否則勝率會衝到接近 100% |
+| 五十八 | Trailing Stop | ✅ | ATR / 百分比 / 結構型三種,由排程的 exit_plan 工作執行。停損只能往有利方向移動,有九個測試釘住這一條 |
 | 五十九 | Portfolio Risk | ✅ | `agmcis/risk/portfolio.py`。相關群一起停損的總風險有上限;反向部位不給抵銷(爆倉時對沖那一邊不會保護你,而且給抵銷會產生繞過上限的漏洞) |
 | 六十 | Correlation Engine | ✅ | `agmcis/risk/correlation.py`。用對數報酬率算 Pearson 與 Beta;樣本不足回 None 而不是 0;算不出來時一律當成相關 |
 
@@ -177,8 +177,8 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 60 |
-| ⚠️ 部分做到 | 41 |
+| ✅ 已做到 | 63 |
+| ⚠️ 部分做到 | 38 |
 | ❌ 沒做 | 5 |
 
 ## 缺口排序(由大到小)
@@ -190,7 +190,7 @@
 3. ~~**四十六 — SAFE LIVE MODE**~~ ✅ 已補(`agmcis/safety/safe_live.py`,22 個測試)。
 4. ~~**五十一 — News Risk 封鎖窗口**~~ ✅ 已補(`agmcis/risk/news_risk.py`,33 個測試)。
 5. ~~**七十三 + 七十四 + 七十五 + 七十六 — 策略退化偵測**~~ ✅ 已補(`agmcis/strategy/health.py`,31 個測試 + Dashboard 面板)。
-6. **五十七 + 五十八 — Partial TP 與 ATR/結構型移動停損**(績效)
+6. ~~**五十五 + 五十七 + 五十八 — Partial TP 與 ATR / 結構型移動停損**~~ ✅ 已補(`agmcis/execution/exit_plan.py`,74 個測試)。
 7. **六十四 + 六十九 + 七十 + 七十一 — 決策持久化**(可解釋性)
 8. **六十六 — `/health`**(維運)
 9. **三十七 + 三十三 — Monte Carlo 成本敏感度、回測 Partial Fill / Trailing**(研究可信度)

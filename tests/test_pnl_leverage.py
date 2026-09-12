@@ -58,15 +58,25 @@ def fake_transaction(cursor):
 
 
 def trade_row(trade_id=7, signal="做多", entry=100.0, size=1000.0, leverage=3.0,
-              entry_fee=0.0, position_value=None, held_seconds=0.0):
+              entry_fee=0.0, position_value=None, held_seconds=0.0,
+              realized_partial=0.0, original_position_value=None):
     """
     close_trade_atomic 的 SELECT 欄位順序。
-    Phase 10 之後多了 entry_fee / position_value / 持倉秒數。
+
+    Phase 10 之後多了 entry_fee / position_value / 持倉秒數;
+    分批停利(第五十七節)之後再多了已實現的分批損益與原始名目價值。
+
+    這個 tuple 的長度必須跟 SQL 的欄位數完全一致 —— 少一個就會
+    在解包時炸掉,那正是我們要的:SQL 改了而假資料沒改,
+    測試應該紅,不應該悄悄驗到別的東西。
     """
     if position_value is None:
         position_value = size * leverage
+    if original_position_value is None:
+        original_position_value = position_value
     return (trade_id, signal, entry, size, leverage,
-            entry_fee, position_value, held_seconds)
+            entry_fee, position_value, held_seconds,
+            realized_partial, original_position_value)
 
 
 class TestRealizedPnlUsesLeverage(unittest.TestCase):
