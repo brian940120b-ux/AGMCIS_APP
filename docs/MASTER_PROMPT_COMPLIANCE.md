@@ -126,10 +126,10 @@
 |---|---|---|---|
 | 七十一 | Trade Explainability | ⚠️ | 開倉當下可解釋,但因為決策沒有持久化,**事後問「為什麼開這一單」答不出來** |
 | 七十二 | Strategy Evaluation 流程 | ✅ | `run_strategy_lab.py` 走 Backtest → OOS → Walk Forward → Monte Carlo,且 LiveGate 要求人工核可 |
-| 七十三 | Strategy Status | ⚠️ | `StrategyStatus` 列舉存在,**但沒有任何地方真的讀它來決定策略能不能下單** |
-| 七十四 | Strategy Kill Switch | ❌ | **沒有**。單一策略回撤超限不會自動 PAUSE |
-| 七十五 | Performance Drift Detection | ❌ | **沒有**。self_review 是靜態檢討,不比較近期 vs 歷史 |
-| 七十六 | Market Regime Drift | ❌ | **沒有**。市況由 TREND 轉 RANGE 不會觸發策略權重重估 |
+| 七十三 | Strategy Status | ✅ | `agmcis/strategy/health.py::StatusStore`。Registry 在評估**之前**就排除不可交易的策略 —— 不是算完再丟掉,因為「幾個策略同向」的分母也不該包含它 |
+| 七十四 | Strategy Kill Switch | ✅ | 回撤超過 20% 自動 PAUSE。只做 PAUSE 不改參數 —— 第七十八節明講 AI 不得自己改策略 |
+| 七十五 | Performance Drift Detection | ✅ | 近期 30 筆 vs 歷史,用**標準誤檢定**而不是比大小。漂移不自動停 —— 它是「去看一下」,不是「已經壞了」 |
+| 七十六 | Market Regime Drift | ✅ | `regime_fit()` 比較策略在各市況的期望值。樣本不足的市況不列入比較 —— 三筆交易的「期望值」不是期望值 |
 | 七十七 | Research Loop | ⚠️ | 各環節都在,但沒有串成自動循環 |
 | 七十八 | 禁止 AI 無限自改 | ✅ | 沒有任何自動改策略的路徑;LiveGate 要求人工核可 |
 | 七十九 | Live 絕對安全原則 | ✅ | `live_gate.py` 九項任一失敗即 NO TRADE,且失敗預設是「未通過」 |
@@ -177,9 +177,9 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 56 |
-| ⚠️ 部分做到 | 42 |
-| ❌ 沒做 | 8 |
+| ✅ 已做到 | 60 |
+| ⚠️ 部分做到 | 41 |
+| ❌ 沒做 | 5 |
 
 ## 缺口排序(由大到小)
 
@@ -189,7 +189,7 @@
 2. ~~**五十九 + 六十 + 二十 — 組合風險與相關性**~~ ✅ 已補(`agmcis/risk/{correlation,portfolio}.py`,41 個測試)。
 3. ~~**四十六 — SAFE LIVE MODE**~~ ✅ 已補(`agmcis/safety/safe_live.py`,22 個測試)。
 4. ~~**五十一 — News Risk 封鎖窗口**~~ ✅ 已補(`agmcis/risk/news_risk.py`,33 個測試)。
-5. **七十四 + 七十五 + 七十六 — 策略退化偵測**(安全)策略壞掉不會自己停。
+5. ~~**七十三 + 七十四 + 七十五 + 七十六 — 策略退化偵測**~~ ✅ 已補(`agmcis/strategy/health.py`,31 個測試 + Dashboard 面板)。
 6. **五十七 + 五十八 — Partial TP 與 ATR/結構型移動停損**(績效)
 7. **六十四 + 六十九 + 七十 + 七十一 — 決策持久化**(可解釋性)
 8. **六十六 — `/health`**(維運)

@@ -25,12 +25,18 @@ Master Prompt 第 40 條:不要只依賴一個策略,只有在達到共識時才
 
   3. 停損取**最保守**的那個(離進場最近的),停利取最近的。
      不同策略對同一個方向的風險評估不同時,聽最謹慎的那個。
+
+  4. **被停用的策略不參與投票**(第七十三 / 七十四節)。
+     一個因為回撤超限被 PAUSE 的策略如果還在投票,那個 PAUSE
+     就只是一個標籤。排除發生在評估之前 —— 不是算完再丟掉,
+     因為「有幾個策略同向」的分母也不該包含它。
 """
 import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 from agmcis.core.enums import Direction
+from agmcis.strategy import health as health_module
 from agmcis.strategy.base import Strategy
 from agmcis.strategy.builtin import BUILTIN_STRATEGIES
 
@@ -52,6 +58,9 @@ class Consensus:
     take_profit: Optional[float] = None
     reasons: List[str] = field(default_factory=list)
     blocked_reason: Optional[str] = None
+    # 因為生命週期狀態而沒有參與這一輪的策略。
+    # 它們不算「觀望」—— 觀望是一個意見,這個是沒有意見。
+    disabled: List[str] = field(default_factory=list)
 
     @property
     def is_actionable(self):
@@ -69,15 +78,47 @@ class Consensus:
             "take_profit": self.take_profit,
             "reasons": list(self.reasons),
             "blocked_reason": self.blocked_reason,
+            "disabled": list(self.disabled),
         }
 
 
 class StrategyRegistry:
-    def __init__(self, strategies=None, min_agreeing=DEFAULT_MIN_AGREEING):
+    def __init__(self, strategies=None, min_agreeing=DEFAULT_MIN_AGREEING,
+                 status_store=None, mode=None):
         self._strategies = list(strategies) if strategies is not None else [
             cls() for cls in BUILTIN_STRATEGIES
         ]
         self.min_agreeing = min_agreeing
+        # 生命週期狀態的來源。None = 用全域的檔案儲存。
+        self._status_store = status_store
+        # 判斷「可交易」要用哪一組門檻。None = 用全域 TRADING_MODE。
+        self._mode = mode
+
+    def _mode_name(self):
+        if self._mode is not None:
+            return str(self._mode)
+        from agmcis.config import settings
+        return str(getattr(settings, "TRADING_MODE", "paper"))
+
+    def active(self):
+        """
+        這一輪可以投票的策略,以及被生命週期狀態擋掉的名字。
+
+        狀態讀取失敗時 health.is_tradeable() 會退回預設狀態(PAPER),
+        也就是「模擬盤可以、實單不行」—— 讀不到不會讓策略升級。
+        """
+        mode = self._mode_name()
+        enabled, disabled = [], []
+
+        for strategy in self._strategies:
+            if health_module.is_tradeable(
+                strategy.name, mode=mode, store=self._status_store,
+            ):
+                enabled.append(strategy)
+            else:
+                disabled.append(strategy.name)
+
+        return enabled, disabled
 
     @property
     def names(self):
@@ -89,9 +130,9 @@ class StrategyRegistry:
         self._strategies.append(strategy)
         return self
 
-    def evaluate_all(self, indicators, regime):
+    def evaluate_all(self, indicators, regime, strategies=None):
         verdicts = []
-        for strategy in self._strategies:
+        for strategy in (self._strategies if strategies is None else strategies):
             try:
                 verdicts.append(strategy.evaluate(indicators, regime))
             except Exception as exc:
@@ -116,7 +157,19 @@ class StrategyRegistry:
                 reasons=list(regime.reasons),
             )
 
-        verdicts = self.evaluate_all(indicators, regime)
+        enabled, disabled = self.active()
+
+        if not enabled:
+            return Consensus(
+                disabled=disabled,
+                blocked_reason="沒有可用的策略",
+                reasons=[
+                    f"全部 {len(self._strategies)} 個策略都被生命週期狀態擋住"
+                    f"({', '.join(disabled)})"
+                ],
+            )
+
+        verdicts = self.evaluate_all(indicators, regime, strategies=enabled)
         serialised = [v.to_dict() for v in verdicts]
 
         longs = [v for v in verdicts if v.direction is Direction.LONG and v.confidence > 0]
@@ -131,6 +184,7 @@ class StrategyRegistry:
                 opposing=[v.strategy for v in shorts],
                 waiting=waiting,
                 verdicts=serialised,
+                disabled=disabled,
                 blocked_reason="策略互相矛盾",
                 reasons=[
                     f"做多: {', '.join(v.strategy for v in longs)};"
@@ -142,6 +196,7 @@ class StrategyRegistry:
         if not winners:
             return Consensus(
                 direction=Direction.WAIT, waiting=waiting, verdicts=serialised,
+                disabled=disabled,
                 blocked_reason="沒有策略出手",
                 reasons=["所有策略都選擇觀望"],
             )
@@ -151,6 +206,7 @@ class StrategyRegistry:
                 direction=Direction.WAIT,
                 agreeing=[v.strategy for v in winners],
                 waiting=waiting, verdicts=serialised,
+                disabled=disabled,
                 blocked_reason="同向策略數不足",
                 reasons=[
                     f"只有 {len(winners)} 個策略同向,需要 {self.min_agreeing} 個"
@@ -184,6 +240,7 @@ class StrategyRegistry:
             agreeing=[v.strategy for v in winners],
             waiting=waiting,
             verdicts=serialised,
+            disabled=disabled,
             stop_loss=stop_loss,
             take_profit=take_profit,
             reasons=reasons,

@@ -49,6 +49,19 @@
 </p>
 <div class="card"><div id="costs">載入中…</div></div>
 
+<h2>🧬 策略健康度</h2>
+<p class="muted">
+  每個策略現在的生命週期狀態,以及它最近有沒有退化。
+  <b>PAUSED 的策略不參與投票</b> —— 系統最近很少下單的原因可能在這裡。
+  「漂移」用的是標準誤檢定,不是比大小:任何策略的任何三十筆
+  都有一半機率比歷史平均差,用比大小當標準會每兩次就誤報一次。
+</p>
+<div class="cards">
+  <div class="card">已停用<br><b id="paused_count">-</b></div>
+  <div class="card">績效漂移<br><b id="drifted_count">-</b></div>
+</div>
+<div class="card"><div id="strategy_health">載入中…</div></div>
+
 <h2>🪞 自我檢討</h2>
 <p class="muted">
   哪些東西其實沒有貢獻。這份報告能說出「我不知道」和「這裡在虧錢」——

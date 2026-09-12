@@ -126,15 +126,20 @@ class TestOrdersEndpoint(unittest.TestCase):
 class TestSummaryOnlyReportsWhatNeedsAttention(unittest.TestCase):
 
     def _summary(self, orders, calibration, reconciliation, review=None,
-                 config=None):
+                 config=None, strategies=None):
         review = review if review is not None else {"verdict": "HEALTHY"}
         config = config if config is not None else {"risk_increase_count": 0}
+        strategies = strategies if strategies is not None else {
+            "paused_count": 0, "drifted_count": 0,
+        }
 
         with patch.object(transparency, "_orders", return_value=orders), \
              patch.object(transparency, "_calibration", return_value=calibration), \
              patch.object(transparency, "_reconciliation",
                           return_value=reconciliation), \
              patch.object(transparency, "_self_review", return_value=review), \
+             patch.object(transparency, "_strategy_health",
+                          return_value=strategies), \
              patch.object(transparency, "_config_changes", return_value=config):
             return transparency._summary()
 
@@ -274,3 +279,46 @@ class TestPageIsRegistered(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPausedStrategiesAreVisible(unittest.TestCase):
+    """
+    一個因為回撤超限被自動停掉的策略,如果只寫在 log 裡,
+    使用者看到的只會是「系統最近很少下單」而不知道為什麼。
+    """
+
+    def _summary(self, strategies):
+        with patch.object(transparency, "_orders",
+                          return_value={"naked_count": 0, "unresolved_count": 0}), \
+             patch.object(transparency, "_calibration",
+                          return_value={"calibrated": True}), \
+             patch.object(transparency, "_reconciliation",
+                          return_value={"critical_count": 0}), \
+             patch.object(transparency, "_self_review",
+                          return_value={"verdict": "HEALTHY"}), \
+             patch.object(transparency, "_strategy_health",
+                          return_value=strategies), \
+             patch.object(transparency, "_config_changes",
+                          return_value={"risk_increase_count": 0}):
+            return transparency._summary()
+
+    def test_a_paused_strategy_raises_an_alert(self):
+        result = self._summary({"paused_count": 2, "drifted_count": 0})
+
+        self.assertEqual(result["paused_strategies"], 2)
+        self.assertTrue(
+            any("停用" in a["message"] for a in result["alerts"]),
+        )
+
+    def test_drift_raises_a_warning_not_a_critical(self):
+        """漂移是「去看一下」,不是「已經壞了」。等級要對得上。"""
+        result = self._summary({"paused_count": 0, "drifted_count": 1})
+
+        drift_alerts = [a for a in result["alerts"] if "DRIFT" in a["message"]]
+        self.assertEqual(len(drift_alerts), 1)
+        self.assertEqual(drift_alerts[0]["level"], "warning")
+
+    def test_healthy_strategies_raise_nothing(self):
+        result = self._summary({"paused_count": 0, "drifted_count": 0})
+
+        self.assertEqual(result["alerts"], [])

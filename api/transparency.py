@@ -261,6 +261,52 @@ def _config_changes(limit=20):
     return _safe("config_changes", run, {"records": []})
 
 
+@router.get("/api/strategy_health")
+def api_strategy_health():
+    return _strategy_health()
+
+
+def _strategy_health():
+    """
+    每個策略現在的生命週期狀態與健康度(第七十三 ~ 七十六節)。
+
+    這一塊回答的是「為什麼這個策略最近都沒出手」——
+    答案可能是它被回撤上限自動停掉了,而那件事只寫在 log 裡。
+
+    **唯讀。** 它只評估,不會改狀態 —— 改狀態是排程的 drift_monitor 的事。
+    """
+    def run():
+        from agmcis.strategy.health import evaluate_all, get_store
+        from agmcis.strategy.registry import get_registry
+
+        from database_service import get_closed_trades
+
+        trades = get_closed_trades()
+        registry = get_registry()
+        store = get_store()
+
+        reports = evaluate_all(trades, names=registry.names)
+        enabled, disabled = registry.active()
+
+        return {
+            "strategies": [r.to_dict() for r in reports],
+            "enabled": [s.name for s in enabled],
+            "disabled": disabled,
+            "paused_count": sum(
+                1 for r in reports if r.status == "paused"
+            ),
+            "drifted_count": sum(
+                1 for r in reports if r.verdict == "STRATEGY_DRIFT"
+            ),
+            "recent_changes": store.read_audit(limit=20),
+        }
+
+    return _safe("strategy_health", run, {
+        "strategies": [], "enabled": [], "disabled": [],
+        "paused_count": 0, "drifted_count": 0, "recent_changes": [],
+    })
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()
@@ -276,8 +322,27 @@ def _summary():
     orders = _orders(limit=MAX_ORDERS)
     calibration = _calibration()
     reconciliation = _reconciliation()
+    strategies = _strategy_health()
 
     alerts = []
+
+    if strategies.get("paused_count"):
+        alerts.append({
+            "level": "warning",
+            "message": (
+                f"{strategies['paused_count']} 個策略被自動停用。"
+                f"停用的策略不會投票,系統的訊號來源變少了。"
+            ),
+        })
+
+    if strategies.get("drifted_count"):
+        alerts.append({
+            "level": "warning",
+            "message": (
+                f"{strategies['drifted_count']} 個策略的近期績效顯著低於歷史"
+                f"(STRATEGY_DRIFT)。這是「去看一下」,不是「已經壞了」。"
+            ),
+        })
 
     if orders.get("naked_count"):
         alerts.append({
@@ -326,7 +391,7 @@ def _summary():
             "message": "合約規格尚未校準,強平價與成本都是估計值",
         })
 
-    for source in (orders, calibration, reconciliation, review, config):
+    for source in (orders, calibration, reconciliation, review, config, strategies):
         if source.get("error"):
             alerts.append({"level": "critical", "message": source["error"]})
 
@@ -339,4 +404,6 @@ def _summary():
         "calibrated": bool(calibration.get("calibrated")),
         "self_review_verdict": review.get("verdict"),
         "config_risk_increases": config.get("risk_increase_count", 0),
+        "paused_strategies": strategies.get("paused_count", 0),
+        "drifted_strategies": strategies.get("drifted_count", 0),
     }

@@ -240,6 +240,63 @@ async function loadSelfReview() {
     render("self_review", head + findings + questions + agentTable);
 }
 
+/* ---------------- 策略健康度 ---------------- */
+
+const STRATEGY_VERDICT_CLASS = {
+    HEALTHY: "alert-ok",
+    WATCH: "alert-warning",
+    STRATEGY_DRIFT: "alert-warning",
+    SHOULD_PAUSE: "alert-critical",
+    INSUFFICIENT_DATA: "alert-warning",
+};
+
+async function loadStrategyHealth() {
+    const data = await load("/api/strategy_health");
+    if (data.error) throw new Error(data.error);
+
+    render("paused_count", esc(data.paused_count ?? 0));
+    render("drifted_count", esc(data.drifted_count ?? 0));
+
+    const rows = (data.strategies || []).map(s => {
+        /* 漂移的欄位放的是「幾個標準誤」,不是「差多少錢」——
+           差多少錢在樣本數不同時無法互相比較。 */
+        const sigma = s.drift && s.drift.sigma_gap !== null
+            && s.drift.sigma_gap !== undefined
+            ? num(s.drift.sigma_gap, 1) + " σ" : "-";
+
+        return `<tr>
+            <td class="nowrap">${esc(s.name)}</td>
+            <td class="nowrap">${esc(s.status)}</td>
+            <td class="nowrap ${STRATEGY_VERDICT_CLASS[s.verdict] || ""}">${esc(s.verdict)}</td>
+            <td>${esc(s.trades)}</td>
+            <td>${num(s.win_rate, 1)}%</td>
+            <td>${s.profit_factor === null ? "-" : num(s.profit_factor, 2)}</td>
+            <td>${num(s.max_drawdown_pct, 1)}%</td>
+            <td>${sigma}</td>
+            <td class="muted">${esc((s.reasons || [])[0] || "")}</td>
+        </tr>`;
+    }).join("");
+
+    const table = rows
+        ? `<table class="tp"><tr><th>策略</th><th>狀態</th><th>判定</th>
+           <th>筆數</th><th>勝率</th><th>PF</th><th>回撤</th>
+           <th>近期 vs 歷史</th><th>說明</th></tr>${rows}</table>`
+        : '<span class="muted">還沒有任何策略的已平倉交易。</span>';
+
+    const disabled = (data.disabled || []).length
+        ? `<p class="muted">這一輪不參與投票:${data.disabled.map(esc).join("、")}</p>`
+        : "";
+
+    const changes = (data.recent_changes || []).length
+        ? `<p><b>最近的狀態變更</b></p><ul>${data.recent_changes.slice(-5).reverse()
+            .map(c => `<li class="muted">${esc(c.at)} ${esc(c.strategy)}
+                ${esc(c.from || "-")} → ${esc(c.to)}:${esc(c.reason)}</li>`)
+            .join("")}</ul>`
+        : "";
+
+    render("strategy_health", table + disabled + changes);
+}
+
 /* ---------------- 設定變更 ---------------- */
 
 async function loadConfigChanges() {
@@ -311,6 +368,7 @@ const SECTIONS = [
     ["orders", loadOrders],
     ["reconciliation", loadReconciliation],
     ["costs", loadCosts],
+    ["strategy_health", loadStrategyHealth],
     ["self_review", loadSelfReview],
     ["config_changes", loadConfigChanges],
     ["calibration", loadCalibration],

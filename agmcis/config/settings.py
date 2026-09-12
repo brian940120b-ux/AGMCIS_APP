@@ -134,6 +134,9 @@ SCHEDULER_RATE_LIMIT_CLEANUP_INTERVAL = env_int(
 # 設定變更稽核。設定在模組載入時就固定了,所以改設定一定伴隨重啟 ——
 # 每小時比對一次已經足夠。
 SCHEDULER_CONFIG_AUDIT_INTERVAL = env_int("SCHEDULER_CONFIG_AUDIT_INTERVAL", 3600)
+# 策略退化偵測。跑太密沒有意義 —— 判斷的基礎是「最近 30 筆交易」,
+# 而那個數字不會在一小時內變。
+SCHEDULER_DRIFT_MONITOR_INTERVAL = env_int("SCHEDULER_DRIFT_MONITOR_INTERVAL", 3600)
 EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
 
 # 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,
