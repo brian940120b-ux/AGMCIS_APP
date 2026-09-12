@@ -477,6 +477,160 @@ def _news_center(limit=10):
     return _safe("news_center", run, {"news": [], "count": 0})
 
 
+# /api/journal 已經被 api/journal.py 用掉了(那是舊的簡單版:
+# 只有 symbol / action / price / reason)。第四十一節要的是 27 個欄位的
+# 完整版,所以走一個新路徑而不是覆蓋舊的 —— 覆蓋會讓現有前端壞掉。
+@router.get("/api/trade_journal")
+def api_trade_journal(limit: int = Query(30, ge=1, le=200)):
+    return _journal(limit=limit)
+
+
+def _journal(limit=30):
+    """
+    完整交易日誌(第四十一節)。27 個欄位,拼不起來的部分會標出來。
+
+    `avg_completeness` 是這一批資料本身有多完整 —— **不是績效指標**。
+    在拿一批 completeness 60% 的紀錄去算勝率之前,要先知道那件事。
+    """
+    def run():
+        from agmcis.review import journal as journal_module
+
+        from database_service import get_closed_trades, get_decisions
+
+        trades = get_closed_trades()[-limit:]
+        decisions = get_decisions(limit=limit * 2)
+
+        entries = journal_module.build_many(trades, decisions=decisions)
+
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "summary": journal_module.summarise(entries),
+        }
+
+    return _safe("journal", run, {
+        "entries": [], "summary": {"count": 0, "avg_completeness": 0.0},
+    })
+
+
+@router.get("/api/signals")
+def api_signals(limit: int = Query(5, ge=1, le=20)):
+    return _signals(limit=limit)
+
+
+def _signals(limit=5):
+    """
+    現在的訊號(第八十五節)。
+
+    **包含 WAIT 的訊號。** 只回傳可交易的訊號會讓「系統沒在跑」與
+    「系統跑了但結論是觀望」看起來一樣 —— 而後者是第二十九節
+    明確認可的合法結論。
+    """
+    def run():
+        from agmcis.signal import pipeline
+
+        rows = []
+        for symbol in list(settings.WATCHLIST_SYMBOLS)[:limit]:
+            signal = pipeline.analyse_symbol(symbol)
+            rows.append(signal.to_dict())
+
+        return {
+            "signals": rows,
+            "tradable": sum(1 for r in rows if r.get("direction") not in
+                            (None, "觀望", "WAIT")),
+            "min_score": float(getattr(settings, "MIN_SIGNAL_SCORE", 70)),
+        }
+
+    return _safe("signals", run, {"signals": [], "tradable": 0})
+
+
+@router.get("/api/positions")
+def api_positions():
+    return _positions()
+
+
+def _positions():
+    """
+    持倉(第八十五 / 八十八節)。
+
+    每一筆都帶 `has_stop` —— 沒有停損的部位沒有虧損上限,
+    而那是這張表上唯一需要立刻行動的資訊。
+    """
+    def run():
+        from database_service import get_open_trades
+
+        rows = get_open_trades()
+        naked = [t["symbol"] for t in rows if t.get("stoploss") is None]
+
+        return {
+            "positions": [
+                {
+                    "symbol": t.get("symbol"),
+                    "direction": t.get("signal"),
+                    "entry": t.get("entry_price"),
+                    "stop_loss": t.get("stoploss"),
+                    "take_profit": t.get("takeprofit"),
+                    "leverage": t.get("leverage"),
+                    "notional": t.get("position_value"),
+                    "margin": t.get("size_usdt"),
+                    "liquidation_price": t.get("liquidation_price"),
+                    "tp_stage": t.get("tp_stage", 0),
+                    "realized_partial_usdt": t.get("realized_partial_usdt", 0.0),
+                    "opened_at": t.get("opened_at"),
+                    "has_stop": t.get("stoploss") is not None,
+                }
+                for t in rows
+            ],
+            "count": len(rows),
+            "naked": naked,
+        }
+
+    return _safe("positions", run, {"positions": [], "count": 0, "naked": []})
+
+
+@router.get("/api/risk")
+def api_risk():
+    return _risk()
+
+
+def _risk():
+    """
+    風控現況(第八十五節):帳戶層閘門通不通過、為什麼不通過。
+
+    這個端點回答的是「我現在為什麼開不了新倉」。答案幾乎總是
+    某一條上限碰到了,而那件事目前只寫在 log 裡。
+    """
+    def run():
+        from agmcis.risk.account_state import build_account_state
+        from agmcis.risk.engine import get_engine
+
+        state = build_account_state()
+        gate = get_engine().check_gate(state)
+
+        return {
+            "allowed": gate.allowed,
+            "blockers": list(gate.blockers),
+            "warnings": list(gate.warnings),
+            "emergency": gate.emergency,
+            "account": {
+                "equity": state.equity,
+                "available_balance": state.available_balance,
+                "open_positions": state.open_positions,
+                "exposure_pct": round(state.exposure_pct, 2),
+                "unrealized_pnl_usdt": state.unrealized_pnl_usdt,
+                "realized_pnl_24h": state.realized_pnl_24h,
+                "realized_pnl_7d": state.realized_pnl_7d,
+                "consecutive_losses": state.consecutive_losses,
+                "max_drawdown_pct": state.max_drawdown_pct,
+            },
+            "limits": settings.risk_limits_dict(),
+        }
+
+    return _safe("risk", run, {
+        "allowed": False, "blockers": ["RISK_STATE_UNAVAILABLE"],
+        "account": {}, "limits": {},
+    })
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()

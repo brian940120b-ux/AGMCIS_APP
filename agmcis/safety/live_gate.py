@@ -473,6 +473,33 @@ class LiveGate:
             f"當日 ≤ {effective.get('MAX_TRADES_PER_DAY')} 筆",
         )
 
+    def check_environment(self):
+        """
+        實單只能在 production 環境跑(第八十一節)。
+
+        一台標成 development 的機器送真實訂單,代表有人把設定搬錯了 ——
+        而那通常也代表資料庫、API 金鑰或風控參數有一項是錯的。
+        這一項擋的不是「環境變數的值」,是那個更大的錯誤。
+        """
+        from agmcis.config import settings
+
+        if settings.APP_ENV != settings.ENV_PRODUCTION:
+            return GateCheck(
+                "環境", False,
+                f"APP_ENV 是 {settings.APP_ENV},實單只能在 "
+                f"{settings.ENV_PRODUCTION} 跑。"
+                + (
+                    f"(原始值 {settings.APP_ENV_RAW!r} 無法辨識,已降級)"
+                    if settings.APP_ENV_RAW.strip().lower() not in (
+                        settings.APP_ENV, ""
+                    ) and settings.APP_ENV_RAW.strip().lower() not in
+                    settings._ENV_ALIASES
+                    else ""
+                ),
+            )
+
+        return GateCheck("環境", True, f"APP_ENV = {settings.APP_ENV}")
+
     def check_news_calendar(self):
         """
         重大事件日曆必須是新的(第五十一節)。
@@ -551,6 +578,7 @@ class LiveGate:
         "check_kill_switch",
         "check_safe_live_limits",
         "check_news_calendar",
+        "check_environment",
         "check_live_broker_absent",
         "check_confirmation",
     )

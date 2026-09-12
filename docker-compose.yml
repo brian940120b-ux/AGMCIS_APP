@@ -1,0 +1,53 @@
+# 開發 / 測試 / staging 用(第八十二 / 八十三節)。
+#
+# ⚠️ Production 目前跑在 systemd 上,不是這個檔案。
+#    第八十二節:「不要破壞目前正在運作的 Production」。
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-agmcis}
+      POSTGRES_USER: ${DB_USER:-agmcis}
+      # 沒有預設值:一個有預設密碼的資料庫遲早會帶著那個密碼上線。
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 必須設定}
+    volumes:
+      - agmcis-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-agmcis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      target: base
+    # env_file 而不是 environment:金鑰不進 compose 檔,
+    # compose 檔會進 Git(第十 / 八十四節)。
+    env_file: .env
+    environment:
+      DB_HOST: db
+      APP_ENV: ${APP_ENV:-development}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: .
+      target: scheduler
+    env_file: .env
+    environment:
+      DB_HOST: db
+      APP_ENV: ${APP_ENV:-development}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  agmcis-db:

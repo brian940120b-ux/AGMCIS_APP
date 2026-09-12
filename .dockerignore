@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+data/history
+*.log
+*.flag
+*.stop
+emergency.stop
+trading_pause.flag
+scheduler_status.json
+strategy_status.json
+config/news_calendar.json

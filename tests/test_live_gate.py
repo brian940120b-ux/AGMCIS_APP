@@ -96,13 +96,30 @@ class GateTestCase(unittest.TestCase):
             providers=providers if providers is not None else passing_providers(),
         )
 
+    @staticmethod
+    def as_production():
+        """
+        實單閘門要求 APP_ENV=production(第八十一節)。
+        測試環境是 development,所以要開閘門的測試必須明講這件事。
+        """
+        from unittest.mock import patch
+
+        from agmcis.config import settings
+
+        return patch.object(settings, "APP_ENV", settings.ENV_PRODUCTION)
+
     def open_gate(self, **overrides):
         path = confirmation()
         self.addCleanup(os.unlink, path)
 
-        return self.gate(
-            providers=passing_providers(**overrides), confirmation_file=path,
-        ).evaluate()
+        # 閘門要求 APP_ENV=production(第八十一節)。測試環境是
+        # development,所以要驗「閘門能開」就必須明講這件事 ——
+        # 那本身也是一個在記錄「實單只能在正式環境跑」的斷言。
+        with self.as_production():
+            return self.gate(
+                providers=passing_providers(**overrides),
+                confirmation_file=path,
+            ).evaluate()
 
 
 class TestTheGateOpensOnlyWhenEverythingIsReady(GateTestCase):
@@ -431,3 +448,53 @@ class TestIsLiveAllowed(GateTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheEnvironmentGate(GateTestCase):
+    """
+    一台標成 development 的機器送真實訂單,代表有人把設定搬錯了 ——
+    而那通常也代表資料庫、API 金鑰或風控參數有一項是錯的。
+    """
+
+    def test_development_cannot_open_the_gate(self):
+        from agmcis.config import settings
+
+        with patch.object(settings, "APP_ENV", settings.ENV_DEVELOPMENT):
+            check = self.gate().check_environment()
+
+        self.assertFalse(check.passed)
+        self.assertIn("development", check.detail)
+
+    def test_staging_cannot_open_the_gate_either(self):
+        """staging 的設定與 production 相同,但帳戶不同。"""
+        from agmcis.config import settings
+
+        with patch.object(settings, "APP_ENV", settings.ENV_STAGING):
+            self.assertFalse(self.gate().check_environment().passed)
+
+    def test_production_passes(self):
+        with self.as_production():
+            check = self.gate().check_environment()
+
+        self.assertTrue(check.passed)
+
+    def test_an_unrecognised_env_name_falls_back_to_development(self):
+        """
+        當成 production 會讓一個打錯字的環境變數解鎖正式環境的行為;
+        拋例外會讓系統在可以繼續跑的情況下起不來。
+        """
+        from agmcis.config import settings
+
+        self.assertEqual(
+            settings._normalise_env("prodution"), settings.ENV_DEVELOPMENT,
+        )
+        self.assertEqual(
+            settings._normalise_env(None), settings.ENV_DEVELOPMENT,
+        )
+
+    def test_legacy_names_still_work(self):
+        """"dev" 一直是預設值,直接改掉會讓現有部署變成未知環境。"""
+        from agmcis.config import settings
+
+        self.assertEqual(settings._normalise_env("dev"), settings.ENV_DEVELOPMENT)
+        self.assertEqual(settings._normalise_env("prod"), settings.ENV_PRODUCTION)

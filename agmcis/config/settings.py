@@ -70,7 +70,60 @@ def env_list(name, default=""):
 
 APP_NAME = "AGMCIS"
 VERSION = "1.1.0"
-APP_ENV = env("APP_ENV", default="dev")
+
+# ---------------- 環境分離(第八十一節)----------------
+#
+# 五個環境。它們的差別不只是名字 —— 每一個對「什麼可以自動發生」
+# 的答案不同:
+#
+#   development  本機開發。可以連測試網,不連真錢。
+#   testing      跑測試。不連任何外部服務。
+#   paper        模擬盤。連真實行情,不送真實訂單。
+#   staging      上線前的最後一站。設定與 production 相同但帳戶不同。
+#   production   真的在跑的那一套。
+#
+# 預設是 development,不是 production。反過來的話,一個忘了設
+# APP_ENV 的環境會以為自己是正式環境 —— 而那個誤會的方向是錯的。
+ENV_DEVELOPMENT = "development"
+ENV_TESTING = "testing"
+ENV_PAPER = "paper"
+ENV_STAGING = "staging"
+ENV_PRODUCTION = "production"
+
+KNOWN_ENVIRONMENTS = (
+    ENV_DEVELOPMENT, ENV_TESTING, ENV_PAPER, ENV_STAGING, ENV_PRODUCTION,
+)
+
+# 舊值的相容對應。"dev" 一直是預設值,直接改掉會讓現有部署變成未知環境。
+_ENV_ALIASES = {
+    "dev": ENV_DEVELOPMENT,
+    "test": ENV_TESTING,
+    "prod": ENV_PRODUCTION,
+    "stage": ENV_STAGING,
+}
+
+
+def _normalise_env(value):
+    """
+    無法辨識的環境名稱一律當成 development。
+
+    當成 production 會讓一個打錯字的環境變數解鎖正式環境的行為;
+    拋例外會讓系統在一個可以繼續跑的情況下起不來。
+    降級到最保守的那一個,並在下面留下 APP_ENV_RAW 供稽核。
+    """
+    name = str(value or "").strip().lower()
+    name = _ENV_ALIASES.get(name, name)
+    return name if name in KNOWN_ENVIRONMENTS else ENV_DEVELOPMENT
+
+
+APP_ENV_RAW = env("APP_ENV", default=ENV_DEVELOPMENT)
+APP_ENV = _normalise_env(APP_ENV_RAW)
+
+IS_PRODUCTION = APP_ENV == ENV_PRODUCTION
+IS_STAGING = APP_ENV == ENV_STAGING
+# staging 與 production 共用「不是玩具環境」這個性質:
+# 兩者都不該接受寬鬆的預設值。
+IS_PROTECTED_ENV = IS_PRODUCTION or IS_STAGING
 
 
 # ---------------- 資料庫 ----------------

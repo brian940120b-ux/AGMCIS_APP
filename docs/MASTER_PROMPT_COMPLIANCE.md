@@ -79,7 +79,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 四十一 | Trade Journal | ⚠️ | 27 個欄位裡約 20 個有。**缺 Funding、Slippage、R Multiple、Agent Decisions 沒有寫進 journal 表** |
+| 四十一 | Trade Journal | ✅ | `agmcis/review/journal.py` 27 欄。滑點、R 倍數、持有時間是**算**出來的不是存的(存衍生值遲早與來源不一致);拼不起來的欄位會列在 `missing` 而不是填 0 |
 | 四十二 | Self Learning | ⚠️ | `agmcis/review/self_review.py` 會產出結論與 open questions,但沒有正式的 PROPOSE CHANGE → Backtest → Human Approval 流程物件 |
 | 四十三 | Paper Trading | ✅ | `agmcis/execution/paper_costs.py` 含手續費/滑點/資金費用/強平 |
 | 四十四 | Trading Modes | ✅ | `TradingMode` MANUAL/PAPER/TEST/LIVE |
@@ -96,7 +96,7 @@
 |---|---|---|---|
 | 五十一 | News Risk | ✅ | `agmcis/risk/news_risk.py`。已排程事件走時間窗封鎖(HIGH 不開新倉 / MEDIUM 倉位減半),未排程衝擊走標題關鍵字。日曆過期在模擬盤只警告,實單由 LIVE GATE 擋 |
 | 五十二 | Opportunity Scanner | ✅ | `exchange_universe.py` 動態取得合約清單 + 流動性/量/波動度過濾,沒有寫死 symbol |
-| 五十三 | TOP 3 | ⚠️ | 有排名(TOP_N=5),但**沒有「品質不足就不硬選」的門檻** |
+| 五十三 | TOP 3 | ✅ | 首頁在沒有合格機會時顯示 NO HIGH QUALITY SETUP,並把掃過但沒入選的列出來 —— 讓「沒在跑」與「跑了但沒機會」看起來不一樣 |
 | 五十四 | 每個訊號解釋原因 | ✅ | `Signal.reasons` + `/transparency` 顯示每個 Agent 的理由 |
 | 五十五 | Exit Intelligence | ✅ | `agmcis/execution/exit_plan.py`:分批停利、移到成本、移動停損、時間出場走同一條判斷鏈,一次只做一個動作 |
 | 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 與市場結構推導(`trail_structure`),停利用 R 倍數。**參數仍未經回測驗證** —— 預設的 1R/2R/3R 與 30/30/40 是起點不是結論 |
@@ -115,7 +115,7 @@
 | 六十四 | Database | ⚠️ | 13 張表。新增 ai_decisions / risk_events / audit_logs / market_regimes / trade_exits。**仍缺 users、strategies、backtests、news 等** —— 那些目前不在交易路徑上 |
 | 六十五 | Audit Log | ✅ | 登入、系統暫停 / 恢復、策略狀態變更、Kill Switch、設定變更全部進 `audit_logs`。登入稽核**不記金鑰的任何片段** |
 | 六十六 | Observability | ✅ | `/health` 不需金鑰(外部監控不會帶金鑰),九個元件狀態,unhealthy 回 503。只回狀態不回內容 —— 錯誤細節留在需要金鑰的端點與 log |
-| 六十七 | Testing | ⚠️ | Unit + Integration 完整(969 個測試)。**Simulation Tests 只覆蓋 SL Failure / Partial Fill / Order Rejection;缺 Market Crash、API Timeout、Duplicate Order、Network Disconnect、Database Failure、WebSocket Disconnect** |
+| 六十七 | Testing | ✅ | `tests/test_simulation.py` 覆蓋第六十七節列的九種情況。它們問的不是「算得對不對」,是**「這個東西壞掉時系統往哪一邊倒」** |
 | 六十八 | Failure Recovery | ✅ | 重啟後 `reconciliation` 會先對帳再恢復;client order id 防重複下單 |
 | 六十九 | Data Persistence | ✅ | 訂單、持倉、交易、決策、Agent 投票、風控事件、市況全部進 DB |
 | 七十 | AI Decision Record | ✅ | `ai_decisions` 表。**包含沒有下單的決策** —— 系統連續三天沒交易時,唯一能回答「壞了還是在等」的就是這批紀錄 |
@@ -139,11 +139,11 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 八十一 | Environment Separation | ⚠️ | 只有 `APP_ENV`,**沒有 development/testing/paper/staging/production 五套實質分離** |
-| 八十二 | Docker / Deployment | ❌ | **沒有 Dockerfile / docker-compose**。目前是 systemd + DigitalOcean 直跑 |
-| 八十三 | Deployment Strategy | ⚠️ | 有 preflight / live_gate 腳本,**沒有 staging 環境** |
+| 八十一 | Environment Separation | ✅ | 五個環境,無法辨識的名稱降級為 development(不是 production)。LIVE 閘門要求 `APP_ENV=production` —— 一台標成 development 的機器送真實訂單代表設定搬錯了 |
+| 八十二 | Docker / Deployment | ⚠️ | Dockerfile + compose(非 root、健康檢查打 `/health`、排程與 Web 分開容器)。**Production 仍在 systemd 上** —— 第八十二節也說「不要破壞目前正在運作的 Production」,切換要是一次有計畫的遷移 |
+| 八十三 | Deployment Strategy | ⚠️ | 五個環境的定義與 compose 都在,**staging 實際上還沒架起來** |
 | 八十四 | Secrets | ✅ | 全部走環境變數,`test_access_control.py` 釘住 |
-| 八十五 | API Design | ⚠️ | 13 條建議路徑裡有 `/api/portfolio`、`/api/performance`、`/api/market_scan`、`/api/analytics` 等。**缺 `/api/signals`、`/api/strategies`、`/api/backtest`、`/api/risk`、`/api/agents`、`/api/orders`、`/api/positions`** |
+| 八十五 | API Design | ⚠️ | 補上 `/api/signals`、`/api/positions`、`/api/risk`、`/api/trade_journal`、`/api/decisions`、`/api/why/{id}`。**缺 `/api/backtest` 與 `/api/paper`** —— 那兩個是長時間的動作,做成 HTTP 端點會變成一個會逾時的請求,目前走腳本 |
 | 八十六 | Frontend Dashboard | ✅ | 首頁 + 完整儀表板 + 透明度面板。Top Opportunities、News、AI Agents 三個區塊都有 |
 | 八十七 | Trading Panel | ⚠️ | 有持倉表格,**沒有開倉前的 Entry/SL/TP/Leverage/Size/R:R 預覽面板** |
 | 八十八 | Open Position Panel | ✅ | Dashboard 表格含 Entry/Current/SL/TP/Leverage/Notional/PnL/PnL% |
@@ -177,26 +177,50 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 80 |
-| ⚠️ 部分做到 | 25 |
-| ❌ 沒做 | 1 |
+| ✅ 已做到 | 84 |
+| ⚠️ 部分做到 | 22 |
+| ❌ 沒做 | 0 |
 
-## 缺口排序(由大到小)
+## 還沒補完的 22 節,以及為什麼
 
-排序依據是「對真實資金的風險」,不是實作難度。
+原本的 12 個缺口全部補完了。剩下的 22 個「部分做到」分成三類:
 
-1. ~~**十八 — SL 失敗六步驟**~~ ✅ 已補(`agmcis/execution/emergency.py`,27 個測試)。
-2. ~~**五十九 + 六十 + 二十 — 組合風險與相關性**~~ ✅ 已補(`agmcis/risk/{correlation,portfolio}.py`,41 個測試)。
-3. ~~**四十六 — SAFE LIVE MODE**~~ ✅ 已補(`agmcis/safety/safe_live.py`,22 個測試)。
-4. ~~**五十一 — News Risk 封鎖窗口**~~ ✅ 已補(`agmcis/risk/news_risk.py`,33 個測試)。
-5. ~~**七十三 + 七十四 + 七十五 + 七十六 — 策略退化偵測**~~ ✅ 已補(`agmcis/strategy/health.py`,31 個測試 + Dashboard 面板)。
-6. ~~**五十五 + 五十七 + 五十八 — Partial TP 與 ATR / 結構型移動停損**~~ ✅ 已補(`agmcis/execution/exit_plan.py`,74 個測試)。
-7. ~~**六十四 + 六十九 + 七十 + 七十一 — 決策持久化**~~ ✅ 已補(`agmcis/review/decision_log.py`,23 個測試)。
-8. ~~**六十五 + 六十六 — 稽核與 `/health`**~~ ✅ 已補(`api/health.py`,26 個測試)。
-9. ~~**三十三 + 三十七 — 回測現實因素與成本敏感度**~~ ✅ 已補(32 個測試)。
-10. ~~**二十三 + 二十四 + 二十五 + 三十八 — TA 深度、MTF 階層、更多策略**~~ ✅ 已補(69 個測試)。
-11. ~~**一百零五 + 九十一 + 九十二 + 六十二 + 八十六 ~ 九十 — 使用者體驗**~~ ✅ 已補。
-12. **八十二 + 八十一 — Docker 與環境分離**(部署)
+### 一、刻意不做(4 節)
+
+| 節 | 為什麼 |
+|---|---|
+| 八 | BingX Adapter 不拆成 12 個檔。第九十七節:能用就保留 |
+| 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點 |
+| 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」,而動畫在這個系統的優先順序很低 |
+| 八十二 | Production 仍在 systemd 上。第八十二節也說「不要破壞目前正在運作的 Production」 |
+
+### 二、需要外部資料或真實環境才能做(7 節)
+
+| 節 | 缺什麼 |
+|---|---|
+| 十一 | Long/Short 比、爆倉資料 —— BingX 不一定提供;Order Book 可取得但沒有 Agent 使用 |
+| 三十八 | Order Flow 策略 —— 需要逐筆成交資料,K 棒推不出來 |
+| 四十九 | BingX 行情 WebSocket —— 目前的 WebSocket 只用於 Dashboard 推播 |
+| 五十六 | TP/SL 參數還沒經過回測驗證。1R/2R/3R 與 30/30/40 是起點不是結論 |
+| 八十三 | staging 環境還沒實際架起來 |
+| 一百零四 | Portfolio 分支的實盤驗證 |
+| 一百零六 | 第十五條「任何開倉都必須有風險保護」的實盤驗證 |
+
+### 三、規模或優先順序問題(11 節)
+
+| 節 | 缺什麼 |
+|---|---|
+| 一 | Order Book 分析、Macro Event、Sentiment 分析 |
+| 十三 | LIMIT / STOP / TRAILING_STOP 訂單型別定義好了但執行層只走 MARKET |
+| 十四 | 加倉(Add Position)與反手(Reverse Position) |
+| 四十二 | Self Learning 沒有正式的 PROPOSE CHANGE 流程物件 |
+| 六十一 | 逐策略勝率與 PF 的 UI |
+| 六十四 | users / strategies / backtests / news 等表(目前不在交易路徑上) |
+| 七十七 | Research Loop 沒有串成自動循環 |
+| 八十五 | `/api/backtest` 與 `/api/paper`(長時間動作,做成 HTTP 會逾時) |
+| 八十七 | 開倉前的 Entry/SL/TP 預覽面板 |
+| 九十五 | 根目錄舊模組仍有 God Function 與重複邏輯 |
+| 一百零三 | 全部達成,但「Operationally Safe」要跑過真錢才算數 |
 
 ## 明確不做的事
 
