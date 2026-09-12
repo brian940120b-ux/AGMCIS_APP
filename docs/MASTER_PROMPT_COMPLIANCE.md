@@ -99,7 +99,7 @@
 | 五十三 | TOP 3 | ✅ | 首頁在沒有合格機會時顯示 NO HIGH QUALITY SETUP,並把掃過但沒入選的列出來。合格的定義是**共識層自己產生得出 TradeIntent**,不是比對一個 Agent 管線根本不產生的 score —— 那個 bug 讓首頁**永遠**顯示沒有機會,而那個畫面跟系統壞掉長得一樣 |
 | 五十四 | 每個訊號解釋原因 | ✅ | `Signal.reasons` + `/transparency` 顯示每個 Agent 的理由 |
 | 五十五 | Exit Intelligence | ✅ | `agmcis/execution/exit_plan.py`:分批停利、移到成本、移動停損、時間出場走同一條判斷鏈,一次只做一個動作 |
-| 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 與市場結構推導(`trail_structure`),停利用 R 倍數。**參數仍未經回測驗證** —— 預設的 1R/2R/3R 與 30/30/40 是起點不是結論 |
+| 五十六 | Dynamic TP / SL | ⚠️ | 停損可由 ATR 與市場結構推導(`trail_structure`),停利用 R 倍數。**驗證工具做好了**(`agmcis/lab/exit_tuning.py` + `scripts/tune_exits.py`):固定進場只換出場,回報每組的期望值 R 與樣本數,並算「最佳與中位數的差距」——差距大代表參數面崎嶇,那時正確的動作是維持現狀。**但還沒跑過真實 K 棒**,所以預設值仍是起點不是結論 |
 | 五十七 | Partial Take Profit | ✅ | TP1/TP2/TP3 + TP1 後移到成本價(含手續費緩衝)。分批**不算一筆已平倉交易** —— 否則勝率會衝到接近 100% |
 | 五十八 | Trailing Stop | ✅ | ATR / 百分比 / 結構型三種,由排程的 exit_plan 工作執行。停損只能往有利方向移動,有九個測試釘住這一條 |
 | 五十九 | Portfolio Risk | ✅ | `agmcis/risk/portfolio.py`。相關群一起停損的總風險有上限;反向部位不給抵銷(爆倉時對沖那一邊不會保護你,而且給抵銷會產生繞過上限的漏洞) |
@@ -155,7 +155,7 @@
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
 | 九十一 | Trading Modes UI | ✅ | 首頁右上角的模式徽章。LIVE 用會脈動的紅框 —— 那不是裝飾,是為了讓「現在是真錢」在餘光裡也看得到 |
-| 九十二 | LIVE Confirmation | ⚠️ | 七項確認與確認句在 CLI;UI 只顯示**唯讀**的閘門狀態。**刻意不做網頁按鈕** —— 網頁按鈕表達不了「24 小時後失效」與「這次批准 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點 |
+| 九十二 | LIVE Confirmation | ⚠️ | `scripts/live_confirm.py` 逐項問完第九十二節列的七件事(Account / Exchange / Market / Risk / Leverage / Daily Loss / API),每一項顯示**當下的實際值**,最後逐字輸入確認句。簽的是**那一組設定**:確認檔存設定指紋,之後有人改了風控參數就作廢 ——「批准過一次」不等於「批准所有設定」。UI 只顯示唯讀狀態,**刻意不做網頁按鈕**(表達不了 24 小時失效與指名金額)|
 | 九十三 | No Hidden Trading | ✅ | 所有下單進 DB + log + journal;`/transparency` 可查 |
 | 九十四 | No Silent Failure | ✅ | `test_production_safety.py` 以 AST 掃描 `except: pass` |
 | 九十五 | Code Quality | ⚠️ | `agmcis/` 套件內符合。**根目錄的舊模組仍有 God Function 與重複邏輯** |
@@ -203,7 +203,7 @@
 | 節 | 還缺什麼 |
 |---|---|
 | 三十八 | OrderFlow 是**代理指標**。真正的 order flow 需要逐筆成交,這裡用訂單簿失衡 + 量能確認近似,所以門檻高、信心上限 65。要升級需要 BingX 的逐筆資料 |
-| 五十六 | 1R / 2R / 3R 與 30/30/40 是**起點不是結論**。要用真實 K 棒回測才知道該調成什麼 —— 而這個容器連不到 BingX |
+| 五十六 | 1R / 2R / 3R 與 30/30/40 是**起點不是結論**。調校工具寫好了(`scripts/tune_exits.py`),但它要真實 K 棒才有意義,而這個容器連不到 BingX。跑完之後結果也不會自動套用 —— 走提案流程,由人批准(第七十八節)|
 | 八十三 | staging 環境還沒實際架起來。設定分離做完了(五個環境),但沒有第二台機器 |
 | 一百零四 | 組合風險與相關性的程式碼在 `agmcis/risk/portfolio.py`,但沒有跑過真實的多倉情境 |
 | 一百零六 | 第 1–16 條達成。第 17 條「任何開倉都必須有風險保護」的六步驟緊急保護寫完了,但**沒有在真的下單失敗時觸發過** |

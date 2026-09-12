@@ -195,10 +195,19 @@ class LiveGate:
                 f"第一次用真錢跑的規模應該小到虧光也不影響任何事。",
             )
 
+        # 第九十二節的七項確認。**這一段是刻意加嚴的** ——
+        # 只檢查那一句話,等於使用者可以在不知道自己批准了什麼設定的
+        # 情況下簽名。舊格式的確認檔會在這裡失效,而失效的方向是對的。
+        from agmcis.safety import live_confirm
+
+        ok, detail = live_confirm.verify(data)
+        if not ok:
+            return GateCheck("人工確認", False, detail)
+
         return GateCheck(
             "人工確認", True,
             f"已簽署({age.total_seconds() / 60:.0f} 分鐘前),"
-            f"批准單筆名目上限 {notional} USDT",
+            f"批准單筆名目上限 {notional} USDT,七項確認齊全",
         )
 
     def check_preflight(self):

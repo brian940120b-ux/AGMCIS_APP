@@ -25,7 +25,19 @@ READ_ONLY_SCRIPTS = [
     "preflight.py",
     "live_gate.py",
     "run_strategy_lab.py",
+    # 出場調校(第五十六節)。它寫一份 JSON 報告,但**不改任何參數** ——
+    # 第七十八節:自己修改 → 自己測試 → 自己批准,這條鏈不成立。
+    "tune_exits.py",
 ]
+
+# 這些腳本會寫檔,而且那就是它們的職責。
+#
+# 它們仍然要通過禁止清單的掃描 —— 「會寫檔」不等於「可以下單」。
+# 把它們整支排除在檢查外,等於在唯讀規則上開一個沒有邊界的洞。
+WRITES_BY_DESIGN = {
+    "migrate.py": "跑資料庫 migration",
+    "live_confirm.py": "寫 LIVE 確認檔(第九十二節)",
+}
 
 FORBIDDEN_CALLS = {
     # 交易所寫入
@@ -65,6 +77,18 @@ class TestScriptsAreReadOnly(unittest.TestCase):
                 with self.subTest(script=name, call=called):
                     self.assertNotIn(called, FORBIDDEN_CALLS)
 
+    def test_scripts_that_write_by_design_still_cannot_trade(self):
+        """
+        「會寫檔」不等於「可以下單」。這些腳本一樣不准碰交易路徑。
+        """
+        for name in WRITES_BY_DESIGN:
+            path = os.path.join(SCRIPTS_DIR, name)
+            self.assertTrue(os.path.exists(path), f"{name} 不存在")
+
+            for called in calls_in(path):
+                with self.subTest(script=name, call=called):
+                    self.assertNotIn(called, FORBIDDEN_CALLS)
+
     def test_every_script_in_the_list_still_exists(self):
         """
         腳本被改名或刪掉時,上面的迴圈會靜靜地少檢查一支。
@@ -78,7 +102,7 @@ class TestScriptsAreReadOnly(unittest.TestCase):
         新增一支檢查腳本卻忘了加進清單,等於它沒有被檢查過。
         這裡列出漏掉的,強迫做個決定。
         """
-        known = set(READ_ONLY_SCRIPTS) | {"migrate.py", "__init__.py"}
+        known = set(READ_ONLY_SCRIPTS) | set(WRITES_BY_DESIGN) | {"__init__.py"}
         present = {
             name for name in os.listdir(SCRIPTS_DIR)
             if name.endswith(".py")
@@ -88,8 +112,8 @@ class TestScriptsAreReadOnly(unittest.TestCase):
         self.assertEqual(
             unlisted, set(),
             f"這些腳本沒有被納入唯讀檢查:{sorted(unlisted)}。"
-            f"如果它本來就會寫入(例如 migrate.py),把它加進 known;"
-            f"否則加進 READ_ONLY_SCRIPTS。",
+            f"如果它本來就會寫檔(例如 migrate.py),把它加進 WRITES_BY_DESIGN;"
+            f"否則加進 READ_ONLY_SCRIPTS。兩邊都會掃禁止清單。",
         )
 
 

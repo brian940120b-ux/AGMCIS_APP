@@ -29,12 +29,22 @@ def audit_path():
 
 
 def confirmation(phrase=None, hours_ago=0.0, notional=20.0, **overrides):
+    """
+    一份完整的確認檔。
+
+    第九十二節的七項確認與設定指紋一併帶上 —— 少任何一項閘門都會關,
+    而那正是 test_confirmations 那一組在驗的事。
+    """
+    from agmcis.safety import live_confirm
+
     data = {
         "phrase": phrase if phrase is not None else lg.REQUIRED_PHRASE,
         "signed_at": (
             datetime.now(timezone.utc) - timedelta(hours=hours_ago)
         ).isoformat(),
         "approved_notional_usdt": notional,
+        "confirmations": {name: True for name in live_confirm.REQUIRED_ITEMS},
+        "settings_fingerprint": live_confirm.fingerprint(),
     }
     data.update(overrides)
 
@@ -109,13 +119,16 @@ class GateTestCase(unittest.TestCase):
         return patch.object(settings, "APP_ENV", settings.ENV_PRODUCTION)
 
     def open_gate(self, **overrides):
-        path = confirmation()
-        self.addCleanup(os.unlink, path)
-
         # 閘門要求 APP_ENV=production(第八十一節)。測試環境是
         # development,所以要驗「閘門能開」就必須明講這件事 ——
         # 那本身也是一個在記錄「實單只能在正式環境跑」的斷言。
+        #
+        # 確認檔也要在同一個 context 裡建立:設定指紋含 APP_ENV,
+        # 而在 development 簽的名不該在 production 生效。
         with self.as_production():
+            path = confirmation()
+            self.addCleanup(os.unlink, path)
+
             return self.gate(
                 providers=passing_providers(**overrides),
                 confirmation_file=path,
