@@ -54,9 +54,33 @@ class OrdersMixin:
             market_type=market_type, is_write=True,
         )
 
-    def get_order(self, order_id, symbol, market_type=MarketType.PERPETUAL):
-        """查詢是唯讀的,所以走一般重試。"""
+    def get_order(self, order_id, symbol, market_type=MarketType.PERPETUAL,
+                  params=None):
+        """
+        查詢是唯讀的,所以走一般重試。
+
+        `params` 讓呼叫端指定交易所專屬的查詢欄位 —— 例如用
+        clientOrderId 而不是交易所訂單編號來查。那個欄位叫什麼
+        要對著官方 API 確認,不在這一層猜(第五節)。
+        """
         market_symbol = self.to_market_symbol(symbol, market_type)
         return self._call(
-            "fetch_order", order_id, market_symbol, market_type=market_type
+            "fetch_order", order_id, market_symbol, dict(params or {}),
+            market_type=market_type,
         )
+
+    def get_open_orders(self, symbol=None, market_type=MarketType.PERPETUAL):
+        """
+        還活著的掛單。
+
+        空清單代表**確定沒有掛單**,查詢失敗會拋例外 ——
+        兩者不能混:實單的停損就是一張掛單,而「查不到」被當成
+        「沒有停損」與被當成「有停損」是兩種相反的錯誤。
+        呼叫端(LiveBroker.has_protection)自己決定要往哪邊倒。
+        """
+        market_symbol = (
+            self.to_market_symbol(symbol, market_type) if symbol else None
+        )
+        return self._call(
+            "fetch_open_orders", market_symbol, market_type=market_type,
+        ) or []

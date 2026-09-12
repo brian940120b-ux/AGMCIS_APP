@@ -110,10 +110,22 @@ def _payload(**overrides):
     return body
 
 
+def _no_live_code():
+    """
+    假裝系統裡沒有實單程式碼。
+
+    網頁精靈遇到實單程式碼會拒絕(見下面 TestTheWebWizardCannotSignLiveCode)。
+    那個拒絕是對的,但它會蓋掉這一組要驗的其他事 —— 七項確認、金額、
+    確認句、寫檔格式 —— 所以這裡把它拿掉,讓每一組只驗一件事。
+    """
+    return patch.object(api_confirm, "_live_path_blocked", lambda: (True, ""))
+
+
 def test_a_complete_submission_writes_the_file(tmp_path):
     target = tmp_path / "conf.json"
 
-    ok, message = api_confirm.submit(_payload(), path=str(target))
+    with _no_live_code():
+        ok, message = api_confirm.submit(_payload(), path=str(target))
 
     assert ok is True, message
     data = json.loads(target.read_text(encoding="utf-8"))
@@ -130,7 +142,8 @@ def test_the_web_file_passes_the_same_gate_check_as_the_cli(tmp_path):
     兩條路徑產生不同格式的檔案,遲早會有一條沒被驗到。
     """
     target = tmp_path / "conf.json"
-    api_confirm.submit(_payload(), path=str(target))
+    with _no_live_code():
+        api_confirm.submit(_payload(), path=str(target))
 
     data = json.loads(target.read_text(encoding="utf-8"))
     ok, detail = live_confirm.verify(data)
@@ -144,9 +157,58 @@ def test_it_records_that_it_came_from_the_web(tmp_path):
     而網頁與 CLI 的情境不一樣。
     """
     target = tmp_path / "conf.json"
-    api_confirm.submit(_payload(), path=str(target))
+    with _no_live_code():
+        api_confirm.submit(_payload(), path=str(target))
 
     assert json.loads(target.read_text(encoding="utf-8"))["signed_via"] == "web"
+
+
+class TestTheWebWizardCannotSignLiveCode:
+    """
+    第七十八節要的是「有人讀過那段會送真實訂單的程式碼」。
+    一個網頁按鈕表達不了那件事 —— 它只證明有人點過一個按鈕。
+    """
+
+    def test_it_refuses_while_live_code_exists(self, tmp_path):
+        target = tmp_path / "conf.json"
+        found = [("agmcis/execution/live_broker.py", "LiveBroker", "類別名稱含 live")]
+
+        with patch.object(
+            gate_module.LiveGate, "_scan_live_broker_sources", lambda self: found,
+        ):
+            ok, message = api_confirm.submit(_payload(), path=str(target))
+
+        assert ok is False
+        assert "live_confirm.py" in message
+        assert not target.exists()
+
+    def test_a_scan_it_cannot_run_also_refuses(self, tmp_path):
+        """掃不動不等於沒有。"""
+        target = tmp_path / "conf.json"
+
+        def boom(self):
+            raise OSError("掃不動")
+
+        with patch.object(
+            gate_module.LiveGate, "_scan_live_broker_sources", boom,
+        ):
+            ok, message = api_confirm.submit(_payload(), path=str(target))
+
+        assert ok is False
+        assert "掃不動" in message
+        assert not target.exists()
+
+    def test_the_real_system_state_decides(self, tmp_path):
+        """
+        沒有 patch 的時候,結果要跟這個專案當下的實際狀態一致 ——
+        有實單程式碼就拒絕,沒有就放行。
+        """
+        target = tmp_path / "conf.json"
+        has_live_code = bool(gate_module.LiveGate()._scan_live_broker_sources())
+
+        ok, _ = api_confirm.submit(_payload(), path=str(target))
+
+        assert ok is not has_live_code
 
 
 @pytest.mark.parametrize("overrides,fragment", [

@@ -16,8 +16,13 @@ LIVE 確認的網頁流程(Master Prompt 第九十一 / 九十二節)。
 
 **不做:** 它不會讓系統開始下實單。寫出確認檔只是解開
 LIVE SAFETY GATE 的**其中一項**檢查 —— 模擬盤筆數、天數、上線前
-檢查、提款權限那幾項不是簽名就能通過的,而且 `LiveBroker` 根本
-不存在(閘門自己有一條檢查在確認這件事)。
+檢查、提款權限那幾項不是簽名就能通過的。
+
+而且它**簽不了實單路徑那一項**。第七十八節要的是「有人讀過那段
+會送真實訂單的程式碼」,一個網頁按鈕表達不了那件事:它只證明有人
+點過一個按鈕。所以實單程式碼存在時,這裡會直接拒絕並請人改用
+`python scripts/live_confirm.py` —— 那支腳本會把每個檔案的路徑與
+SHA-256 印在終端機上逐檔問過去。
 
 所以這個按鈕的最壞情況是「磁碟上多了一個確認檔」,不是「送出了
 一張單」。這是它可以做成網頁的原因。
@@ -118,6 +123,35 @@ def api_submit_live_confirmation(payload: dict = Body(...)):
     return {"ok": ok, "message": message}
 
 
+def _live_path_blocked():
+    """
+    有沒有需要人逐檔讀過的實單程式碼。回傳 (可以繼續嗎, 說明)。
+
+    掃不動也回 False —— 「掃不動」不等於「沒有」。
+    """
+    from agmcis.safety.live_gate import LiveGate
+
+    try:
+        found = LiveGate()._scan_live_broker_sources()
+    except Exception as exc:
+        return False, (
+            f"掃不到實單路徑({type(exc).__name__}: {exc})。"
+            f"掃不動不等於沒有,所以這裡停下來。"
+        )
+
+    if not found:
+        return True, ""
+
+    files = "、".join(sorted({where for where, _n, _w in found}))
+    return False, (
+        f"這個系統裡有會送出真實訂單的程式碼({files})。\n"
+        f"第七十八節要求那段程式碼由人逐檔讀過並簽下原始碼雜湊,"
+        f"而網頁按鈕證明不了「讀過」——它只證明有人點過按鈕。\n"
+        f"請改用 python scripts/live_confirm.py,它會逐檔把路徑與 "
+        f"SHA-256 印出來。"
+    )
+
+
 def submit(payload, path=None, settings_module=None):
     """
     驗證並寫檔。純函式(除了寫檔),所以測試不用發 HTTP。
@@ -182,6 +216,20 @@ def submit(payload, path=None, settings_module=None):
     if phrase != gate_module.REQUIRED_PHRASE:
         return False, "確認句不符。必須逐字輸入,大小寫要一樣。"
 
+    # ---------- 實單路徑 ----------
+    #
+    # 網頁簽不了這一項,而且**不該讓它簽得了**。
+    #
+    # 第七十八節要的是「有人讀過那段會送真實訂單的程式碼」。
+    # 一個網頁按鈕表達不了那件事:它只證明有人點過一個按鈕。
+    # CLI 會把每個檔案的路徑與 SHA-256 印在終端機上,逐檔問過去 ——
+    # 那個過程本身就是「讀過」的證據。
+    #
+    # 所以實單程式碼存在時,網頁精靈在這裡停下來,不寫檔。
+    ok, why = _live_path_blocked()
+    if not ok:
+        return False, why
+
     # ---------- 寫檔 ----------
     document = {
         "phrase": gate_module.REQUIRED_PHRASE,
@@ -206,8 +254,8 @@ def submit(payload, path=None, settings_module=None):
     return True, (
         f"已簽署,批准單筆名目上限 {notional:g} USDT,"
         f"{gate_module.CONFIRMATION_VALID_HOURS} 小時後失效。\n"
-        f"這**不代表系統會開始下實單** —— LIVE SAFETY GATE 還有其他檢查,"
-        f"而且 LiveBroker 不存在。跑 scripts/live_gate.py 看整體結果。"
+        f"這**不代表系統會開始下實單** —— LIVE SAFETY GATE 還有其他檢查。"
+        f"跑 scripts/live_gate.py 看整體結果。"
     )
 
 

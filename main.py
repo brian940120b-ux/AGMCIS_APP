@@ -232,8 +232,10 @@ def trading_modes(request: Request):
     「為什麼是這一個」—— 模式是從三個設定推導的,不是另外存的值。
 
     PAPER → LIVE 的七項確認也在這裡。它**不會讓系統開始下實單**:
-    產生的確認檔只是 LIVE SAFETY GATE 其中一項檢查,而且
-    LiveBroker 不存在。最壞的情況是磁碟上多了一個檔案。
+    產生的確認檔只是 LIVE SAFETY GATE 其中一項檢查,而模擬盤筆數、
+    天數、上線前檢查那幾項不是簽名就能通過的。而且實單程式碼存在時
+    網頁精靈會直接拒絕 —— 那一項要在終端機逐檔讀過原始碼才簽得下去
+    (第七十八節)。最壞的情況是磁碟上多了一個檔案。
     """
     key = request.query_params.get("key")
     if key and key_is_valid(key):

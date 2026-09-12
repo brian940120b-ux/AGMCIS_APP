@@ -285,7 +285,22 @@ class TestAccountAndOrders(unittest.TestCase):
         result = adapter(mock).get_order("1", "BTC/USDT")
 
         self.assertEqual(result["status"], "closed")
-        mock.fetch_order.assert_called_once_with("1", "BTC/USDT:USDT")
+        mock.fetch_order.assert_called_once_with("1", "BTC/USDT:USDT", {})
+
+    def test_get_order_passes_exchange_specific_params_through(self):
+        """
+        用 clientOrderId 而不是交易所訂單編號查,要靠 params 那一個欄位。
+        欄位名稱由呼叫端決定 —— 這一層不猜(第五節)。
+        """
+        mock = MagicMock()
+        mock.fetch_order.return_value = {"id": "1"}
+
+        adapter(mock).get_order("cid-1", "BTC/USDT",
+                                params={"clientOrderID": "cid-1"})
+
+        mock.fetch_order.assert_called_once_with(
+            "cid-1", "BTC/USDT:USDT", {"clientOrderID": "cid-1"},
+        )
 
 
 class TestAdapterContract(unittest.TestCase):

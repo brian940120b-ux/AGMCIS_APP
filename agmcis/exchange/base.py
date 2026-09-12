@@ -141,12 +141,25 @@ class ExchangeAdapter(ABC):
         ...
 
     @abstractmethod
-    def get_order(self, order_id: str, symbol: str, market_type=None) -> Dict:
+    def get_order(self, order_id: str, symbol: str, market_type=None,
+                  params: Optional[Dict] = None) -> Dict:
         """
         查詢單一訂單狀態。
 
         這是 OrderState.UNKNOWN 時的唯一正確反應 ——
         先查清楚交易所到底收到什麼,再決定,絕不盲目重送。
+
+        `params` 給交易所專屬的查詢欄位(例如改用 clientOrderId 查)。
+        """
+
+    @abstractmethod
+    def get_open_orders(self, symbol: Optional[str] = None,
+                        market_type=None) -> List[Dict]:
+        """
+        還活著的掛單。空清單代表確定沒有,查詢失敗拋例外。
+
+        實單的停損是交易所那邊一張獨立的掛單,所以「這個部位有沒有
+        保護」只能靠這個查 —— 資料庫欄位在實盤不代表任何事。
         """
 
     # ---------------- 能力宣告 ----------------

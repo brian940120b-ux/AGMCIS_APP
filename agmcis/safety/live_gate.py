@@ -17,9 +17,17 @@ Master Prompt 說得很清楚:Live Trading / API Key / Risk Limit 需要人確�
   * 它必須指名批准的金額上限,所以「批准過一次」不等於「批准所有金額」。
   * 每一次閘門評估都寫稽核紀錄,包含通過與沒通過的項目。
 
-最後,即使全部通過,**系統仍然無法下實單** —— `LiveBroker` 不存在。
-這個閘門是實單的**前提**,不是開關。真正要接實單時,
-那段程式碼本身還要再經過一次審視。
+最後一項是實單路徑本身。`LiveBroker` 現在存在了,
+所以那一項的通過條件不再是「它不存在」,而是:
+
+  **確認檔裡帶著每一個實單檔案的 SHA-256,而那份簽章由
+  scripts/live_confirm.py 逐檔問過人才會產生。**
+
+第七十八節不允許 AI 自我修改 → 自我測試 → 自我核可 → 自我上線。
+雜湊我算得出來,「我讀過了」不行。而且簽的是**那一份原始碼** ——
+改一個字雜湊就變,舊的簽章作廢。
+
+這個閘門仍然是實單的**前提**,不是開關。
 """
 import json
 import logging
@@ -613,10 +621,16 @@ class LiveGate:
 
     def check_live_broker_absent(self):
         """
-        即使全部通過,系統仍然無法下實單 —— LiveBroker 不存在。
+        實單路徑:要嘛不存在,要嘛**被人逐檔讀過並簽章**。
 
-        這一項**通過的條件是它不存在**。它是一個提醒:
-        這個閘門是實單的前提,不是開關。
+        原本這一項通過的條件只有「不存在」。那擋得住「悄悄多出一個
+        LiveBroker」,但也代表實單能力一旦寫出來,閘門就永遠開不了 ——
+        於是唯一的出路會是有人把這個檢查刪掉,那比沒有檢查更糟。
+
+        所以現在有第二條路:確認檔裡帶著每一個實單檔案的 SHA-256,
+        而那份簽章由 scripts/live_confirm.py 逐檔問過人才會產生。
+        第七十八節不允許 AI 自我核可上線 —— 雜湊我算得出來,
+        「我讀過了」不行。
         """
         try:
             found = self._scan_live_broker_sources()
@@ -627,20 +641,27 @@ class LiveGate:
                 blocking=True,
             )
 
-        if found:
-            lines = [f"{where}:{name}({why})" for where, name, why in found]
+        if not found:
             return GateCheck(
-                "實單路徑", False,
-                "execution 套件裡出現了實單程式碼:"
-                + ";".join(lines)
-                + "。實單程式碼必須單獨審視過才能存在。",
+                "實單路徑", True,
+                "整個 execution 套件裡沒有 LiveBroker —— "
+                "閘門通過也還不會下實單,這是刻意的。",
+                blocking=False,
             )
+
+        from agmcis.safety import live_path
+
+        ok, detail = live_path.verify(found, self._read_confirmation() or {})
+        found_names = "、".join(
+            f"{where}:{name}" for where, name, _why in found
+        )
+
+        if not ok:
+            return GateCheck("實單路徑", False, detail)
 
         return GateCheck(
             "實單路徑", True,
-            "整個 execution 套件裡沒有 LiveBroker —— "
-            "閘門通過也還不會下實單,這是刻意的。",
-            blocking=False,
+            f"{detail}({found_names})。簽章綁定原始碼雜湊,改一個字就作廢。",
         )
 
     # ---------------- 評估 ----------------

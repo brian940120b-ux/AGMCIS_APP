@@ -86,22 +86,37 @@ def check_trading_mode():
     mode = str(getattr(settings, "TRADING_MODE", "paper")).lower()
 
     if mode == "live":
-        check("交易模式", BLOCKER,
-              "TRADING_MODE=live,但系統裡**沒有 LiveBroker 實作**。\n"
-              "實單路徑要等 Phase 17 的 Safety Gate。現在設成 live 沒有意義,\n"
-              "而且會讓人以為真的在下實單。")
+        check("交易模式", WARNING,
+              "TRADING_MODE=live。實單能不能真的送出去由 LIVE SAFETY GATE\n"
+              "決定,不是由這個設定決定 —— 跑 python scripts/live_gate.py。")
     else:
         check("交易模式", OK, f"{mode}(模擬盤)")
 
-    # 確認實單能力真的不存在
-    from agmcis.execution import broker as broker_module
+    # 實單路徑存不存在,以及它有沒有被人逐檔讀過並簽章(第七十八節)。
+    #
+    # 這裡**不判定它該不該存在** —— 那是閘門的事,而且閘門掃的範圍
+    # 是整個 execution 套件,不是單一模組。用兩套不同的判斷去回答
+    # 同一個問題,遲早會有一邊說有一邊說沒有。
+    from agmcis.safety.live_gate import LiveGate
 
-    live = [n for n in dir(broker_module) if "live" in n.lower()]
-    if live:
-        check("實單能力", BLOCKER,
-              f"broker 模組裡出現了 {live} —— 實單路徑不該在 Phase 17 之前存在。")
-    else:
-        check("實單能力", OK, "沒有 LiveBroker,系統無法送出真實訂單")
+    try:
+        found = LiveGate()._scan_live_broker_sources()
+    except Exception as exc:
+        check("實單路徑", BLOCKER,
+              f"掃不到實單路徑({type(exc).__name__}: {exc})——"
+              f"掃不動不等於沒有。")
+        return
+
+    if not found:
+        check("實單路徑", OK, "沒有 LiveBroker,系統無法送出真實訂單")
+        return
+
+    files = sorted({where for where, _n, _w in found})
+    check("實單路徑", WARNING,
+          f"系統裡有會送出真實訂單的程式碼:{'、'.join(files)}。\n"
+          f"它要由人逐檔讀過並簽下原始碼雜湊,閘門才會放行 ——\n"
+          f"先跑 python scripts/verify_live_broker.py,再跑 "
+          f"python scripts/live_confirm.py。")
 
 
 # ---------------- 3. 風控 ----------------

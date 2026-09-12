@@ -32,7 +32,7 @@ Trading Rules     交易所收不收這組數字?
     ↓
 Execution Engine  送單、狀態機、**開倉後必須有停損保護**
     ↓
-Broker            PaperBroker(LiveBroker 不存在)
+Broker            PaperBroker(LiveBroker 已寫好但未接上)
 ```
 
 每一層的職責是排他的:
@@ -116,7 +116,9 @@ agmcis/
 
 ## 目前的狀態
 
-- **只有模擬盤。** `LiveBroker` 不存在,系統沒有任何一條路徑能送出真實訂單。
+- **只有模擬盤。** `LiveBroker` 已經寫好並有 45 個行為測試,但沒有被
+  接進 Execution Engine,而且 LIVE SAFETY GATE 的實單路徑那一項要有人
+  逐檔讀過原始碼並簽下 SHA-256 才放行(第七十八節)。
 - **合約規格尚未校準。** 維持保證金率、費率用的是保守猜測值,
   強平價與成本都是估計。校準要在 VPS 上執行(見 `docs/PHASE_11_REPORT.md`)。
 - **還沒有策略通過完整的樣本外驗證。** 資料量不夠。

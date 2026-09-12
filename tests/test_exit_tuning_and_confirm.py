@@ -330,12 +330,29 @@ def _answers(*values):
     return lambda prompt="": next(stream, "")
 
 
+def _live_path_files():
+    """
+    實單路徑上有幾個檔案要逐檔審視(第七十八節)。
+
+    算出來而不是寫死:實單程式碼的檔案數會變,而寫死的數字
+    只會讓這些測試在下一次變動時對不上,不會發現任何問題。
+    """
+    from agmcis.safety.live_gate import LiveGate
+
+    found = LiveGate()._scan_live_broker_sources()
+    return sorted({where for where, _name, _why in found})
+
+
+def _live_path_yeses():
+    return ["yes"] * len(_live_path_files())
+
+
 def test_the_wizard_writes_a_complete_confirmation(tmp_path):
     wizard = _wizard()
     target = tmp_path / "conf.json"
 
     ok, message = wizard.run(
-        reader=_answers(*(["yes"] * 7 + ["20", lg.REQUIRED_PHRASE])),
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses() + ["20", lg.REQUIRED_PHRASE])),
         writer=lambda *a: None,
         path=str(target),
     )
@@ -367,12 +384,82 @@ def test_saying_no_to_any_item_writes_nothing(tmp_path):
     assert not target.exists()
 
 
+# ---------------- 第七十八節:實單路徑要人逐檔讀過 ----------------
+
+def test_the_wizard_asks_about_every_live_source_file(tmp_path):
+    """
+    第七十八節:AI 不得自我修改 → 自我測試 → 自我核可 → 自我上線。
+    雜湊我算得出來,「我讀過了」不行,所以這一段一定要問人。
+    """
+    files = _live_path_files()
+    if not files:
+        pytest.skip("目前沒有實單程式碼")
+
+    wizard = _wizard()
+    asked = []
+
+    wizard.run(
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses()
+                          + ["20", lg.REQUIRED_PHRASE])),
+        writer=asked.append,
+        path=str(tmp_path / "conf.json"),
+    )
+
+    printed = "\n".join(asked)
+    for relative in files:
+        assert relative in printed, f"精靈沒有列出 {relative}"
+
+
+def test_the_signature_binds_to_the_current_source(tmp_path):
+    from agmcis.safety import live_path
+
+    if not _live_path_files():
+        pytest.skip("目前沒有實單程式碼")
+
+    wizard = _wizard()
+    target = tmp_path / "conf.json"
+
+    ok, message = wizard.run(
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses()
+                          + ["20", lg.REQUIRED_PHRASE])),
+        writer=lambda *a: None,
+        path=str(target),
+    )
+
+    assert ok is True, message
+    data = json.loads(target.read_text(encoding="utf-8"))
+    signature = data[live_path.REVIEW_KEY]
+
+    assert sorted(signature) == _live_path_files()
+    assert live_path.verify(
+        lg.LiveGate()._scan_live_broker_sources(), data,
+    )[0] is True
+
+
+def test_refusing_one_live_file_writes_nothing(tmp_path):
+    if not _live_path_files():
+        pytest.skip("目前沒有實單程式碼")
+
+    wizard = _wizard()
+    target = tmp_path / "conf.json"
+
+    ok, message = wizard.run(
+        reader=_answers(*(["yes"] * 7 + ["no"] + ["20", lg.REQUIRED_PHRASE])),
+        writer=lambda *a: None,
+        path=str(target),
+    )
+
+    assert ok is False
+    assert "實單路徑" in message
+    assert not target.exists()
+
+
 def test_a_wrong_phrase_writes_nothing(tmp_path):
     wizard = _wizard()
     target = tmp_path / "conf.json"
 
     ok, message = wizard.run(
-        reader=_answers(*(["yes"] * 7 + ["20", "i understand live trading risk"])),
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses() + ["20", "i understand live trading risk"])),
         writer=lambda *a: None,
         path=str(target),
     )
@@ -389,7 +476,7 @@ def test_an_amount_over_the_first_live_cap_is_refused(tmp_path):
     over = lg.MAX_INITIAL_NOTIONAL_USDT + 1
 
     ok, message = wizard.run(
-        reader=_answers(*(["yes"] * 7 + [str(over), lg.REQUIRED_PHRASE])),
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses() + [str(over), lg.REQUIRED_PHRASE])),
         writer=lambda *a: None,
         path=str(target),
     )
@@ -404,7 +491,7 @@ def test_a_non_numeric_amount_is_refused(tmp_path):
     target = tmp_path / "conf.json"
 
     ok, message = wizard.run(
-        reader=_answers(*(["yes"] * 7 + ["很多", lg.REQUIRED_PHRASE])),
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses() + ["很多", lg.REQUIRED_PHRASE])),
         writer=lambda *a: None,
         path=str(target),
     )
@@ -434,7 +521,7 @@ def test_the_wizard_output_never_contains_the_secret(tmp_path):
 
     printed = []
     wizard.run(
-        reader=_answers(*(["yes"] * 7 + ["20", lg.REQUIRED_PHRASE])),
+        reader=_answers(*(["yes"] * 7 + _live_path_yeses() + ["20", lg.REQUIRED_PHRASE])),
         writer=lambda *a: printed.append(" ".join(str(x) for x in a)),
         path=str(target),
     )

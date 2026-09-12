@@ -56,8 +56,9 @@ def main():
 
     print(f"閘門開啟。批准單筆名目上限 {result.approved_notional} USDT。")
     print()
-    print("⚠️  提醒:閘門開啟**不代表系統會下實單**。")
-    print("    LiveBroker 並不存在 —— 實單程式碼本身還要再經過一次審視。")
+    print("⚠️  提醒:閘門開啟**不代表你已經檢視過每一次下單**。")
+    print("    實單路徑那一項通過,只代表有人在簽名的那一刻讀過那一份")
+    print("    原始碼。程式碼改過之後簽章就作廢,要重新讀、重新簽。")
     return 0
 
 

@@ -21,6 +21,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agmcis.safety import live_gate as lg
+from agmcis.safety import live_path
 
 
 def audit_path():
@@ -46,6 +47,11 @@ def confirmation(phrase=None, hours_ago=0.0, notional=20.0, **overrides):
         "approved_notional_usdt": notional,
         "confirmations": {name: True for name in live_confirm.REQUIRED_ITEMS},
         "settings_fingerprint": live_confirm.fingerprint(),
+        # 實單原始碼的簽章。系統裡有 LiveBroker 的時候少了它閘門會關,
+        # 而那正是 TestLiveTradingIsStillImpossible 那一組在驗的事。
+        live_path.REVIEW_KEY: live_path.build_signature(
+            lg.LiveGate()._scan_live_broker_sources()
+        ),
     }
     data.update(overrides)
 
@@ -397,18 +403,37 @@ class TestLiveTradingIsStillImpossible(GateTestCase):
     閘門是實單的前提,不是開關。
     """
 
-    def test_there_is_no_live_broker(self):
+    def test_unsigned_live_code_closes_the_gate(self):
+        """
+        沒有簽章時,實單程式碼的存在本身就把閘門關上。
+        `self.gate()` 用的是一個不存在的確認檔。
+        """
         check = self.gate().check_live_broker_absent()
+        found = lg.LiveGate()._scan_live_broker_sources()
 
-        self.assertTrue(check.passed)
+        if not found:
+            self.assertTrue(check.passed)
+            self.assertIn("沒有 LiveBroker", check.detail)
+            return
 
-    def test_an_open_gate_still_has_no_live_broker(self):
+        self.assertFalse(check.passed)
+        self.assertIn(live_path.REVIEW_KEY, check.detail)
+
+    def test_an_open_gate_has_the_live_path_signed(self):
+        """
+        閘門開著的時候,實單路徑要嘛不存在,要嘛已經被人逐檔簽過。
+        沒有第三種。
+        """
         result = self.open_gate()
         live_check = next(c for c in result.checks if c.name == "實單路徑")
 
         self.assertTrue(result.open)
         self.assertTrue(live_check.passed)
-        self.assertIn("還不會下實單", live_check.detail)
+        self.assertTrue(
+            "沒有 LiveBroker" in live_check.detail
+            or "人工審視並簽章" in live_check.detail,
+            live_check.detail,
+        )
 
     def scan(self, filename, source):
         """把一段程式碼放進一個假的 execution 套件,讓閘門去掃它。"""
@@ -454,7 +479,7 @@ class TestLiveTradingIsStillImpossible(GateTestCase):
         )
 
         self.assertFalse(check.passed)
-        self.assertIn("OrderSender", check.detail)
+        self.assertIn("real_orders.py", check.detail)
 
     def test_a_paper_broker_does_not_trip_it(self):
         check = self.scan(

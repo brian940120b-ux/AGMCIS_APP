@@ -249,7 +249,7 @@ async function loadLiveGate() {
     const head = `<div class="alert ${data.open ? "alert-critical" : "alert-ok"}">
         <b>${data.open ? "⚠️ 閘門開啟" : "🔒 閘門關閉"}</b> —
         ${data.open
-            ? "所有檢查都通過了。實單仍然需要 LiveBroker 存在才送得出去。"
+            ? "所有檢查都通過了,包含實單路徑那一項 —— 代表有人逐檔讀過實單程式碼並簽了原始碼雜湊。"
             : `${esc(data.failed_count ?? 0)} 項未通過`}
     </div>`;
 

@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agmcis.safety import live_confirm  # noqa: E402
 from agmcis.safety import live_gate as gate_module  # noqa: E402
+from agmcis.safety import live_path as live_path_module  # noqa: E402
 
 RULE = "=" * 68
 
@@ -63,6 +64,58 @@ def _ask(prompt, reader=input):
         return ""
 
 
+def _review_live_path(reader, writer):
+    """
+    逐檔問「這一份會送真實訂單的程式碼你讀過了嗎」。
+
+    回傳 (ok, 簽章, 訊息)。沒有實單程式碼時簽章是空的 —— 那是
+    正常狀態,不是缺漏。
+    """
+    from agmcis.safety import live_path
+    from agmcis.safety.live_gate import LiveGate
+
+    try:
+        found = LiveGate()._scan_live_broker_sources()
+    except Exception as exc:
+        return False, None, (
+            f"掃不到實單路徑({type(exc).__name__}: {exc})。中止 ——"
+            f"掃不動不等於沒有。"
+        )
+
+    if not found:
+        return True, live_path.EMPTY, ""
+
+    reasons = {}
+    for where, name, why in found:
+        reasons.setdefault(where, []).append(f"{name}({why})")
+
+    try:
+        signature = live_path.build_signature(found)
+    except Exception as exc:
+        return False, None, f"算不出原始碼雜湊({type(exc).__name__}: {exc})。中止。"
+
+    writer("")
+    writer("  ⚠️  這個系統裡有會送出**真實訂單**的程式碼。")
+    writer("      第七十八節不允許我自己核可它上線,所以要請你逐檔讀過。")
+    writer("      簽的是每一個檔案當下的 SHA-256 —— 改一個字就作廢。")
+    writer("")
+
+    for index, relative in enumerate(sorted(signature), start=1):
+        writer(f"  [{index}/{len(signature)}] {relative}")
+        writer(f"      {'、'.join(reasons.get(relative, []))}")
+        writer(f"      SHA-256 {signature[relative]}")
+        answer = _ask("      你讀過這個檔案了嗎?(yes / 其他任何字 = 放棄)", reader)
+        writer("")
+
+        if answer.lower() != "yes":
+            return False, None, (
+                f"在實單路徑第 {index} 個檔案({relative})中止。"
+                f"沒有寫入任何檔案。"
+            )
+
+    return True, signature, ""
+
+
 def run(reader=input, writer=print, path=None, settings_module=None):
     """
     跑一次精靈。回傳 (成功?, 訊息)。
@@ -87,6 +140,14 @@ def run(reader=input, writer=print, path=None, settings_module=None):
 
         if answer.lower() != "yes":
             return False, f"在第 {index} 項({entry['item']})中止。沒有寫入任何檔案。"
+
+    # ---------- 實單路徑逐檔審視 ----------
+    #
+    # 第七十八節:AI 不得自我修改 → 自我測試 → 自我核可 → 自我上線。
+    # 雜湊我算得出來,「我讀過了」不行 —— 所以這一段一定要問人。
+    ok, signature, message = _review_live_path(reader, writer)
+    if not ok:
+        return False, message
 
     # ---------- 批准金額 ----------
     writer(f"  批准的**單筆名目上限**是多少 USDT?"
@@ -127,6 +188,8 @@ def run(reader=input, writer=print, path=None, settings_module=None):
         # 閘門會作廢這份確認 —— 見 agmcis/safety/live_confirm.py。
         "settings_fingerprint": live_confirm.fingerprint(items),
         "confirmed_values": {e["item"]: e["values"] for e in items},
+        # 實單原始碼的雜湊。改一個字就作廢 —— 見 agmcis/safety/live_path.py。
+        live_path_module.REVIEW_KEY: signature,
     }
 
     target = Path(path or gate_module.CONFIRMATION_FILE)

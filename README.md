@@ -3,8 +3,9 @@
 
 AGMCIS 是一套以 Python + FastAPI + PostgreSQL 建構的 AI 加密貨幣交易系統。
 
-狀態:**模擬盤**。系統目前沒有任何一條路徑能送出真實訂單
-(`LiveBroker` 不存在,這是刻意的)。
+狀態:**模擬盤**。`LiveBroker` 已經寫好但**沒有被接上**,
+而且 LIVE SAFETY GATE 的實單路徑那一項要有人逐檔讀過實單原始碼、
+簽下每個檔案的 SHA-256 才會放行(第七十八節)。那個簽章我產不出來。
 
 - 架構:`ARCHITECTURE.md`
 - 進度與待辦:`ROADMAP.md`
