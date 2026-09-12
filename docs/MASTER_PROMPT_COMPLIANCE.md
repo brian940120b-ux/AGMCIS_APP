@@ -26,7 +26,7 @@
 | 五 | BingX Primary | ✅ | 規格由 `scripts/verify_bingx.py --write-specs` 從官方 API 抓取後寫入 `agmcis/exchange/specs.py`,不靠記憶 |
 | 六 | 雙合約市場 | ✅ | `MarketType.STANDARD` / `PERPETUAL` 全鏈路分離;`test_specs_calibration.py` 釘住 |
 | 七 | Exchange Abstraction | ✅ | `agmcis/exchange/base.py` 抽象 + BingX 實作;`test_api_surface.py` 用 AST 檢查策略層不得直接 import 交易所 |
-| 八 | BingX Adapter 模組切分 | ⚠️ | 功能都在,但集中在單一 `adapter.py` 而非 Master Prompt 建議的 12 個檔。依第九十七節「能用就保留」判斷不拆,但這是刻意偏離,記錄在此 |
+| 八 | BingX Adapter 模組切分 | ✅ | 照第八節建議的佈局拆完。`adapter.py` 從 711 行變成 108 行的**組裝點**,用 mixin 讓檔案分開而物件不變 —— 公開 API 與拆之前一模一樣,25 個方法一個都沒少。第八節說「已有類似模組就不要重複建立」,所以 contracts / websocket / executor / reconciler / rate_limiter / errors 是指路的 re-export,實作留在原處。金鑰收斂到 `auth.py`,有測試掃「只有它能碰 EXCHANGE_CREDENTIALS」;`signer.py` 說明簽章為什麼交給 ccxt(第五節:不要猜 API),並有測試擋自己寫 HMAC |
 | 九 | Authentication | ✅ | HMAC-SHA256 由 ccxt 處理;`sync_server_time()` + `EXCHANGE_MAX_CLOCK_SKEW_MS` 有時鐘偏移閘門 |
 | 十 | API Key Security | ✅ | `test_access_control.py` 檢查金鑰不進 log / 不進回應;`.gitignore` 含 `.env`;提款權限與 IP 白名單寫在 `docs/PHASE_17_REPORT.md` 的人工檢查清單 |
 
@@ -177,20 +177,19 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 96 |
-| ⚠️ 部分做到 | 10 |
+| ✅ 已做到 | 97 |
+| ⚠️ 部分做到 | 9 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 10 節,以及為什麼
+## 還沒補完的 9 節,以及為什麼
 
-原本的 12 個「❌ 沒做」全部補完了。剩下的 10 個「部分做到」分成兩類。
+原本的 12 個「❌ 沒做」全部補完了。剩下的 9 個「部分做到」分成兩類。
 **這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
-### 一、刻意不做(4 節)
+### 一、刻意不做(3 節)
 
 | 節 | 為什麼 |
 |---|---|
-| 八 | BingX Adapter 不拆成 12 個檔。第九十七節:能用就保留。拆檔會動到唯一一條真的會送出訂單的路徑,而那條路徑現在是對的 |
 | 六十三 | 沒有動畫節點圖。第六十三節自己說「UI Animation 不得影響交易核心」。五關的決策鏈、投票、理由、棄權原因都看得到,只是不會動 |
 | 八十二 | Production 仍在 systemd 上。Dockerfile 與 compose 都寫好了,但第八十二節也說「不要破壞目前正在運作的 Production」 |
 | 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准的是 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點。狀態看得到,開關要人去 VPS 上跑腳本 |
@@ -220,4 +219,3 @@
 ## 明確不做的事
 
 * **Phase 18–20(小額實單 / 監控 / 放大)**:需要真實資金,依第一百零二節必須人工授權。
-* **八**:BingX Adapter 不拆成 12 個檔,依第九十七節保留現狀。
