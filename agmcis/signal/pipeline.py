@@ -99,7 +99,9 @@ def analyse_symbol(symbol, timeframe=DEFAULT_TIMEFRAME, limit=DEFAULT_LIMIT,
     regime = regime_module.detect(indicators, btc_indicators=btc_indicators)
 
     # ---- 4. 策略集成 ----
-    consensus = registry.consensus(indicators, regime)
+    # 把原始 K 棒一起傳進去:需要它的策略(VWAP、市場結構)不能用
+    # 指標湊一個近似值 —— 那會產生一個名字對但內容不對的訊號。
+    consensus = registry.consensus(indicators, regime, candles=_candles(df))
 
     if not consensus.is_actionable:
         signal = wait_signal(consensus.blocked_reason or "沒有共識", price=price)
@@ -228,3 +230,37 @@ def top_opportunities(signals, count=3, min_score=None):
         if s.is_tradable and s.score is not None and s.score >= min_score
     ]
     return qualified[:count]
+
+
+def _candles(frame):
+    """
+    DataFrame -> [{time, open, high, low, close, volume}, ...]。
+
+    轉不出來回 None 而不是空 list:空 list 與「沒有 K 棒」在策略那邊
+    是同一個結果(WAIT),但 None 說得出「我們沒給」而空 list 看起來
+    像「市場上沒有 K 棒」。
+    """
+    if frame is None or len(frame) == 0:
+        return None
+
+    try:
+        columns = {
+            name: frame[name].tolist()
+            for name in ("open", "high", "low", "close", "volume")
+        }
+        times = frame["time"].tolist() if "time" in frame else list(range(len(frame)))
+
+        return [
+            {
+                "time": times[i],
+                "open": float(columns["open"][i]),
+                "high": float(columns["high"][i]),
+                "low": float(columns["low"][i]),
+                "close": float(columns["close"][i]),
+                "volume": float(columns["volume"][i]),
+            }
+            for i in range(len(frame))
+        ]
+    except Exception:
+        logger.warning("K 棒轉換失敗,需要 K 棒的策略這一輪會棄權")
+        return None

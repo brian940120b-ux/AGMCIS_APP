@@ -34,7 +34,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 十一 | Market Data Engine | ⚠️ | Last/Bid/Ask、24h 量、Kline、Order Book、Funding、Open Interest 都有 adapter 方法。**缺**:Mark Price / Index Price 沒有獨立取得;Long/Short 比、爆倉資料沒有;Order Book 雖可取得但沒有任何 Agent 使用(imbalance / spread 沒進評分) |
+| 十一 | Market Data Engine | ⚠️ | 加上 Mark Price / Index Price(取不到回 None,**不用 last 冒充** —— 強平算的是標記價)。**仍缺**:Long/Short 比、爆倉資料;Order Book 可取得但沒有 Agent 使用 |
 | 十二 | Trading Rules Engine | ✅ | `agmcis/execution/rules_engine.py`,tick/step/minQty/minNotional 全部套用,且只會讓部位更保守 |
 | 十三 | Order Types | ⚠️ | `OrderType` 七種型別齊全,但實際只走 MARKET;LIMIT / STOP / TRAILING_STOP 沒有被執行路徑使用 |
 | 十四 | Long / Short | ⚠️ | 開多/開空/全平/減倉有。**缺**:Add Position(加倉)、Reverse Position(反手)沒有實作 |
@@ -51,9 +51,9 @@
 |---|---|---|---|
 | 二十一 | Position Sizing | ✅ | `agmcis/risk/position_sizing.py`,由 equity × risk% ÷ 停損距離推導 |
 | 二十二 | Leverage Management | ✅ | `agmcis/risk/leverage.py`,由 ATR / 停損距離 / 強平安全係數共同壓低 |
-| 二十三 | Market Regime | ⚠️ | STRONG_BULL/BULL/RANGE/BEAR/STRONG_BEAR + 獨立的波動度分級都有。**缺 RISK_ON / RISK_OFF / PANIC** |
-| 二十四 | Multi-Timeframe | ⚠️ | `mtf_engine.calculate_mtf_score()` 只是一個加權函式,真正的 1D→4H→1H→15M→5M 階層分析沒有建立 |
-| 二十五 | Technical Analysis | ⚠️ | EMA/SMA/RSI/MACD/ADX/ATR/BB/Volume 有。**缺 VWAP、Volume Profile、Support/Resistance、Market Structure、Breakout Retest、Liquidity Sweep、HH/HL/LH/LL** |
+| 二十三 | Market Regime | ✅ | 加上 PANIC(獨立市況,不是「很嚴重的 STRONG_BEAR」)與 RiskAppetite(獨立維度,不是同一個列舉的更多選項) |
+| 二十四 | Multi-Timeframe | ✅ | `agmcis/analysis/mtf.py`。**階層不是投票**:1D/4H 決定方向、1H 確認結構、15M/5M 只影響時機。低時間框架永遠改不了方向 |
+| 二十五 | Technical Analysis | ✅ | `agmcis/analysis/structure.py` 補上 VWAP、Volume Profile、支撐壓力、HH/HL/LH/LL、流動性掃蕩。掃蕩與突破分開 —— 兩者都算掃蕩的話,乾淨的上升趨勢裡每一根都會回報掃蕩 |
 | 二十六 | Signal Engine | ✅ | `agmcis/core/models.py::Signal` 欄位齊全(risk_reward 由 entry/SL/TP 推導) |
 | 二十七 | Signal Score | ✅ | `agmcis/signal/scorer.py` 0–100,權重可調且缺資料時分母縮減(不是給 0 分) |
 | 二十八 | Confidence | ✅ | `ConfidenceBand` 六級與 Master Prompt 完全一致 |
@@ -71,7 +71,7 @@
 | 三十五 | Backtest Metrics | ✅ | 17 項全部都有,含 MFE / MAE / Calmar / Recovery Factor |
 | 三十六 | Walk Forward | ✅ | `agmcis/lab/splits.py` Train/Validation/Test/OOS |
 | 三十七 | Monte Carlo | ✅ | 重抽樣 + `agmcis/lab/cost_sensitivity.py`。成本變動**重跑回測**而不是在結果上加減 —— 成本會改變哪些交易還有得賺、強平價在哪、以及成交價本身 |
-| 三十八 | Strategy Lab | ⚠️ | 可測 EMA(trend_following)、Breakout、Momentum、Mean Reversion,並支援 Ensemble。**缺 RSI、MACD、VWAP、Volatility、Market Structure、Order Flow 六種策略** |
+| 三十八 | Strategy Lab | ⚠️ | 九個策略:EMA / Breakout / Momentum / MeanReversion / RSI / MACD / VWAP / Volatility / MarketStructure。**缺 Order Flow** —— 它需要逐筆成交資料,K 棒推不出來 |
 | 三十九 | 避免 Overfitting | ✅ | `agmcis/lab/scoring.py` 有 OVERFITTED 標記與 Strategy Health Score |
 | 四十 | Strategy Ensemble | ✅ | `agmcis/lab/ensemble.py`,含權重上限 |
 
@@ -177,8 +177,8 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 71 |
-| ⚠️ 部分做到 | 30 |
+| ✅ 已做到 | 74 |
+| ⚠️ 部分做到 | 27 |
 | ❌ 沒做 | 5 |
 
 ## 缺口排序(由大到小)
@@ -194,7 +194,7 @@
 7. ~~**六十四 + 六十九 + 七十 + 七十一 — 決策持久化**~~ ✅ 已補(`agmcis/review/decision_log.py`,23 個測試)。
 8. ~~**六十五 + 六十六 — 稽核與 `/health`**~~ ✅ 已補(`api/health.py`,26 個測試)。
 9. ~~**三十三 + 三十七 — 回測現實因素與成本敏感度**~~ ✅ 已補(32 個測試)。
-10. **二十五 + 二十四 + 三十八 — TA 深度、MTF 階層、更多策略**(研究廣度)
+10. ~~**二十三 + 二十四 + 二十五 + 三十八 — TA 深度、MTF 階層、更多策略**~~ ✅ 已補(69 個測試)。
 11. **一百零五 + 九十一 + 六十二 + 六十三 — 使用者體驗**(展示)
 12. **八十二 + 八十一 — Docker 與環境分離**(部署)
 

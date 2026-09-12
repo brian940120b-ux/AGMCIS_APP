@@ -56,9 +56,20 @@ class Strategy(ABC):
     # 這個策略適合哪些市況。空集合代表不挑市況。
     suitable_regimes = frozenset()
 
+    # 這個策略需不需要原始 K 棒。需要 K 棒的策略(VWAP、市場結構、
+    # 訂單流)在拿不到 K 棒時必須回 WAIT,不能用指標湊一個近似值 ——
+    # 那會產生一個名字叫 VWAP 但其實不是 VWAP 的訊號。
+    needs_candles = False
+
     @abstractmethod
-    def evaluate(self, indicators, regime) -> StrategyVerdict:
-        """看一眼市場,回傳看法。不得有副作用,不得碰交易所。"""
+    def evaluate(self, indicators, regime, candles=None) -> StrategyVerdict:
+        """
+        看一眼市場,回傳看法。不得有副作用,不得碰交易所。
+
+        candles 是原始 K 棒(可能是 None)。只有 needs_candles=True 的
+        策略會用到它 —— 其他策略的簽名收下它但忽略,這樣註冊表可以
+        用同一種方式呼叫所有策略。
+        """
 
     def wait(self, *reasons):
         return StrategyVerdict(

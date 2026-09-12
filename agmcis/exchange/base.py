@@ -62,6 +62,13 @@ class ExchangeAdapter(ABC):
 
     @abstractmethod
     def get_ticker(self, symbol: str, market_type: MarketType) -> Dict:
+        """
+        必須包含 mark_price 與 index_price(可以是 None)。
+
+        **不可以用 last 冒充標記價。** 強平與未實現損益用的都是標記價;
+        用最新成交價代替會在插針行情裡算錯,而那正是最需要算對的時候。
+        取不到就誠實地回 None,讓呼叫端知道它沒有這個資訊。
+        """
         """失敗拋 ExchangeUnavailableError。"""
 
     @abstractmethod

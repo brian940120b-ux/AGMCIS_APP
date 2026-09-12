@@ -25,7 +25,7 @@ class TrendFollowing(Strategy):
         Regime.BEAR.value, Regime.STRONG_BEAR.value,
     })
 
-    def evaluate(self, indicators, regime):
+    def evaluate(self, indicators, regime, candles=None):
         if not self.suits(regime):
             return self.wait(f"順勢策略不在 {regime.regime.value} 出手")
 
@@ -82,7 +82,7 @@ class Breakout(Strategy):
     """
     name = "breakout"
 
-    def evaluate(self, indicators, regime):
+    def evaluate(self, indicators, regime, candles=None):
         price = indicators.price
         upper, lower = indicators.bb_upper, indicators.bb_lower
 
@@ -127,7 +127,7 @@ class Momentum(Strategy):
     """動能。MACD 柱狀圖與 RSI 同向,且不在極端區。"""
     name = "momentum"
 
-    def evaluate(self, indicators, regime):
+    def evaluate(self, indicators, regime, candles=None):
         hist, rsi = indicators.macd_hist, indicators.rsi
 
         if hist is None or rsi is None:
@@ -171,7 +171,7 @@ class MeanReversion(Strategy):
     name = "mean_reversion"
     suitable_regimes = frozenset({Regime.RANGE.value})
 
-    def evaluate(self, indicators, regime):
+    def evaluate(self, indicators, regime, candles=None):
         if not self.suits(regime):
             return self.wait(
                 f"均值回歸只在盤整市出手,目前 {regime.regime.value}"
@@ -208,3 +208,10 @@ class MeanReversion(Strategy):
 
 
 BUILTIN_STRATEGIES = [TrendFollowing, Breakout, Momentum, MeanReversion]
+
+# 第三十八節要求的其餘策略。它們在 registry 裡與上面四個平等,
+# 但生命週期狀態預設是 PAPER —— 沒有經過 OOS 與 Walk Forward 驗證的
+# 策略可以在模擬盤跑,不能碰真錢(第七十三節)。
+from agmcis.strategy.extra import EXTRA_STRATEGIES   # noqa: E402
+
+ALL_STRATEGIES = BUILTIN_STRATEGIES + EXTRA_STRATEGIES

@@ -38,7 +38,7 @@ from typing import List, Optional
 from agmcis.core.enums import Direction
 from agmcis.strategy import health as health_module
 from agmcis.strategy.base import Strategy
-from agmcis.strategy.builtin import BUILTIN_STRATEGIES
+from agmcis.strategy.builtin import ALL_STRATEGIES
 
 logger = logging.getLogger("agmcis.strategy_registry")
 
@@ -86,7 +86,7 @@ class StrategyRegistry:
     def __init__(self, strategies=None, min_agreeing=DEFAULT_MIN_AGREEING,
                  status_store=None, mode=None):
         self._strategies = list(strategies) if strategies is not None else [
-            cls() for cls in BUILTIN_STRATEGIES
+            cls() for cls in ALL_STRATEGIES
         ]
         self.min_agreeing = min_agreeing
         # 生命週期狀態的來源。None = 用全域的檔案儲存。
@@ -130,11 +130,11 @@ class StrategyRegistry:
         self._strategies.append(strategy)
         return self
 
-    def evaluate_all(self, indicators, regime, strategies=None):
+    def evaluate_all(self, indicators, regime, strategies=None, candles=None):
         verdicts = []
         for strategy in (self._strategies if strategies is None else strategies):
             try:
-                verdicts.append(strategy.evaluate(indicators, regime))
+                verdicts.append(strategy.evaluate(indicators, regime, candles))
             except Exception as exc:
                 # 單一策略出錯不該讓整輪掛掉,但一定要記錄
                 logger.exception(
@@ -143,8 +143,13 @@ class StrategyRegistry:
                 verdicts.append(strategy.wait(f"策略錯誤: {exc}"))
         return verdicts
 
-    def consensus(self, indicators, regime):
-        """集成所有策略的看法。"""
+    def consensus(self, indicators, regime, candles=None):
+        """
+        集成所有策略的看法。
+
+        candles 是原始 K 棒。需要它的策略(VWAP、市場結構)在拿不到時
+        會回 WAIT —— 那是棄權而不是反對,所以不會擋住其他策略。
+        """
         if not indicators.data_ok:
             return Consensus(
                 blocked_reason=f"資料不可信: {indicators.data_error}",
@@ -169,7 +174,9 @@ class StrategyRegistry:
                 ],
             )
 
-        verdicts = self.evaluate_all(indicators, regime, strategies=enabled)
+        verdicts = self.evaluate_all(
+            indicators, regime, strategies=enabled, candles=candles,
+        )
         serialised = [v.to_dict() for v in verdicts]
 
         longs = [v for v in verdicts if v.direction is Direction.LONG and v.confidence > 0]

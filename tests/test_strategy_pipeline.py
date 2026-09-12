@@ -503,13 +503,25 @@ class TestPipelineCanActuallyTrade(unittest.TestCase):
 
     def test_abstention_is_not_counted_as_opposition(self):
         """
-        只有一個策略同向時仍然可以交易,但分數會反映佐證不足 ——
+        只有少數策略同向時仍然可以交易,但分數會反映佐證不足 ——
         品質由 MIN_SIGNAL_SCORE 把關,不是由硬性的同向數門檻。
+
+        不綁定「剛好一個策略同向」:第三十八節之後策略從四個變成九個,
+        而這個測試的重點是「棄權不等於反對」,不是同向的確切數量。
         """
         signal = self._analyse(self._series("up"))
         breakdown = signal.score_breakdown
+        consensus = signal.consensus
 
-        self.assertEqual(len(signal.consensus["agreeing"]), 1)
+        self.assertGreaterEqual(len(consensus["agreeing"]), 1)
+        self.assertEqual(consensus["opposing"], [], "沒有策略反對")
+        self.assertTrue(consensus["waiting"], "有策略棄權")
+        self.assertLess(
+            len(consensus["agreeing"]) + len(consensus["disabled"]),
+            len(consensus["agreeing"]) + len(consensus["waiting"])
+            + len(consensus["disabled"]),
+            "前提:這一輪確實有策略棄權",
+        )
         self.assertTrue(signal.is_tradable)
         # 佐證不足,strategy_consensus 這一項拿不到滿分
         self.assertLess(

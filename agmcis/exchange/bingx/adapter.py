@@ -35,6 +35,14 @@ from agmcis.exchange.rate_limiter import RateLimiter
 
 logger = logging.getLogger("agmcis.exchange.bingx")
 
+
+def _as_float(value):
+    """轉不動就回 None。回 0 會被當成「標記價是 0」,那比沒有更糟。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 # ccxt 的 bingx 只有這一種合約市場型態。
 # has['future'] 是 False,傳 defaultType='futures' 建構時不會報錯,
 # 但實際呼叫時才會失敗 —— 這種「延後爆炸」正是要避免的。
@@ -372,8 +380,41 @@ class BingXAdapter(ExchangeAdapter):
             "change_pct_24h": raw.get("percentage"),
             "volume_24h": raw.get("baseVolume"),
             "quote_volume_24h": raw.get("quoteVolume"),
+            # 標記價與指數價(第十一節)。
+            #
+            # 這兩個與 last 是不同的東西,而且差別會決定實際結果:
+            #   * **強平用的是標記價,不是最新成交價。** 用 last 算強平距離
+            #     會在插針行情裡算錯 —— 那正是最需要算對的時候。
+            #   * 未實現損益也是用標記價計算的。
+            #   * 指數價是現貨參考,標記價偏離指數價很多代表合約在溢價。
+            #
+            # ccxt 對 BingX 不保證帶回這兩個欄位,所以取不到就是 None ——
+            # **不退回 last**。用 last 冒充標記價會讓呼叫端以為它拿到了
+            # 標記價,而那個誤會只有在插針的時候才會被發現。
+            "mark_price": self._mark_price(raw),
+            "index_price": self._index_price(raw),
             "timestamp": raw.get("timestamp"),
         }
+
+    @staticmethod
+    def _mark_price(raw):
+        info = raw.get("info") or {}
+        for key in ("markPrice", "mark_price"):
+            if raw.get(key) is not None:
+                return _as_float(raw.get(key))
+            if info.get(key) is not None:
+                return _as_float(info.get(key))
+        return None
+
+    @staticmethod
+    def _index_price(raw):
+        info = raw.get("info") or {}
+        for key in ("indexPrice", "index_price"):
+            if raw.get(key) is not None:
+                return _as_float(raw.get(key))
+            if info.get(key) is not None:
+                return _as_float(info.get(key))
+        return None
 
     def get_ohlcv(self, symbol, timeframe="1h", limit=150,
                   market_type=MarketType.PERPETUAL):
