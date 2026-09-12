@@ -745,3 +745,215 @@ def update_trade_stoploss(symbol, stoploss):
             (stoploss, symbol),
         )
     return True
+
+
+# ---------------- 決策紀錄(第六十九 / 七十 / 七十一節)----------------
+#
+# 這幾個寫入函式**不吞例外** —— 呼叫端(agmcis/review/decision_log.py)
+# 負責決定失敗要不要擋住交易,而它的答案是「不要」。把決定寫在那一層,
+# 這一層保持誠實。
+
+def insert_ai_decision(payload):
+    """寫一筆決策紀錄。回傳 id。"""
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO ai_decisions (
+                decision_id, symbol, market_type, direction, score, confidence,
+                market_regime, volatility, outcome, reason,
+                agent_votes, strategy_verdicts, score_breakdown,
+                risk_decision, news_risk, trade_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (decision_id) DO NOTHING
+            RETURNING id;
+            """,
+            (
+                payload["decision_id"], payload["symbol"], payload.get("market_type"),
+                payload.get("direction"), payload.get("score"),
+                payload.get("confidence"), payload.get("market_regime"),
+                payload.get("volatility"), payload["outcome"], payload.get("reason"),
+                Json(payload.get("agent_votes")) if payload.get("agent_votes") else None,
+                Json(payload.get("strategy_verdicts")) if payload.get("strategy_verdicts") else None,
+                Json(payload.get("score_breakdown")) if payload.get("score_breakdown") else None,
+                Json(payload.get("risk_decision")) if payload.get("risk_decision") else None,
+                Json(payload.get("news_risk")) if payload.get("news_risk") else None,
+                payload.get("trade_id"),
+            ),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def link_decision_to_trade(decision_id, trade_id):
+    """
+    下單成功之後才知道 trade_id。分成兩步寫,是因為決策紀錄必須在
+    **下單之前**就存在 —— 下單當下當機的話,那筆決策不能跟著消失。
+    """
+    with transaction() as cur:
+        cur.execute(
+            "UPDATE ai_decisions SET trade_id = %s WHERE decision_id = %s;",
+            (trade_id, decision_id),
+        )
+    return True
+
+
+def insert_risk_event(payload):
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO risk_events
+                (event_type, symbol, severity, blockers, detail, payload)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                payload["event_type"], payload.get("symbol"),
+                payload.get("severity", "INFO"),
+                Json(payload.get("blockers")) if payload.get("blockers") else None,
+                payload.get("detail"),
+                Json(payload.get("payload")) if payload.get("payload") else None,
+            ),
+        )
+        return cur.fetchone()[0]
+
+
+def insert_audit_log(payload):
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO audit_logs
+                (action, actor, target, before_value, after_value, detail, source_ip)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                payload["action"], payload.get("actor", "system"),
+                payload.get("target"), payload.get("before_value"),
+                payload.get("after_value"), payload.get("detail"),
+                payload.get("source_ip"),
+            ),
+        )
+        return cur.fetchone()[0]
+
+
+def insert_market_regime(payload):
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO market_regimes
+                (symbol, timeframe, regime, volatility, adx, atr_pct, tradeable)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                payload["symbol"], payload.get("timeframe", "1h"),
+                payload["regime"], payload.get("volatility"),
+                payload.get("adx"), payload.get("atr_pct"),
+                payload.get("tradeable"),
+            ),
+        )
+        return cur.fetchone()[0]
+
+
+DECISION_COLUMNS = """
+    decision_id, symbol, market_type, direction, score, confidence,
+    market_regime, volatility, outcome, reason,
+    agent_votes, strategy_verdicts, score_breakdown,
+    risk_decision, news_risk, trade_id, created_at
+"""
+
+
+def _row_to_decision(row):
+    return {
+        "decision_id": row[0],
+        "symbol": row[1],
+        "market_type": row[2],
+        "direction": row[3],
+        "score": _f(row[4]),
+        "confidence": _f(row[5]),
+        "market_regime": row[6],
+        "volatility": row[7],
+        "outcome": row[8],
+        "reason": row[9],
+        "agent_votes": row[10],
+        "strategy_verdicts": row[11],
+        "score_breakdown": row[12],
+        "risk_decision": row[13],
+        "news_risk": row[14],
+        "trade_id": row[15],
+        "created_at": row[16].strftime("%Y-%m-%d %H:%M:%S") if row[16] else None,
+    }
+
+
+def get_decision_for_trade(trade_id):
+    """「為什麼你開這一單?」"""
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {DECISION_COLUMNS} FROM ai_decisions "
+            f"WHERE trade_id = %s ORDER BY id DESC LIMIT 1;",
+            (trade_id,),
+        )
+        row = cur.fetchone()
+    return _row_to_decision(row) if row else None
+
+
+def get_decisions(limit=50, symbol=None, outcome=None):
+    conn = get_connection()
+    clauses, params = [], []
+
+    if symbol:
+        clauses.append("symbol = %s")
+        params.append(symbol)
+    if outcome:
+        clauses.append("outcome = %s")
+        params.append(outcome)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(int(limit))
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {DECISION_COLUMNS} FROM ai_decisions {where} "
+            f"ORDER BY id DESC LIMIT %s;",
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+    return [_row_to_decision(row) for row in rows]
+
+
+def get_risk_events(limit=50):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT event_type, symbol, severity, blockers, detail, created_at "
+            "FROM risk_events ORDER BY id DESC LIMIT %s;",
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+
+    return [{
+        "event_type": row[0], "symbol": row[1], "severity": row[2],
+        "blockers": row[3], "detail": row[4],
+        "created_at": row[5].strftime("%Y-%m-%d %H:%M:%S") if row[5] else None,
+    } for row in rows]
+
+
+def get_audit_logs(limit=50):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT action, actor, target, before_value, after_value, "
+            "detail, created_at FROM audit_logs ORDER BY id DESC LIMIT %s;",
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+
+    return [{
+        "action": row[0], "actor": row[1], "target": row[2],
+        "before_value": row[3], "after_value": row[4], "detail": row[5],
+        "created_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
+    } for row in rows]

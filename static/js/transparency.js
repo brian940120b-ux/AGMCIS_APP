@@ -240,6 +240,53 @@ async function loadSelfReview() {
     render("self_review", head + findings + questions + agentTable);
 }
 
+/* ---------------- 決策紀錄 ---------------- */
+
+const OUTCOME_CLASS = {
+    OPENED: "alert-ok",
+    WAIT: "",
+    REJECTED_BY_RISK: "alert-warning",
+    REJECTED_BY_RULES: "alert-warning",
+    BLOCKED: "alert-warning",
+    FAILED: "alert-critical",
+};
+
+async function loadDecisions() {
+    const data = await load("/api/decisions?limit=30");
+    if (data.error) throw new Error(data.error);
+
+    const counts = Object.entries(data.by_outcome || {})
+        .map(([outcome, n]) => `${esc(outcome)} ${esc(n)}`).join("、");
+
+    const rows = (data.decisions || []).map(d => {
+        /* 拒絕的原因放在這裡最有用 —— 「為什麼沒開」是這張表存在的理由。 */
+        const why = d.reason
+            || (d.risk_decision && d.risk_decision.reason)
+            || "";
+
+        return `<tr>
+            <td class="nowrap">${esc(d.created_at || "-")}</td>
+            <td class="nowrap">${esc(d.symbol)}</td>
+            <td class="nowrap">${esc(d.direction || "-")}</td>
+            <td class="nowrap ${OUTCOME_CLASS[d.outcome] || ""}">${esc(d.outcome)}</td>
+            <td>${d.score === null ? "-" : num(d.score, 0)}</td>
+            <td>${d.confidence === null ? "-" : num(d.confidence, 0)}</td>
+            <td class="nowrap">${esc(d.market_regime || "-")}</td>
+            <td class="muted">${esc(why)}</td>
+            <td>${d.trade_id ? `<a href="/api/why/${esc(d.trade_id)}">為什麼</a>` : ""}</td>
+        </tr>`;
+    }).join("");
+
+    const summary = counts
+        ? `<p class="muted">最近 ${esc(data.count)} 筆:${counts}</p>` : "";
+
+    render("decisions", summary + (rows
+        ? `<table class="tp"><tr><th>時間</th><th>標的</th><th>方向</th>
+           <th>結果</th><th>分數</th><th>信心</th><th>市況</th>
+           <th>原因</th><th></th></tr>${rows}</table>`
+        : '<span class="muted">還沒有決策紀錄。</span>'));
+}
+
 /* ---------------- 策略健康度 ---------------- */
 
 const STRATEGY_VERDICT_CLASS = {
@@ -368,6 +415,7 @@ const SECTIONS = [
     ["orders", loadOrders],
     ["reconciliation", loadReconciliation],
     ["costs", loadCosts],
+    ["decisions", loadDecisions],
     ["strategy_health", loadStrategyHealth],
     ["self_review", loadSelfReview],
     ["config_changes", loadConfigChanges],

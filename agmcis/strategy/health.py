@@ -143,6 +143,19 @@ class StatusStore:
         )
 
         self._audit(name, before, status.value, reason, actor)
+
+        # 同一件事也寫進系統稽核(第六十五節)。檔案是權威來源
+        # (資料庫掛掉時仍然讀得到),資料庫是給人查的 ——
+        # 兩邊都寫,但只有檔案會被讀回來做判斷。
+        try:
+            from agmcis.review.decision_log import audit
+            audit(
+                "STRATEGY_STATUS_CHANGE", actor=actor, target=name,
+                before=before, after=status.value, detail=reason,
+            )
+        except Exception:
+            logger.exception("策略狀態的系統稽核寫入失敗 | %s", name)
+
         logger.warning(
             "策略狀態變更 | %s | %s -> %s | %s", name, before, status.value, reason,
         )

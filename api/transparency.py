@@ -307,6 +307,91 @@ def _strategy_health():
     })
 
 
+@router.get("/api/decisions")
+def api_decisions(limit: int = Query(30, ge=1, le=200),
+                  symbol: str = Query(None),
+                  outcome: str = Query(None)):
+    return _decisions(limit=limit, symbol=symbol, outcome=outcome)
+
+
+def _decisions(limit=30, symbol=None, outcome=None):
+    """
+    決策紀錄(第七十節)。**包含沒有下單的決策。**
+
+    系統連續三天沒有交易的時候,唯一能回答「它是壞了還是在等」的
+    就是這批紀錄 —— 而那個問題只看訂單表永遠答不出來。
+    """
+    def run():
+        from database_service import get_decisions
+
+        rows = get_decisions(limit=limit, symbol=symbol, outcome=outcome)
+        counts = {}
+        for row in rows:
+            counts[row["outcome"]] = counts.get(row["outcome"], 0) + 1
+
+        return {
+            "decisions": rows,
+            "count": len(rows),
+            "by_outcome": counts,
+        }
+
+    return _safe("decisions", run, {"decisions": [], "count": 0, "by_outcome": {}})
+
+
+@router.get("/api/why/{trade_id}")
+def api_why(trade_id: int):
+    return _why(trade_id)
+
+
+def _why(trade_id):
+    """
+    「為什麼你開這一單?」(第七十一節)
+
+    可解釋性不是「當下說得出來」,是**事後查得到**。這個端點回答的
+    是後者 —— 而且刻意不隱藏缺漏:沒有存到的項目會寫「沒有紀錄」,
+    不會被省略掉。省略會讓讀的人以為那一項沒有意見。
+    """
+    def run():
+        from agmcis.review.decision_log import explain_trade
+        return explain_trade(trade_id).to_dict()
+
+    return _safe("why", run, {"found": False, "lines": []})
+
+
+@router.get("/api/risk_events")
+def api_risk_events(limit: int = Query(30, ge=1, le=200)):
+    return _risk_events(limit=limit)
+
+
+def _risk_events(limit=30):
+    """風控事件。被擋下來的、被縮小的、觸發緊急保護的。"""
+    def run():
+        from database_service import get_risk_events
+        events = get_risk_events(limit=limit)
+        return {
+            "events": events,
+            "critical_count": sum(
+                1 for e in events if e.get("severity") == "CRITICAL"
+            ),
+        }
+
+    return _safe("risk_events", run, {"events": [], "critical_count": 0})
+
+
+@router.get("/api/audit_logs")
+def api_audit_logs(limit: int = Query(30, ge=1, le=200)):
+    return _audit_logs(limit=limit)
+
+
+def _audit_logs(limit=30):
+    """系統稽核(第六十五節):登入、模式切換、策略狀態變更、緊急操作。"""
+    def run():
+        from database_service import get_audit_logs
+        return {"entries": get_audit_logs(limit=limit)}
+
+    return _safe("audit_logs", run, {"entries": []})
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()
