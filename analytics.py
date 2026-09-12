@@ -24,6 +24,52 @@ LEVERAGED = "LEVERAGED"
 LEGACY = "LEGACY_UNLEVERAGED"
 
 
+def pnl_of(trade):
+    """
+    一筆交易的損益,**沒有就是 None**。
+
+    ## 為什麼不是 `trade.get("pnl_usdt", 0)`
+
+    那個寫法有一個具體的 bug:欄位**存在但值是 None** 的時候,
+    `.get(key, default)` 回傳的是 None 不是 default —— 預設值永遠用不到。
+    然後下一行的 `equity += pnl` 就會拋 TypeError,而那個例外會讓
+    `/api/analytics_pro`、儀表板的分析區塊與日報整個掛掉。
+
+    一筆 CLOSED 但 pnl_usdt 是 NULL 的資料列會怎麼出現?平倉寫到一半
+    當機、手動改過的資料列、或從別處匯入的歷史。它是少見的,不是不可能的。
+
+    ## 為什麼不把它當成 0
+
+    那樣更糟:它會安靜地進統計。一筆損益不明的交易被當成打平,
+    會讓「已實現收益」少算、讓勝率的分母多一個非勝利。
+    **算不出來就排除,並且把排除幾筆講出來**(第九十四節)。
+    """
+    value = trade.get("pnl_usdt")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def with_pnl(closed_trades):
+    """
+    只留有損益數字的交易。回傳 (可用的, 排除幾筆)。
+
+    排除的筆數一定要回報 —— 加總對不起來會讓人以為統計算錯。
+    """
+    usable, skipped = [], 0
+
+    for trade in closed_trades:
+        if pnl_of(trade) is None:
+            skipped += 1
+            continue
+        usable.append(trade)
+
+    return usable, skipped
+
+
 def split_by_pnl_basis(closed_trades):
     """
     把已平倉交易依損益基準分成兩組。
@@ -41,11 +87,19 @@ def split_by_pnl_basis(closed_trades):
 
 
 def build_equity_curve(closed_trades):
+    """
+    資金曲線。損益不明的那幾筆**跳過** —— 見 pnl_of()。
+
+    跳過而不是當成 0:當成 0 會在曲線上畫出一段「這裡什麼都沒發生」,
+    而實際上是「這裡發生了什麼我們不知道」。
+    """
     equity = START_BALANCE
     curve = [equity]
 
     for trade in closed_trades:
-        pnl = trade.get("pnl_usdt", 0)
+        pnl = pnl_of(trade)
+        if pnl is None:
+            continue
         equity += pnl
         curve.append(round(equity, 2))
 
@@ -71,23 +125,27 @@ def calculate_max_drawdown(equity_curve):
     return round(max_drawdown, 2)
 
 
-def calculate_profit_factor(closed_trades):
-    gross_profit = sum(
-        trade.get("pnl_usdt", 0)
-        for trade in closed_trades
-        if trade.get("pnl_usdt", 0) > 0
-    )
+# 沒有虧損單時的 Profit Factor。
+#
+# **999 是一個哨兵值,不是一個測量結果。** 正確的答案是「無限大」,
+# 而無限大沒辦法放進 JSON、也沒辦法排序。這裡沿用舊行為(999)
+# 是為了不改契約 —— 前端與 Telegram 日報都在讀這個欄位。
+#
+# 新程式碼請用 agmcis/review/attribution.py 的 Bucket.profit_factor,
+# 它在同樣的情況回 None,而 None 在畫面上會顯示「—」。
+NO_LOSSES_PROFIT_FACTOR = 999
 
-    gross_loss = abs(
-        sum(
-            trade.get("pnl_usdt", 0)
-            for trade in closed_trades
-            if trade.get("pnl_usdt", 0) < 0
-        )
-    )
+
+def calculate_profit_factor(closed_trades):
+    """損益不明的那幾筆不參與 —— 見 pnl_of()。"""
+    values = [pnl_of(trade) for trade in closed_trades]
+    values = [value for value in values if value is not None]
+
+    gross_profit = sum(value for value in values if value > 0)
+    gross_loss = abs(sum(value for value in values if value < 0))
 
     if gross_loss == 0:
-        return 0 if gross_profit == 0 else 999
+        return 0 if gross_profit == 0 else NO_LOSSES_PROFIT_FACTOR
 
     return round(gross_profit / gross_loss, 2)
 
@@ -135,6 +193,7 @@ def _empty_analytics(account, legacy_summary, include_legacy):
         "current_balance": account.get("balance", START_BALANCE),
         "legacy": legacy_summary,
         "pnl_basis": "MIXED" if include_legacy else "LEVERAGED",
+        "unpriced_trades": 0,
     }
 
 
@@ -146,17 +205,14 @@ def summarise_pnl(closed_trades):
     沒有虧損單時 risk_reward_ratio 回 0 而不是無限大 ——
     無限大在排序與顯示上都會出事。
     """
-    total_trades = len(closed_trades)
-    total_pnl = sum(trade.get("pnl_usdt", 0) for trade in closed_trades)
+    values = [pnl_of(trade) for trade in closed_trades]
+    values = [value for value in values if value is not None]
 
-    wins_list = [
-        trade.get("pnl_usdt", 0) for trade in closed_trades
-        if trade.get("pnl_usdt", 0) > 0
-    ]
-    losses_list = [
-        trade.get("pnl_usdt", 0) for trade in closed_trades
-        if trade.get("pnl_usdt", 0) < 0
-    ]
+    total_trades = len(values)
+    total_pnl = sum(values)
+
+    wins_list = [value for value in values if value > 0]
+    losses_list = [value for value in values if value < 0]
 
     avg_win = sum(wins_list) / len(wins_list) if wins_list else 0
     avg_loss = sum(losses_list) / len(losses_list) if losses_list else 0
@@ -183,9 +239,11 @@ def summarise_by_symbol(closed_trades):
     symbol_map = {}
 
     for trade in closed_trades:
-        symbol = trade["symbol"]
-        pnl = trade.get("pnl_usdt", 0)
+        pnl = pnl_of(trade)
+        if pnl is None:
+            continue
 
+        symbol = trade["symbol"]
         stats = symbol_map.setdefault(symbol, {
             "symbol": symbol, "trades": 0, "wins": 0, "losses": 0, "pnl": 0,
         })
@@ -224,8 +282,14 @@ def get_trade_analytics(include_legacy=False):
     closed_trades = all_closed if include_legacy else comparable
     legacy_summary = _legacy_summary(legacy)
 
+    # 損益不明的那幾筆排除掉,但**把筆數講出來** ——
+    # 加總對不起來會讓人以為統計算錯(第九十四節)。
+    closed_trades, unpriced = with_pnl(closed_trades)
+
     if not closed_trades:
-        return _empty_analytics(account, legacy_summary, include_legacy)
+        payload = _empty_analytics(account, legacy_summary, include_legacy)
+        payload["unpriced_trades"] = unpriced
+        return payload
 
     totals = summarise_pnl(closed_trades)
     symbol_stats = summarise_by_symbol(closed_trades)
@@ -253,4 +317,6 @@ def get_trade_analytics(include_legacy=False):
         "current_balance": round(account.get("balance", START_BALANCE), 2),
         "legacy": legacy_summary,
         "pnl_basis": "MIXED" if include_legacy else "LEVERAGED",
+        # 已平倉但損益不明、因此沒有納入上面任何數字的筆數。
+        "unpriced_trades": unpriced,
     }
