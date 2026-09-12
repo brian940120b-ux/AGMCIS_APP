@@ -193,6 +193,23 @@ def _job_config_audit():
     )
 
 
+def _job_pending_orders():
+    """
+    掛單巡檢(第十三節):到期的取消、觸價的成交。
+
+    間隔與部位監控一致 —— 掛單與停損看的是同一種東西(價格有沒有
+    走到某一條線),用不同的頻率檢查會讓其中一個系統性地慢半拍。
+    """
+    from agmcis.execution.pending import run_pending_orders
+
+    return Job(
+        name="pending_orders",
+        run=run_pending_orders,
+        interval_seconds=settings.SCHEDULER_POSITION_INTERVAL,
+        tags=["execution"],
+    )
+
+
 def _job_drift_monitor():
     """
     策略退化偵測(第七十四 / 七十五 / 七十六節)。
@@ -292,12 +309,13 @@ JOB_SETS = {
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_rate_limit_cleanup, _job_config_audit, _job_drift_monitor,
-        _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
+        _job_pending_orders, _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_rate_limit_cleanup, _job_config_audit, _job_drift_monitor,
+        _job_pending_orders,
     ],
     JOB_SET_OPPORTUNITY: [_job_opportunity_scanner],
     JOB_SET_TRADER: [_job_auto_trader, _job_daily_report],

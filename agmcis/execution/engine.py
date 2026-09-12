@@ -30,7 +30,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from agmcis.core.enums import OrderState, OrderType
+from agmcis.core.enums import Direction, OrderState, OrderType
 from agmcis.core.errors import TradingRuleViolation
 from agmcis.core.models import Order
 from agmcis.execution import state_machine as sm
@@ -83,6 +83,10 @@ SUBMIT_FAILED = "SUBMIT_FAILED"
 NAKED_POSITION_CLOSED = "NAKED_POSITION_CLOSED"
 NAKED_POSITION_STUCK = "NAKED_POSITION_STUCK"
 OPENED_PARTIAL = "OPENED_PARTIAL"
+PENDING = "PENDING"
+ADDED = "ADDED"
+REVERSED = "REVERSED"
+REVERSE_CLOSE_FAILED = "REVERSE_CLOSE_FAILED"
 PARTIAL_REMAINDER_STUCK = "PARTIAL_REMAINDER_STUCK"
 CLOSED = "CLOSED"
 CLOSE_FAILED = "CLOSE_FAILED"
@@ -208,6 +212,14 @@ class ExecutionEngine:
 
         self._move(order, OrderState.VALIDATING)
         self._move(order, OrderState.RISK_CHECK)
+
+        # ---- 1b. 非市價單:掛著等,不是現在成交 ----
+        #
+        # 一張掛在 98 的買單不會因為送出去就成交。把它當成成交
+        # 是回測與模擬盤最容易系統性高估的地方之一。
+        if request.order_type is not OrderType.MARKET:
+            return self._rest(order, request, intent, decision, validation)
+
         self._move(order, OrderState.SUBMITTING)
 
         # ---- 2. 送單 ----
@@ -370,6 +382,157 @@ class ExecutionEngine:
             reason=f"裸倉且平倉失敗,需要人工處理:{outcome.reason}",
             protection=outcome,
         )
+
+    def _rest(self, order, request, intent, decision, validation):
+        """
+        把非市價單掛進掛單簿。狀態停在 ACCEPTED —— 它被交易所收下了,
+        但還沒成交。
+
+        ⚠️ 這是**模擬盤**的掛單。實盤的掛單在交易所那邊,
+        LiveBroker 出現時這條路徑必須被繞過而不是沿用 ——
+        兩份掛單簿會產生兩種事實。
+        """
+        from agmcis.execution import pending as pending_module
+
+        # SUBMITTING -> ACCEPTED,不是直接跳到 ACCEPTED。
+        # 掛單**是**被送出去的,只是沒有成交 —— 少了 SUBMITTING 那一步,
+        # 送單當下當機的訂單會在對帳時看起來像從來沒送過。
+        self._move(order, OrderState.SUBMITTING, reason="送出掛單")
+        self._move(order, OrderState.ACCEPTED, reason="掛單等待觸價")
+
+        try:
+            entry = pending_module.from_request(
+                request, intent, decision.size_usdt, decision.leverage,
+            )
+            self._pending_book().add(entry)
+        except Exception as exc:
+            logger.exception("Execution | PENDING_FAILED | %s", intent.symbol)
+            self._move(order, OrderState.FAILED, reason=str(exc))
+            return ExecutionResult(
+                ok=False, order=order, symbol=intent.symbol,
+                status=SUBMIT_FAILED,
+                reason=f"掛單建立失敗:{type(exc).__name__}: {exc}",
+            )
+
+        logger.info(
+            "Execution | PENDING | %s | %s @ %s | 到期 %s",
+            intent.symbol, request.order_type.value,
+            entry.trigger_price, entry.expires_at,
+        )
+
+        # ok=True 但 status=PENDING:訂單成功建立了,但**還沒有部位**。
+        # 呼叫端不能把它當成開倉成功 —— 沒有部位就沒有停損要檢查。
+        return ExecutionResult(
+            ok=True, order=order, symbol=intent.symbol, status=PENDING,
+            adjustments=list(validation.adjustments),
+            reason=f"掛單在 {entry.trigger_price},到期時間 {entry.expires_at}",
+        )
+
+    def _pending_book(self):
+        from agmcis.execution import pending as pending_module
+        return pending_module.get_book()
+
+    # ---------------- 加倉與反手(第十四節)----------------
+
+    def add_to_position(self, decision, position, context=None):
+        """
+        加倉。
+
+        **風控必須重新算過整個部位,不是只算加的那一塊。**
+        一個 1% 風險的部位加上另一個 1% 風險的部位,不是兩個 1%,
+        是一個 2% —— 而 Risk Engine 的單筆風險上限是為「一筆」設的。
+
+        呼叫端要負責把 decision 算成「加上去之後的總風險仍在上限內」。
+        這一層只檢查方向一致,然後走一般的開倉路徑。
+        """
+        intent = decision.intent
+        symbol = intent.symbol
+
+        held = Direction.parse(
+            position.get("signal") or position.get("direction") or "",
+        )
+
+        if held is None or not held.is_directional:
+            return ExecutionResult(
+                ok=False, symbol=symbol, status=REJECTED_NOT_APPROVED,
+                reason=f"現有部位方向不明({position.get('signal')!r}),不加倉",
+            )
+
+        if held is not intent.direction:
+            # 反向的「加倉」是反手,那是另一個函式 ——
+            # 兩者的風險完全不同,不該用同一個入口。
+            return ExecutionResult(
+                ok=False, symbol=symbol, status=REJECTED_NOT_APPROVED,
+                reason=(
+                    f"現有部位是{held.value},意圖是{intent.direction.value} —— "
+                    f"這是反手不是加倉,請用 reverse_position()"
+                ),
+            )
+
+        result = self.execute(decision, context=context)
+
+        if result.ok and result.status == OPENED:
+            result.status = ADDED
+            logger.info(
+                "Execution | ADDED | %s | 在既有的%s部位上加倉",
+                symbol, held.value,
+            )
+
+        return result
+
+    def reverse_position(self, decision, position, context=None,
+                         price=None):
+        """
+        反手:先平掉現有部位,再開反向。
+
+        **先平再開,而且平不掉就不開。** 反過來(先開反向)在
+        單向持倉模式下會被交易所拒絕,在雙向持倉模式下會同時持有
+        多空兩個部位 —— 兩者都不是「反手」的意思。
+
+        平掉之後開倉失敗是可以接受的結果:那時候帳上是空手,
+        而空手永遠是安全的狀態。
+        """
+        intent = decision.intent
+        symbol = intent.symbol
+
+        held = Direction.parse(
+            position.get("signal") or position.get("direction") or "",
+        )
+
+        if held is not None and held is intent.direction:
+            return ExecutionResult(
+                ok=False, symbol=symbol, status=REJECTED_NOT_APPROVED,
+                reason=(
+                    f"現有部位已經是{held.value},這是加倉不是反手,"
+                    f"請用 add_to_position()"
+                ),
+            )
+
+        closed = self.close(symbol, price=price, reason="反手:平掉原方向")
+
+        if not closed.ok:
+            logger.error(
+                "Execution | REVERSE_CLOSE_FAILED | %s | %s | 不開反向",
+                symbol, closed.reason,
+            )
+            return ExecutionResult(
+                ok=False, symbol=symbol, status=REVERSE_CLOSE_FAILED,
+                reason=(
+                    f"反手時平不掉原部位:{closed.reason}。"
+                    f"**沒有開反向** —— 同時持有多空不是反手。"
+                ),
+            )
+
+        result = self.execute(decision, context=context)
+
+        if result.ok and result.status == OPENED:
+            result.status = REVERSED
+            logger.info(
+                "Execution | REVERSED | %s | %s -> %s",
+                symbol, held.value if held else "?", intent.direction.value,
+            )
+
+        return result
 
     def _emergency_close(self, order, symbol, reason):
         """

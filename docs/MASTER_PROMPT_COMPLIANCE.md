@@ -36,7 +36,7 @@
 |---|---|---|---|
 | 十一 | Market Data Engine | ✅ | Mark / Index Price、Long/Short 比、爆倉資料都有(交易所不支援回 None,**不回 1.0**);OrderBookAgent 與 OrderFlow 策略真的在用訂單簿 |
 | 十二 | Trading Rules Engine | ✅ | `agmcis/execution/rules_engine.py`,tick/step/minQty/minNotional 全部套用,且只會讓部位更保守 |
-| 十三 | Order Types | ⚠️ | `OrderType` 七種型別齊全,但實際只走 MARKET;LIMIT / STOP / TRAILING_STOP 沒有被執行路徑使用 |
+| 十三 | Order Types | ✅ | MARKET 立即成交;LIMIT / STOP / TAKE_PROFIT 進 `agmcis/execution/pending.py` 的掛單簿,由排程檢查觸價。掛單有有效期 —— 一張掛三天的單當初的訊號早就過期了 |
 | 十四 | Long / Short | ⚠️ | 開多/開空/全平/減倉有。**缺**:Add Position(加倉)、Reverse Position(反手)沒有實作 |
 | 十五 | Order State Machine | ✅ | `agmcis/execution/state_machine.py`,含 UNKNOWN 不得重下單的規則;`test_execution_engine.py` 釘住 |
 | 十六 | Client Order ID | ✅ | `agmcis/execution/client_order_id.py` |
