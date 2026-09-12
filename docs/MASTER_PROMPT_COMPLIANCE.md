@@ -141,7 +141,7 @@
 |---|---|---|---|
 | 八十一 | Environment Separation | ✅ | 五個環境,無法辨識的名稱降級為 development(不是 production)。LIVE 閘門要求 `APP_ENV=production` —— 一台標成 development 的機器送真實訂單代表設定搬錯了 |
 | 八十二 | Docker / Deployment | ⚠️ | Dockerfile + compose(非 root、健康檢查打 `/health`、排程與 Web 分開容器)。**Production 仍在 systemd 上** —— 第八十二節也說「不要破壞目前正在運作的 Production」,切換要是一次有計畫的遷移 |
-| 八十三 | Deployment Strategy | ⚠️ | 五個環境的定義與 compose 都在,**staging 實際上還沒架起來** |
+| 八十三 | Deployment Strategy | ⚠️ | 五個環境的定義、`docker-compose.staging.yml`、以及 `docs/DEPLOYMENT.md` 寫清楚「不直接覆蓋 Production」具體是哪五步(migration 一律先跑再重啟)。staging 把 `TRADING_MODE` **寫死**成 paper 並用獨立的資料庫 volume —— 共用 production 資料庫的 staging 是第二個 production。**還缺一台實際的機器** |
 | 八十四 | Secrets | ✅ | 全部走環境變數,`test_access_control.py` 釘住 |
 | 八十五 | API Design | ✅ | `/api/backtest` 與 `/api/paper` 做成**任務式**端點(POST 送出 → 拿 job_id → GET `/api/jobs/{id}` 查),不是會逾時的同步請求。一次只跑一個 —— 併發回測會讓停損檢查延遲,而那是拿真錢換一份報告。查詢類再補 `/api/system_events`、`/api/backtests`、`/api/news`、`/api/strategies` |
 | 八十六 | Frontend Dashboard | ✅ | 首頁 + 完整儀表板 + 透明度面板。Top Opportunities、News、AI Agents 三個區塊都有 |
@@ -166,7 +166,7 @@
 | 一百 | 開發順序 | ✅ | Phase 0–17 依序完成;18–20 需要真實資金,必須人工授權 |
 | 一百零一 | 第一個任務 | ✅ | `docs/AUDIT_REPORT.md` 17 問全數回答 |
 | 一百零二 | 不問不必要的問題 | ✅ | 只在真實資金 / Live / API Key 相關時要求人工確認 |
-| 一百零三 | 真正的成功標準 | ✅ | Reliable / Testable / Explainable / Risk Controlled / BingX Compatible / Research Driven / Operationally Safe 全數達成 |
+| 一百零三 | 真正的成功標準 | ⚠️ | Reliable / Testable / Explainable / Risk Controlled / BingX Compatible / Research Driven 六項達成。**Operationally Safe 要跑過真錢才算數** —— 這一項先前標成 ✅ 是不對的,第二節與第九十九節不允許在沒驗證的情況下宣稱完成 |
 | 一百零四 | 最終架構目標 | ⚠️ | 主幹完成。**Portfolio 分支(組合風險/相關性)缺席** |
 | 一百零五 | 最終使用者體驗 | ✅ | 首頁就是第一百零五節描述的樣子。完整儀表板移到 `/dashboard`,沒有刪掉 —— 第一眼要回答「健康嗎、是不是真錢、有沒有機會」,不是三十個數字 |
 | 一百零六 | 最終原則 17 條 | ⚠️ | 第 1–11、13–16 條達成。**第 12 條(Standard/Perpetual 分離)達成**;缺口集中在「任何開倉都必須有風險保護」的六步驟(見十八)與組合層風險 |
@@ -177,13 +177,13 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 95 |
-| ⚠️ 部分做到 | 11 |
+| ✅ 已做到 | 94 |
+| ⚠️ 部分做到 | 12 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 11 節,以及為什麼
+## 還沒補完的 12 節,以及為什麼
 
-原本的 12 個「❌ 沒做」全部補完了。剩下的 11 個「部分做到」分成三類。
+原本的 12 個「❌ 沒做」全部補完了。剩下的 12 個「部分做到」分成三類。
 **這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
 ### 一、刻意不做(4 節)
@@ -195,16 +195,17 @@
 | 八十二 | Production 仍在 systemd 上。Dockerfile 與 compose 都寫好了,但第八十二節也說「不要破壞目前正在運作的 Production」 |
 | 九十二 | LIVE 切換**不做網頁按鈕**。網頁按鈕表達不了「24 小時後失效」與「這次批准的是 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點。狀態看得到,開關要人去 VPS 上跑腳本 |
 
-### 二、需要真實環境或真錢才能算數(5 節)
+### 二、需要真實環境或真錢才能算數(6 節)
 
-這五節的程式碼都寫完了。它們留在 ⚠️ 是因為**沒有跑過真實資料或真錢的東西不能宣稱做到**
+這六節的程式碼都寫完了。它們留在 ⚠️ 是因為**沒有跑過真實資料或真錢的東西不能宣稱做到**
 (第二節、第九十九節)。
 
 | 節 | 還缺什麼 |
 |---|---|
 | 三十八 | OrderFlow 是**代理指標**。真正的 order flow 需要逐筆成交,這裡用訂單簿失衡 + 量能確認近似,所以門檻高、信心上限 65。要升級需要 BingX 的逐筆資料 |
 | 五十六 | 1R / 2R / 3R 與 30/30/40 是**起點不是結論**。調校工具寫好了(`scripts/tune_exits.py`),但它要真實 K 棒才有意義,而這個容器連不到 BingX。跑完之後結果也不會自動套用 —— 走提案流程,由人批准(第七十八節)|
-| 八十三 | staging 環境還沒實際架起來。設定分離做完了(五個環境),但沒有第二台機器 |
+| 八十三 | compose 與 runbook 都寫好了(`docker-compose.staging.yml` + `docs/DEPLOYMENT.md`),**但沒有第二台機器**。起一個 staging 是一行指令,不是一個設計問題了 |
+| 一百零三 | 前六項達成。**Operationally Safe 要跑過真錢才算數** |
 | 一百零四 | 組合風險與相關性的程式碼在 `agmcis/risk/portfolio.py`,但沒有跑過真實的多倉情境 |
 | 一百零六 | 第 1–16 條達成。第 17 條「任何開倉都必須有風險保護」的六步驟緊急保護寫完了,但**沒有在真的下單失敗時觸發過** |
 
@@ -214,6 +215,14 @@
 |---|---|
 | 三十 | 12 個 Agent 齊了,但 Macro Agent 只會投 WAIT —— 它沒有總經資料來源,而一個猜方向的總經 Agent 比沒有更糟 |
 | 九十五 | Dashboard Lite 與 analytics 拆完了。還剩 `paper_trading.create_paper_trade`、`strategy.analyze_symbol`、`risk_control.get_risk_control_status` 三個長函式 —— 它們都在交易路徑上,拆開的風險高於現在的收益,排在真實資料驗證之後 |
+
+## 這些缺口要怎麼補
+
+上面第二類的六節,答案都在同一個地方:**跑真實資料**。
+`docs/OPERATOR_ACTIONS.md` 列了要跑哪幾支腳本、順序是什麼,
+以及哪幾件事需要你授權才能繼續(Phase 18–20 的小額實單、監控、放大)。
+
+我不會自己做那些,也不會催。
 
 ## 明確不做的事
 

@@ -1,0 +1,58 @@
+# Staging(Master Prompt 第八十三節)。
+#
+#     docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# ## 為什麼需要一個獨立的檔案
+#
+# 第八十三節要求 Development → Testing → Staging → Paper → Production,
+# 而「任何重大更新不直接覆蓋 Production」。沒有 staging 的話,那句話
+# 只能靠自律 —— 而自律在半夜修 bug 的時候不管用。
+#
+# ## Staging 與 Production 的差別只有兩件事
+#
+#   1. **帳戶不同。** 這是 staging 存在的全部理由。設定要一樣,
+#      不一樣的 staging 驗證不了 production 的行為。
+#   2. **永遠不是實單。** 下面把 TRADING_MODE 寫死成 paper 而且
+#      AUTO_TRADING 關閉 —— staging 用來驗證「東西會不會壞」,
+#      不是用來賺錢。
+#
+# 其餘全部照 production:APP_ENV=staging 會走與 production 相同的
+# IS_PROTECTED_ENV 分支(agmcis/config/settings.py),所以寬鬆的
+# 預設值在這裡就會被擋下來,而不是等到 production 才發現。
+#
+# ## 資料庫是獨立的一份
+#
+# 共用 production 資料庫的 staging 不是 staging,是第二個 production。
+# 下面用不同的 volume 名稱。
+
+services:
+  db:
+    environment:
+      POSTGRES_DB: ${DB_NAME:-agmcis_staging}
+    volumes:
+      # 獨立的 volume。名字不同就不會接到 production 那一份。
+      - agmcis-staging-db:/var/lib/postgresql/data
+    ports: []
+
+  web:
+    environment:
+      APP_ENV: staging
+      # 寫死。staging 不下實單 —— 不是「預設不下」,是「不能下」。
+      TRADING_MODE: paper
+      AUTO_TRADING: "false"
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-agmcis_staging}
+    ports:
+      # 不同的埠,所以 staging 與 production 可以在同一台機器上並存。
+      - "127.0.0.1:8010:8000"
+
+  scheduler:
+    environment:
+      APP_ENV: staging
+      TRADING_MODE: paper
+      AUTO_TRADING: "false"
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-agmcis_staging}
+
+volumes:
+  agmcis-staging-db:
