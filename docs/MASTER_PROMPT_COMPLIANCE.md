@@ -66,11 +66,11 @@
 |---|---|---|---|
 | 三十一 | Agent Voting | ✅ | `agmcis/agents/consensus.py`,棄權不等於反對 |
 | 三十二 | AI 不可直接控制交易所 | ✅ | Agent 只產生 `TradeIntent`;`test_api_surface.py` 以 AST 強制 |
-| 三十三 | Backtesting Engine | ⚠️ | Long/Short/槓桿/保證金/手續費/滑點/資金費用/TP/SL/強平/Sizing 都有。**缺 Partial Fill、Partial Close、Trailing Stop** |
+| 三十三 | Backtesting Engine | ✅ | 15 項全數支援。三個新功能預設全關,關閉時行為與加功能前**完全相同** —— 一個會讓歷史結論悄悄改變的引擎升級,等於把過去的驗證全部作廢 |
 | 三十四 | Backtest 禁止作弊 | ✅ | 訊號用收盤價產生,成交在下一根;`test_backtest.py` 有專門的 look-ahead 測試 |
 | 三十五 | Backtest Metrics | ✅ | 17 項全部都有,含 MFE / MAE / Calmar / Recovery Factor |
 | 三十六 | Walk Forward | ✅ | `agmcis/lab/splits.py` Train/Validation/Test/OOS |
-| 三十七 | Monte Carlo | ⚠️ | Trade Shuffle / Bootstrap / Probability of Drawdown / Probability of Ruin / Worst Case 有。**缺 Slippage Variation、Fee Variation** |
+| 三十七 | Monte Carlo | ✅ | 重抽樣 + `agmcis/lab/cost_sensitivity.py`。成本變動**重跑回測**而不是在結果上加減 —— 成本會改變哪些交易還有得賺、強平價在哪、以及成交價本身 |
 | 三十八 | Strategy Lab | ⚠️ | 可測 EMA(trend_following)、Breakout、Momentum、Mean Reversion,並支援 Ensemble。**缺 RSI、MACD、VWAP、Volatility、Market Structure、Order Flow 六種策略** |
 | 三十九 | 避免 Overfitting | ✅ | `agmcis/lab/scoring.py` 有 OVERFITTED 標記與 Strategy Health Score |
 | 四十 | Strategy Ensemble | ✅ | `agmcis/lab/ensemble.py`,含權重上限 |
@@ -177,8 +177,8 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 69 |
-| ⚠️ 部分做到 | 32 |
+| ✅ 已做到 | 71 |
+| ⚠️ 部分做到 | 30 |
 | ❌ 沒做 | 5 |
 
 ## 缺口排序(由大到小)
@@ -193,7 +193,7 @@
 6. ~~**五十五 + 五十七 + 五十八 — Partial TP 與 ATR / 結構型移動停損**~~ ✅ 已補(`agmcis/execution/exit_plan.py`,74 個測試)。
 7. ~~**六十四 + 六十九 + 七十 + 七十一 — 決策持久化**~~ ✅ 已補(`agmcis/review/decision_log.py`,23 個測試)。
 8. ~~**六十五 + 六十六 — 稽核與 `/health`**~~ ✅ 已補(`api/health.py`,26 個測試)。
-9. **三十七 + 三十三 — Monte Carlo 成本敏感度、回測 Partial Fill / Trailing**(研究可信度)
+9. ~~**三十三 + 三十七 — 回測現實因素與成本敏感度**~~ ✅ 已補(32 個測試)。
 10. **二十五 + 二十四 + 三十八 — TA 深度、MTF 階層、更多策略**(研究廣度)
 11. **一百零五 + 九十一 + 六十二 + 六十三 — 使用者體驗**(展示)
 12. **八十二 + 八十一 — Docker 與環境分離**(部署)

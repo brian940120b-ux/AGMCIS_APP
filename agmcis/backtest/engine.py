@@ -69,9 +69,44 @@ class BacktestTrade:
     mfe_pct: float = 0.0
     mae_pct: float = 0.0
 
+    # ---- 第三十三節:部分成交與分批平倉 ----
+    #
+    # requested_quantity 是「想要的量」,quantity 是「實際拿到的量」。
+    # 兩者相同時就是全額成交。分開記是因為一個在回測裡全額成交、
+    # 在實盤只成交七成的策略,績效差距不是四捨五入等級的。
+    requested_quantity: Optional[float] = None
+    fill_ratio: float = 1.0
+
+    # 分批平倉:已經收掉的比例與已實現的損益。
+    # 剩餘比例 = 1 - closed_fraction。
+    closed_fraction: float = 0.0
+    realized_partial: float = 0.0
+    partials: List[dict] = field(default_factory=list)
+    tp_stage: int = 0
+
+    # 停損被移動過幾次。移動停損有沒有真的在動,看這個數字最快。
+    stop_moves: int = 0
+    original_stop_loss: Optional[float] = None
+
     @property
     def notional(self):
+        """**剩餘**部位的名目價值。分批收掉的部分不再計入。"""
+        return self.size_usdt * self.leverage * self.remaining_fraction
+
+    @property
+    def full_notional(self):
+        """建倉當下的名目價值。R 倍數與部分成交比例要用它。"""
         return self.size_usdt * self.leverage
+
+    @property
+    def remaining_fraction(self):
+        return max(0.0, 1.0 - self.closed_fraction)
+
+    @property
+    def is_partially_filled(self):
+        if self.requested_quantity is None or self.requested_quantity <= 0:
+            return False
+        return self.quantity < self.requested_quantity * (1 - 1e-9)
 
     @property
     def is_open(self):
@@ -96,8 +131,15 @@ class BacktestTrade:
 
     @property
     def r_multiple(self):
-        """賺賠倍數:實際損益 ÷ 原本打算冒的風險。"""
-        risk = abs(self.entry_price - self.stop_loss) / self.entry_price * self.notional
+        """
+        賺賠倍數:實際損益 ÷ 原本打算冒的風險。
+
+        風險用**原始**停損與**建倉當下**的名目算 —— 停損被移動過之後,
+        用現在的停損算會讓每一筆移動過停損的交易 R 倍數暴增,
+        而那是計算方式造成的,不是策略變好了。
+        """
+        stop = self.original_stop_loss if self.original_stop_loss is not None else self.stop_loss
+        risk = abs(self.entry_price - stop) / self.entry_price * self.full_notional
         if risk <= 0:
             return None
         return round(self.net_pnl / risk, 3)
@@ -125,6 +167,20 @@ class BacktestTrade:
             "bars_held": self.bars_held,
             "mfe_pct": round(self.mfe_pct, 4),
             "mae_pct": round(self.mae_pct, 4),
+            "requested_quantity": (
+                round(self.requested_quantity, 8)
+                if self.requested_quantity is not None else None
+            ),
+            "fill_ratio": round(self.fill_ratio, 6),
+            "partially_filled": self.is_partially_filled,
+            "closed_fraction": round(self.closed_fraction, 6),
+            "realized_partial": round(self.realized_partial, 4),
+            "partials": list(self.partials),
+            "stop_moves": self.stop_moves,
+            "original_stop_loss": (
+                round(self.original_stop_loss, 8)
+                if self.original_stop_loss is not None else None
+            ),
         }
 
 
@@ -158,13 +214,46 @@ class BacktestEngine:
     def __init__(self, costs=None, start_balance=10000.0,
                  risk_per_trade_pct=1.0, max_leverage=5.0,
                  maintenance_margin_ratio=MAINTENANCE_MARGIN_RATIO,
-                 candle_hours=1.0):
+                 candle_hours=1.0, trailing=None, take_profit_stages=None,
+                 fill_model=None):
+        """
+        trailing            移動停損設定(第五十八節)。None = 不移動。
+                            {"mode": "percent", "gap_pct": 3.0}
+                            {"mode": "atr", "multiple": 2.0, "atr_fn": fn}
+                            atr_fn(history, index) -> ATR 值或 None。
+
+        take_profit_stages  分批停利(第五十七節)。None = 一次全平。
+                            [(R 倍數, 比例), ...],比例必須加總為 1。
+
+        fill_model          部分成交(第三十三節)。None = 永遠全額成交。
+                            fill_model(candle, notional) -> 0 到 1 的成交比例。
+
+        三者預設全部關閉,而且關閉時的行為與加這些功能之前**完全相同** ——
+        既有的回測結果不會因為引擎多了功能而改變。這很重要:
+        一個會讓歷史結論悄悄改變的引擎升級,等於把過去的驗證全部作廢。
+        """
         self.costs = costs if costs is not None else DEFAULT_COSTS
         self.start_balance = float(start_balance)
         self.risk_per_trade_pct = float(risk_per_trade_pct)
         self.max_leverage = float(max_leverage)
         self.maintenance_margin_ratio = float(maintenance_margin_ratio)
         self.candle_hours = float(candle_hours)
+        self.trailing = trailing
+        self.take_profit_stages = self._validate_stages(take_profit_stages)
+        self.fill_model = fill_model
+
+    @staticmethod
+    def _validate_stages(stages):
+        if not stages:
+            return None
+
+        total = sum(float(f) for _, f in stages)
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"分批比例加起來是 {total},必須剛好是 1.0 —— "
+                f"少於 1 會留下永遠不平的殘倉,多於 1 平不出來"
+            )
+        return [(float(r), float(f)) for r, f in stages]
 
     # ---------------- 主迴圈 ----------------
 
@@ -209,20 +298,29 @@ class BacktestEngine:
             candle = rows[index]
 
             # ---- 1. 先處理已有部位的出場(用這根的 high/low)----
+            #
+            # 順序:停損 / 強平 -> 分批停利 -> 移動停損。
+            # 停損永遠先判,因為同根 K 棒無法知道誰先到,而假設停損先到
+            # 是保守的那一邊(見模組說明)。分批停利也不例外。
             if position is not None:
                 exited = self._check_exit(position, candle, index)
                 if exited:
-                    balance += position.net_pnl
+                    balance += self._settle(position)
                     result.trades.append(position)
                     position = None
                     pending_exit = False
                     equity_curve.append(round(balance, 8))
 
+            # ---- 1a. 分批停利與移動停損 ----
+            if position is not None:
+                balance += self._check_partials(position, candle, index)
+                self._trail_stop(position, candle, rows[: index + 1], index)
+
             # ---- 1b. 上一根策略喊的出場,在這一根開盤成交 ----
             #     停損停利優先於策略出場 —— 部位已經被停掉就沒得出場了。
             if position is not None and pending_exit:
                 self._close(position, candle["open"], candle, index, "策略出場")
-                balance += position.net_pnl
+                balance += self._settle(position)
                 result.trades.append(position)
                 position = None
                 pending_exit = False
@@ -256,7 +354,7 @@ class BacktestEngine:
         # 收盤時強制平倉,否則未實現損益會被忽略
         if position is not None:
             self._force_close(position, rows[-1], len(rows) - 1, "回測結束")
-            balance += position.net_pnl
+            balance += self._settle(position)
             result.trades.append(position)
             equity_curve.append(round(balance, 8))
 
@@ -318,7 +416,22 @@ class BacktestEngine:
         if notional <= 0 or size_usdt <= 0:
             return None
 
-        quantity = notional / entry_price
+        requested_quantity = notional / entry_price
+        quantity = requested_quantity
+        fill_ratio = 1.0
+
+        # ---- 部分成交(第三十三節)----
+        # 實盤在流動性不足或價格快速移動時一定會遇到。回測假設永遠全額成交,
+        # 等於把「這個策略的部位大小市場吃不吃得下」這個問題整個跳過。
+        if self.fill_model is not None:
+            fill_ratio = float(self.fill_model(candle, notional))
+            if fill_ratio <= 0:
+                return None
+            fill_ratio = min(1.0, fill_ratio)
+            quantity = requested_quantity * fill_ratio
+            notional = notional * fill_ratio
+            size_usdt = notional / leverage
+
         entry_fee = self.costs.fee(notional)
 
         position = BacktestTrade(
@@ -332,9 +445,145 @@ class BacktestEngine:
             quantity=quantity,
             stop_loss=float(stop_loss),
             take_profit=signal.get("take_profit"),
+            requested_quantity=requested_quantity,
+            fill_ratio=fill_ratio,
+            original_stop_loss=float(stop_loss),
         )
         position.fees = entry_fee
         return position
+
+    # ---------------- 移動停損與分批停利 ----------------
+
+    def _trail_stop(self, position, candle, history, index):
+        """
+        移動停損(第五十八節)。回傳有沒有移動。
+
+        用 exit_plan.tighten_only 判斷候選值能不能採用,**不另外寫一套** ——
+        「停損只能往有利方向移動」這條規則有一個實作就夠了,
+        兩個實作遲早會有一個在某個邊界情況把停損往外推。
+        """
+        if not self.trailing:
+            return False
+
+        from agmcis.execution import exit_plan
+
+        mode = self.trailing.get("mode", "percent")
+        is_long = position.direction is Direction.LONG
+        direction = "做多" if is_long else "做空"
+
+        # 用**收盤價**當參考,不是這一根的極值。
+        #
+        # 跟著極值走比較像真實的移動停損,但它需要一個這個引擎在別的
+        # 地方都拒絕的假設:「價格先到極值、才反轉」。如果那根 K 棒其實是
+        # 先反轉再衝到極值,用極值算出來的停損在當時根本還不存在。
+        #
+        # 用收盤價就沒有這個問題:停損永遠落在已經確定發生的價格後面,
+        # 而且它在**下一根**才生效(這一根的出場判定已經跑完了)。
+        # 代價是抓到的利潤比真實的逐筆移動停損少一點 ——
+        # 那是低估而不是高估,是可以接受的方向。
+        reference = candle["close"]
+
+        if mode == "percent":
+            candidate = exit_plan.trail_percent(
+                direction, reference, gap_pct=self.trailing.get("gap_pct", 3.0),
+            )
+        elif mode == "atr":
+            atr_fn = self.trailing.get("atr_fn")
+            atr = atr_fn(history, index) if atr_fn is not None else None
+            candidate = exit_plan.trail_atr(
+                direction, reference, atr,
+                multiple=self.trailing.get("multiple", 2.0),
+            )
+        else:
+            raise ValueError(f"未知的移動停損模式:{mode!r}")
+
+        moved = exit_plan.tighten_only(direction, position.stop_loss, candidate)
+        if moved is None:
+            return False
+
+        position.stop_loss = moved
+        position.stop_moves += 1
+        return True
+
+    def _check_partials(self, position, candle, index):
+        """
+        分批停利(第五十七節)。回傳這一根實現了多少損益。
+
+        與停損同根時**不收** —— 停損優先於停利是這個引擎一貫的
+        保守假設(見模組說明),分批停利沒有理由例外。
+        呼叫順序保證了這件事:_check_exit 先跑。
+        """
+        if not self.take_profit_stages:
+            return 0.0
+
+        is_long = position.direction is Direction.LONG
+        stop = position.original_stop_loss or position.stop_loss
+        risk = abs(position.entry_price - stop)
+        if risk <= 0:
+            return 0.0
+
+        favourable = candle["high"] if is_long else candle["low"]
+        realised = 0.0
+
+        for stage, (r_multiple, fraction) in enumerate(
+            self.take_profit_stages, start=1,
+        ):
+            if stage <= position.tp_stage:
+                continue
+
+            target = position.entry_price + (
+                risk * r_multiple * (1 if is_long else -1)
+            )
+
+            reached = favourable >= target if is_long else favourable <= target
+            if not reached:
+                break       # 目標是依序的,第一個沒到就不用看後面
+
+            # 最後一階由 _check_exit / 主迴圈的全平路徑處理,
+            # 這裡只收中間的階 —— 否則會留下一個 0 比例的部位。
+            if abs(position.closed_fraction + fraction - 1.0) < 1e-9:
+                break
+
+            realised += self._realise_partial(
+                position, target, fraction, stage, index,
+            )
+
+        return realised
+
+    def _realise_partial(self, position, price, fraction, stage, index):
+        """收掉一部分部位。回傳這一腿的淨損益。"""
+        is_long = position.direction is Direction.LONG
+        exit_price = self.costs.exit_price(price, is_long)
+
+        leg_notional = position.full_notional * fraction
+
+        change = (
+            (exit_price - position.entry_price) / position.entry_price
+            if is_long
+            else (position.entry_price - exit_price) / position.entry_price
+        )
+        gross = leg_notional * change
+
+        hours = (index - position.entry_index) * self.candle_hours
+        funding = self.costs.funding_cost(leg_notional, hours, is_long)
+        fee = self.costs.fee(leg_notional)
+
+        leg_pnl = gross - fee - funding
+
+        position.closed_fraction = round(position.closed_fraction + fraction, 10)
+        position.tp_stage = stage
+        position.realized_partial += leg_pnl
+        position.fees += fee
+        position.funding += funding
+        position.partials.append({
+            "stage": stage,
+            "index": index,
+            "fraction": fraction,
+            "price": round(exit_price, 8),
+            "pnl": round(leg_pnl, 4),
+        })
+
+        return leg_pnl
 
     # ---------------- 出場 ----------------
 
@@ -459,14 +708,35 @@ class BacktestEngine:
         position.exit_reason = reason
         position.gross_pnl = gross
         position.fees += exit_fee
-        position.funding = funding
-        position.net_pnl = gross - position.fees - funding
+        position.funding += funding
 
-        # 虧損不可能超過保證金 —— 強平就是為了這個
-        if position.net_pnl < -position.size_usdt:
-            position.net_pnl = -position.size_usdt
+        # 這一腿的損益。分批已經實現的部分另外加 ——
+        # 它已經被算進 balance 了,但 net_pnl 要代表**整筆交易**,
+        # 否則一筆「TP1 收 +90、剩下虧 -20」會被統計成虧損交易。
+        final_leg = gross - position.fees - position.funding
 
+        # 虧損不可能超過保證金 —— 強平就是為了這個。
+        # 上限用剩餘部位的保證金:已經收掉的部分不會再虧。
+        remaining_margin = position.size_usdt * position.remaining_fraction
+        if final_leg < -remaining_margin:
+            final_leg = -remaining_margin
+
+        position.net_pnl = final_leg + position.realized_partial
+
+        # 主迴圈把 net_pnl 加進 balance,但分批那部分已經加過了。
+        # 回傳的是「這一次要加進 balance 的金額」,由 _settle 取用。
+        position._final_leg_pnl = final_leg
         return True
+
+    @staticmethod
+    def _settle(position):
+        """
+        平倉時要加進餘額的金額。
+
+        **不是 net_pnl。** net_pnl 是整筆交易的損益(含分批),
+        而分批那部分在發生的當下就已經加進餘額了。再加一次等於憑空生錢。
+        """
+        return getattr(position, "_final_leg_pnl", position.net_pnl)
 
     def _force_close(self, position, candle, index, reason):
         return self._close(position, candle["close"], candle, index, reason)
