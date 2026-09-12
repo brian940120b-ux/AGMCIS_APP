@@ -550,6 +550,67 @@ class LiveGate:
             f"{calendar.generated_at.date()} 更新,尚有 {len(upcoming)} 筆未來事件",
         )
 
+    # 掃描的範圍。第一版只看 agmcis/execution/broker.py,那是個洞:
+    # 把 LiveBroker 放進同一個套件的**任何其他檔案**,這一項照樣通過。
+    # 我實際試過 —— 閘門回報「沒有 LiveBroker」,而 LiveBroker 就在
+    # agmcis/execution/live_broker.py 裡,is_live = True。
+    #
+    # 所以現在掃整個 execution 套件,而且是讀原始碼(AST)不是 import:
+    #   * import 會執行模組,一個還沒被審視過的實單模組不該被執行;
+    #   * import 失敗的模組會被跳過 —— 「載不進來」不等於「不存在」。
+    LIVE_PATH_ROOTS = ("agmcis/execution",)
+
+    def _scan_live_broker_sources(self):
+        """
+        回傳 [(檔案, 名稱, 原因)]。掃不動就丟例外 ——
+        呼叫端會把例外變成「沒通過」,不是「跳過」。
+        """
+        import ast
+
+        root = Path(__file__).resolve().parents[2]
+        found = []
+
+        for relative in self.LIVE_PATH_ROOTS:
+            directory = root / relative
+            if not directory.is_dir():
+                raise FileNotFoundError(f"找不到要掃描的目錄 {relative}")
+
+            for path in sorted(directory.rglob("*.py")):
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                try:
+                    where = path.relative_to(root).as_posix()
+                except ValueError:
+                    # 掃的目錄不在專案底下(測試會這樣做)。
+                    where = path.as_posix()
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        if "live" in node.name.lower():
+                            found.append((where, node.name, "類別名稱含 live"))
+                            continue
+                        # 名字沒有 live,但自稱是實單的類別一樣要抓到。
+                        for stmt in node.body:
+                            targets = (
+                                stmt.targets if isinstance(stmt, ast.Assign)
+                                else [stmt.target] if isinstance(stmt, ast.AnnAssign)
+                                else []
+                            )
+                            names = [t.id for t in targets if isinstance(t, ast.Name)]
+                            if "is_live" not in names:
+                                continue
+                            value = getattr(stmt, "value", None)
+                            if isinstance(value, ast.Constant) and value.value is True:
+                                found.append(
+                                    (where, node.name, "類別屬性 is_live = True")
+                                )
+                                break
+
+                    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        if "live_broker" in node.name.lower():
+                            found.append((where, node.name, "函式名稱含 live_broker"))
+
+        return found
+
     def check_live_broker_absent(self):
         """
         即使全部通過,系統仍然無法下實單 —— LiveBroker 不存在。
@@ -558,20 +619,27 @@ class LiveGate:
         這個閘門是實單的前提,不是開關。
         """
         try:
-            from agmcis.execution import broker as broker_module
-            live = [n for n in dir(broker_module) if "live" in n.lower()]
+            found = self._scan_live_broker_sources()
         except Exception as exc:
-            return GateCheck("實單路徑", False, f"無法檢查:{exc}", blocking=True)
-
-        if live:
             return GateCheck(
                 "實單路徑", False,
-                f"broker 模組出現了 {live}。實單程式碼必須單獨審視過才能存在。",
+                f"無法檢查:{type(exc).__name__}: {exc} —— 掃不動不等於沒有。",
+                blocking=True,
+            )
+
+        if found:
+            lines = [f"{where}:{name}({why})" for where, name, why in found]
+            return GateCheck(
+                "實單路徑", False,
+                "execution 套件裡出現了實單程式碼:"
+                + ";".join(lines)
+                + "。實單程式碼必須單獨審視過才能存在。",
             )
 
         return GateCheck(
             "實單路徑", True,
-            "沒有 LiveBroker —— 閘門通過也還不會下實單,這是刻意的。",
+            "整個 execution 套件裡沒有 LiveBroker —— "
+            "閘門通過也還不會下實單,這是刻意的。",
             blocking=False,
         )
 

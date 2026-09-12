@@ -11,6 +11,7 @@ LIVE SAFETY GATE(Phase 17)。
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -409,14 +410,92 @@ class TestLiveTradingIsStillImpossible(GateTestCase):
         self.assertTrue(live_check.passed)
         self.assertIn("還不會下實單", live_check.detail)
 
-    def test_a_live_broker_appearing_would_close_the_gate(self):
-        from agmcis.execution import broker as broker_module
+    def scan(self, filename, source):
+        """把一段程式碼放進一個假的 execution 套件,讓閘門去掃它。"""
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        with open(os.path.join(directory, filename), "w", encoding="utf-8") as handle:
+            handle.write(source)
 
-        with patch.object(broker_module, "LiveBroker", object, create=True):
-            check = self.gate().check_live_broker_absent()
+        gate = self.gate()
+        with patch.object(lg.LiveGate, "LIVE_PATH_ROOTS", (directory,)):
+            return gate.check_live_broker_absent()
+
+    def test_a_live_broker_appearing_would_close_the_gate(self):
+        check = self.scan("broker.py", "class LiveBroker:\n    pass\n")
 
         self.assertFalse(check.passed)
         self.assertTrue(check.blocking)
+
+    def test_a_live_broker_in_another_file_is_also_caught(self):
+        """
+        這是一個真的洞的回歸測試。
+
+        第一版只 import agmcis/execution/broker.py 然後看 dir() ——
+        所以 agmcis/execution/live_broker.py 裡的 LiveBroker 完全看不到。
+        我實際建過那個檔案,閘門照樣回報「沒有 LiveBroker」。
+        """
+        check = self.scan(
+            "live_broker.py",
+            "class LiveBroker:\n    is_live = True\n",
+        )
+
+        self.assertFalse(check.passed)
+        self.assertIn("live_broker.py", check.detail)
+
+    def test_a_class_that_hides_the_word_live_is_still_caught(self):
+        """
+        名字裡沒有 live 但自稱 is_live = True 的類別一樣要抓到。
+        改個名字就能繞過的檢查等於沒有檢查。
+        """
+        check = self.scan(
+            "real_orders.py",
+            "class OrderSender:\n    is_live = True\n",
+        )
+
+        self.assertFalse(check.passed)
+        self.assertIn("OrderSender", check.detail)
+
+    def test_a_paper_broker_does_not_trip_it(self):
+        check = self.scan(
+            "paper.py",
+            "class PaperBroker:\n    is_live = False\n",
+        )
+
+        self.assertTrue(check.passed)
+
+    def test_it_reads_the_source_instead_of_importing_it(self):
+        """
+        一個還沒被審視過的實單模組不該被執行才對。
+        所以掃描讀原始碼 —— 就算模組 import 會炸,它照樣被看見。
+        """
+        check = self.scan(
+            "explodes.py",
+            "raise RuntimeError('這個模組 import 就會炸')\n\n"
+            "class LiveBroker:\n    pass\n",
+        )
+
+        self.assertFalse(check.passed)
+
+    def test_a_directory_it_cannot_scan_counts_as_not_passed(self):
+        """「掃不動」不等於「沒有」。"""
+        gate = self.gate()
+        with patch.object(
+            lg.LiveGate, "LIVE_PATH_ROOTS", ("/nonexistent-execution-package",)
+        ):
+            check = gate.check_live_broker_absent()
+
+        self.assertFalse(check.passed)
+        self.assertTrue(check.blocking)
+
+    def test_it_scans_the_whole_execution_package(self):
+        """設定本身要對:掃的是整個套件,不是單一檔案。"""
+        for relative in lg.LiveGate.LIVE_PATH_ROOTS:
+            path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                relative,
+            )
+            self.assertTrue(os.path.isdir(path), relative)
 
 
 class TestAudit(GateTestCase):
