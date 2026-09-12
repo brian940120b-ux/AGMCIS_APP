@@ -341,3 +341,62 @@ class TestAuditCoversTheRestOfSectionSixtyFive(unittest.TestCase):
 
         self.assertEqual(written[0][0][0], "STRATEGY_STATUS_CHANGE")
         self.assertEqual(written[0][1]["after"], "paused")
+
+
+class TestTheLandingPage(unittest.TestCase):
+    """
+    第一百零五節:打開系統的第一眼要回答「健康嗎、是不是真錢、
+    有沒有機會」,不是三十個數字。
+    """
+
+    def test_the_landing_page_needs_a_key(self):
+        from fastapi.testclient import TestClient
+
+        import main
+
+        response = TestClient(main.app).get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 401)
+
+    def test_the_full_dashboard_is_still_reachable(self):
+        """它沒有被刪掉,只是不再是第一眼。"""
+        import main
+
+        paths = {
+            getattr(route, "path", None)
+            for route in main.app.routes
+        }
+        source = __import__("inspect").getsource(main)
+
+        self.assertIn('@app.get("/dashboard"', source)
+
+    def test_the_overview_reports_the_mode(self):
+        """
+        模式是狀態列最重要的一格 —— 它決定其他數字是不是真錢。
+        """
+        from api import overview
+
+        status = overview._status()
+        self.assertIn("mode", status)
+        self.assertIn("is_live", status)
+
+    def test_the_agent_count_is_not_hardcoded(self):
+        """
+        一個永遠顯示 12/12 的儀表板,在三個 Agent 棄權時
+        看起來一模一樣 —— 那正是最需要被看見的時候。
+        """
+        from api import overview
+
+        agents = overview._agents()
+        self.assertGreater(agents["registered"], 0)
+        self.assertIsNone(agents["active"], "活躍數由實際掃描結果填")
+
+    def test_an_overview_section_that_fails_does_not_blank_the_page(self):
+        from api import overview
+
+        with patch.object(overview, "_opportunities",
+                          return_value={"error": "掛了", "top": []}), \
+             patch.object(overview, "logger"):
+            payload = overview.build_overview()
+
+        self.assertIn("status", payload)
+        self.assertEqual(payload["opportunities"]["error"], "掛了")

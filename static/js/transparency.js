@@ -240,6 +240,59 @@ async function loadSelfReview() {
     render("self_review", head + findings + questions + agentTable);
 }
 
+/* ---------------- LIVE SAFETY GATE ---------------- */
+
+async function loadLiveGate() {
+    const data = await load("/api/live_gate");
+    if (data.error) throw new Error(data.error);
+
+    const head = `<div class="alert ${data.open ? "alert-critical" : "alert-ok"}">
+        <b>${data.open ? "⚠️ 閘門開啟" : "🔒 閘門關閉"}</b> —
+        ${data.open
+            ? "所有檢查都通過了。實單仍然需要 LiveBroker 存在才送得出去。"
+            : `${esc(data.failed_count ?? 0)} 項未通過`}
+    </div>`;
+
+    const rows = (data.checks || []).map(check => `<tr>
+        <td class="nowrap">${check.passed ? "✓" : (check.blocking ? "⛔" : "⚠️")}</td>
+        <td class="nowrap">${esc(check.name)}</td>
+        <td class="muted">${esc(check.detail)}</td>
+    </tr>`).join("");
+
+    const how = data.how_to_open
+        ? `<p class="muted"><b>怎麼開:</b>${esc(data.how_to_open)}</p>` : "";
+
+    render("live_gate", head + (rows
+        ? `<table class="tp"><tr><th></th><th>檢查</th><th>說明</th></tr>${rows}</table>`
+        : '<span class="muted">拿不到檢查結果。</span>') + how);
+}
+
+/* ---------------- News Center ---------------- */
+
+const IMPACT_CLASS = {
+    HIGH: "alert-critical", MEDIUM: "alert-warning", LOW: "",
+};
+
+async function loadNewsCenter() {
+    const data = await load("/api/news_center?limit=10");
+    if (data.error) throw new Error(data.error);
+
+    const rows = (data.news || []).map(item => `<tr>
+        <td class="nowrap ${IMPACT_CLASS[item.impact] || ""}">${esc(item.impact)}</td>
+        <td class="nowrap">${esc(item.direction)}</td>
+        <td>${num(item.score, 0)}</td>
+        <td class="nowrap">${(item.affected_symbols || []).map(esc).join("、") || "-"}</td>
+        <td>${item.url
+            ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.title)}</a>`
+            : esc(item.title)}</td>
+    </tr>`).join("");
+
+    render("news_center", rows
+        ? `<table class="tp"><tr><th>影響</th><th>方向</th><th>強度</th>
+           <th>相關標的</th><th>標題</th></tr>${rows}</table>`
+        : '<span class="muted">目前沒有新聞。</span>');
+}
+
 /* ---------------- 決策紀錄 ---------------- */
 
 const OUTCOME_CLASS = {
@@ -415,6 +468,8 @@ const SECTIONS = [
     ["orders", loadOrders],
     ["reconciliation", loadReconciliation],
     ["costs", loadCosts],
+    ["live_gate", loadLiveGate],
+    ["news_center", loadNewsCenter],
     ["decisions", loadDecisions],
     ["strategy_health", loadStrategyHealth],
     ["self_review", loadSelfReview],

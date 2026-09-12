@@ -392,6 +392,91 @@ def _audit_logs(limit=30):
     return _safe("audit_logs", run, {"entries": []})
 
 
+@router.get("/api/live_gate")
+def api_live_gate():
+    return _live_gate()
+
+
+def _live_gate():
+    """
+    LIVE SAFETY GATE 的**唯讀**狀態(第九十二節)。
+
+    ## 為什麼這裡沒有「切換到 LIVE」的按鈕
+
+    第九十二節要求切到 LIVE 前有七項確認與一句「I UNDERSTAND LIVE
+    TRADING RISK」。那七項確認在 scripts/live_gate.py 裡,而且結果是
+    一個**人手動建立的簽名檔**,有效期 24 小時、必須指名批准的金額。
+
+    做成網頁按鈕會讓那整套變成一個誤觸就會發生的動作。網頁按鈕沒辦法
+    表達「這個確認 24 小時後失效」「這次批准的是 30 USDT 不是所有金額」,
+    而那兩件事正是這套機制的重點。
+
+    所以這裡只顯示:現在通不通過、哪幾項沒過、確認檔什麼時候過期。
+    要開實單仍然要人去 VPS 上跑那個腳本。這是刻意偏離第九十二節的
+    UI 部分,理由寫在這裡。
+    """
+    def run():
+        from agmcis.safety.providers import build_gate
+
+        result = build_gate().evaluate()
+        payload = result.to_dict()
+        payload["how_to_open"] = (
+            "在 VPS 上執行 scripts/live_gate.py。它會逐項確認帳戶、交易所、"
+            "市場、風險、槓桿、當日虧損上限與 API,最後要求逐字輸入 "
+            "I UNDERSTAND LIVE TRADING RISK。確認檔 24 小時後自動失效。"
+        )
+        return payload
+
+    return _safe("live_gate", run, {
+        "open": False, "checks": [], "failed_count": 0,
+    })
+
+
+@router.get("/api/news_center")
+def api_news_center(limit: int = Query(10, ge=1, le=50)):
+    return _news_center(limit=limit)
+
+
+def _news_center(limit=10):
+    """
+    News Center(第八十九節):每則新聞的 Impact / Direction / Confidence。
+
+    **信心是關鍵字比對的信心,不是「這則新聞會讓價格往那邊走」的機率。**
+    這兩件事差很遠,而把前者顯示成後者會讓人對一個關鍵字計數器
+    產生不該有的信任。欄位名稱旁邊必須寫清楚。
+    """
+    def run():
+        from news_ai_engine import analyze_news_sentiment
+
+        items = analyze_news_sentiment()[:limit]
+        rows = []
+
+        for item in items:
+            score = float(item.get("score") or 0)
+            sentiment = item.get("sentiment") or "Neutral"
+
+            rows.append({
+                "title": item.get("title"),
+                "source": item.get("source"),
+                "url": item.get("url"),
+                "direction": sentiment,
+                # Impact 用分數的絕對值分級。這是關鍵字命中的強度,
+                # 不是市場影響力 —— 一則標題裡有三個「hack」的文章
+                # 不見得比一則有一個的重要。
+                "impact": (
+                    "HIGH" if score >= 45 else
+                    "MEDIUM" if score >= 20 else "LOW"
+                ),
+                "score": score,
+                "affected_symbols": item.get("affected_symbols") or [],
+                "confidence_basis": "關鍵字比對強度,不是價格影響機率",
+            })
+
+        return {"news": rows, "count": len(rows)}
+
+    return _safe("news_center", run, {"news": [], "count": 0})
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()

@@ -104,9 +104,12 @@ class TestApiSurface(unittest.TestCase):
         新增頁面時很容易只記得保護 /api/,忘了頁面本身。
         頁面上的資料跟 API 是同一份。
         """
+        # /health 是唯一刻意開放的端點(第六十六節)——
+        # 外部監控不會帶金鑰。它由上面那條 router 測試單獨守住。
         pages = [
             path for path in self._paths()
             if not path.startswith("/api/") and "{" not in path
+            and path != "/health"
         ]
 
         unprotected = []

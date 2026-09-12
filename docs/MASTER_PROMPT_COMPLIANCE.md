@@ -110,8 +110,8 @@
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
 | 六十一 | Performance Dashboard | ⚠️ | Equity / PnL / Win Rate / PF / Expectancy / Drawdown 有。**缺 Best/Worst Strategy、逐策略勝率與 PF 的 UI** |
-| 六十二 | AI Agent Dashboard | ⚠️ | `/transparency` 顯示 Agent 投票結果,但**沒有顯示 Agent 目前正在做什麼**(狀態燈/進行中的工作) |
-| 六十三 | Agent Interaction Visualization | ❌ | **沒有**。沒有節點圖、沒有決策時間軸 |
+| 六十二 | AI Agent Dashboard | ✅ | 首頁的 Agent 面板顯示每個 Agent 在做什麼與這一輪的票。活躍數是**實際有意見的**數量,不是寫死的 12/12 |
+| 六十三 | Agent Interaction Visualization | ⚠️ | 有 Agent 面板與逐 Agent 的 WHY 展開,**沒有動畫節點圖**。動畫在這個系統的優先順序很低 —— 第六十三節自己也說「UI Animation 不得影響交易核心」 |
 | 六十四 | Database | ⚠️ | 13 張表。新增 ai_decisions / risk_events / audit_logs / market_regimes / trade_exits。**仍缺 users、strategies、backtests、news 等** —— 那些目前不在交易路徑上 |
 | 六十五 | Audit Log | ✅ | 登入、系統暫停 / 恢復、策略狀態變更、Kill Switch、設定變更全部進 `audit_logs`。登入稽核**不記金鑰的任何片段** |
 | 六十六 | Observability | ✅ | `/health` 不需金鑰(外部監控不會帶金鑰),九個元件狀態,unhealthy 回 503。只回狀態不回內容 —— 錯誤細節留在需要金鑰的端點與 log |
@@ -144,18 +144,18 @@
 | 八十三 | Deployment Strategy | ⚠️ | 有 preflight / live_gate 腳本,**沒有 staging 環境** |
 | 八十四 | Secrets | ✅ | 全部走環境變數,`test_access_control.py` 釘住 |
 | 八十五 | API Design | ⚠️ | 13 條建議路徑裡有 `/api/portfolio`、`/api/performance`、`/api/market_scan`、`/api/analytics` 等。**缺 `/api/signals`、`/api/strategies`、`/api/backtest`、`/api/risk`、`/api/agents`、`/api/orders`、`/api/positions`** |
-| 八十六 | Frontend Dashboard | ⚠️ | Dashboard + Transparency 兩頁。**缺 Top Opportunities、News、AI Agents 三個區塊** |
+| 八十六 | Frontend Dashboard | ✅ | 首頁 + 完整儀表板 + 透明度面板。Top Opportunities、News、AI Agents 三個區塊都有 |
 | 八十七 | Trading Panel | ⚠️ | 有持倉表格,**沒有開倉前的 Entry/SL/TP/Leverage/Size/R:R 預覽面板** |
 | 八十八 | Open Position Panel | ✅ | Dashboard 表格含 Entry/Current/SL/TP/Leverage/Notional/PnL/PnL% |
-| 八十九 | News Center | ⚠️ | `news_center.py` 有,**UI 沒有 Impact / Direction / Confidence 三欄** |
-| 九十 | System Status UI | ⚠️ | `/api/system_health` 有資料,**UI 沒有 BingX/WebSocket/RiskEngine/Agents 的狀態燈** |
+| 八十九 | News Center | ✅ | Impact / Direction / 強度 / 相關標的都有。UI 明說**強度是關鍵字命中的強度,不是價格影響機率** |
+| 九十 | System Status UI | ✅ | 首頁狀態列九個元件。降級時把壞掉的元件**列出來** —— 只顯示 DEGRADED 等於要人去翻 log |
 
 ## 九十一~一百零六:模式 UI、品質、流程、最終原則
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 九十一 | Trading Modes UI | ❌ | **UI 完全沒有顯示目前模式**。PAPER/LIVE 在畫面上看不出來 |
-| 九十二 | LIVE Confirmation | ⚠️ | `scripts/live_gate.py` 有七項確認與 "I UNDERSTAND LIVE TRADING RISK",**但只在 CLI,UI 沒有** |
+| 九十一 | Trading Modes UI | ✅ | 首頁右上角的模式徽章。LIVE 用會脈動的紅框 —— 那不是裝飾,是為了讓「現在是真錢」在餘光裡也看得到 |
+| 九十二 | LIVE Confirmation | ⚠️ | 七項確認與確認句在 CLI;UI 只顯示**唯讀**的閘門狀態。**刻意不做網頁按鈕** —— 網頁按鈕表達不了「24 小時後失效」與「這次批准 30 USDT 不是所有金額」,而那兩件事正是這套機制的重點 |
 | 九十三 | No Hidden Trading | ✅ | 所有下單進 DB + log + journal;`/transparency` 可查 |
 | 九十四 | No Silent Failure | ✅ | `test_production_safety.py` 以 AST 掃描 `except: pass` |
 | 九十五 | Code Quality | ⚠️ | `agmcis/` 套件內符合。**根目錄的舊模組仍有 God Function 與重複邏輯** |
@@ -168,7 +168,7 @@
 | 一百零二 | 不問不必要的問題 | ✅ | 只在真實資金 / Live / API Key 相關時要求人工確認 |
 | 一百零三 | 真正的成功標準 | ✅ | Reliable / Testable / Explainable / Risk Controlled / BingX Compatible / Research Driven / Operationally Safe 全數達成 |
 | 一百零四 | 最終架構目標 | ⚠️ | 主幹完成。**Portfolio 分支(組合風險/相關性)缺席** |
-| 一百零五 | 最終使用者體驗 | ❌ | **首頁不是 Master Prompt 描述的樣子**:沒有 SYSTEM STATUS、沒有 MODE、沒有 12/12 AGENTS、沒有 TOP OPPORTUNITIES、沒有點進去看 WHY |
+| 一百零五 | 最終使用者體驗 | ✅ | 首頁就是第一百零五節描述的樣子。完整儀表板移到 `/dashboard`,沒有刪掉 —— 第一眼要回答「健康嗎、是不是真錢、有沒有機會」,不是三十個數字 |
 | 一百零六 | 最終原則 17 條 | ⚠️ | 第 1–11、13–16 條達成。**第 12 條(Standard/Perpetual 分離)達成**;缺口集中在「任何開倉都必須有風險保護」的六步驟(見十八)與組合層風險 |
 
 ---
@@ -177,9 +177,9 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 74 |
-| ⚠️ 部分做到 | 27 |
-| ❌ 沒做 | 5 |
+| ✅ 已做到 | 80 |
+| ⚠️ 部分做到 | 25 |
+| ❌ 沒做 | 1 |
 
 ## 缺口排序(由大到小)
 
@@ -195,7 +195,7 @@
 8. ~~**六十五 + 六十六 — 稽核與 `/health`**~~ ✅ 已補(`api/health.py`,26 個測試)。
 9. ~~**三十三 + 三十七 — 回測現實因素與成本敏感度**~~ ✅ 已補(32 個測試)。
 10. ~~**二十三 + 二十四 + 二十五 + 三十八 — TA 深度、MTF 階層、更多策略**~~ ✅ 已補(69 個測試)。
-11. **一百零五 + 九十一 + 六十二 + 六十三 — 使用者體驗**(展示)
+11. ~~**一百零五 + 九十一 + 九十二 + 六十二 + 八十六 ~ 九十 — 使用者體驗**~~ ✅ 已補。
 12. **八十二 + 八十一 — Docker 與環境分離**(部署)
 
 ## 明確不做的事

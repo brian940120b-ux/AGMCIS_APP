@@ -45,6 +45,7 @@ from api.analytics import router as analytics_router
 from api.auto_trader import router as auto_trader_router
 from api.dashboard import router as dashboard_router
 from api.health import router as health_router
+from api.overview import router as overview_router
 from api.equity import router as equity_router
 from api.journal import router as journal_router
 from api.leaderboard import router as leaderboard_router
@@ -73,6 +74,7 @@ for _router in (
     scheduler_status_router,
     system_health_router,
     transparency_router,
+    overview_router,
 ):
     app.include_router(_router, dependencies=PROTECTED)
 
@@ -133,13 +135,34 @@ def tr(rows):
         )
 
     return "".join(out)
-@app.get("/",response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
+def landing(request: Request):
+    """
+    第一百零五節的首頁:狀態、模式、Agent、TOP 機會、點進去看 WHY。
+
+    完整儀表板移到 /dashboard —— 它沒有被刪掉,只是不再是第一眼。
+    第一眼要回答的是「系統現在健康嗎、是不是真錢、有沒有機會」,
+    而不是三十個數字。
+    """
+    key = request.query_params.get("key")
+    if key and key_is_valid(key):
+        return redirect_with_session("/", key, request)
+
+    if not is_authenticated(request):
+        return HTMLResponse(LOGIN_PAGE, status_code=401)
+
+    return templates.TemplateResponse(
+        request=request, name="home.html", context={},
+    )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
 def home(request: Request):
     # 金鑰從 query string 帶進來時,驗證後存進 HttpOnly cookie 並導回乾淨網址,
     # 讓金鑰不留在瀏覽歷史與 Nginx access log 裡。
     key = request.query_params.get("key")
     if key and key_is_valid(key):
-        return redirect_with_session("/", key, request)
+        return redirect_with_session("/dashboard", key, request)
 
     if not is_authenticated(request):
         return HTMLResponse(LOGIN_PAGE, status_code=401)
@@ -150,7 +173,7 @@ def home(request: Request):
     max_lev=risk_limits.MAX_LEVERAGE
     return f"""<html><head><meta charset='utf-8'><title>AGMCIS Dashboard</title><link rel='stylesheet' href='/static/css/dashboard.css'></head><body>
 <h1>AGMCIS Dashboard Lite</h1><p class='muted'>Top50 掃描、模擬交易、TP/SL、Telegram 都在背景服務運作。API 即時更新模式。</p>
-<p><a href='/transparency' style='color:#38bdf8'>→ 透明度面板</a>(Agent 投票、訂單狀態、對帳差異、成本、規格校準)</p><p class='muted'>最後更新：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+<p><a href='/' style='color:#38bdf8'>← 回首頁</a> · <a href='/transparency' style='color:#38bdf8'>→ 透明度面板</a>(Agent 投票、訂單狀態、對帳差異、成本、規格校準)</p><p class='muted'>最後更新：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
 <div class='grid'><div class='card'>帳戶資金<br><b id='balance'>{a.get('balance')} USDT</b></div><div class='card'>總交易<br><b id='trades'>{n}</b></div><div class='card'>勝率<br><b id='win_rate'>{wr}%</b></div><div class='card'>目前持倉<br><b id='open_count'>{len(o)}</b></div><div class='card'>淨損益<br><b class='{netc}'>{net} USDT</b></div><div class='card'>槓桿上限<br><b>{max_lev:g}x</b></div><div class='card'>總浮盈虧<br><b id='total_open_upnl'>0 USDT</b></div><div class='card'>風險等級<br><b id='risk_level'>LOW</b></div><div class='card'>系統狀態<br><b id='system_status'>-</b></div><div class='card'>最佳交易<br><b id='best_trade'>0</b></div><div class='card'>最差交易<br><b id='worst_trade'>0</b></div><div class='card'>Profit Factor<br><b id='profit_factor'>0</b></div><div class='card'>已平倉<br><b id='total_closed_trades'>0</b></div></div>
 <h2>績效分析</h2><div class="grid"><div class="card">💰 已實現收益<br><b id="total_realized">0</b></div><div class="card">🔥 最大連勝<br><b id="max_win_streak">0</b></div><div class="card">❄️ 最大連敗<br><b id="max_loss_streak">0</b></div><div class="card">📊 已平倉交易<br><b id="analytics_closed_trades">0</b></div></div><h2>目前持倉</h2><table id="open_positions_table"><tr><th>幣種</th><th>方向</th><th>槓桿</th><th>倉位價值</th><th>進場</th><th>現價</th><th>出場</th><th>停損</th><th>停利</th><th>ROI</th><th>UPNL</th><th>已實現</th><th>狀態</th><th>時間/原因</th></tr>{tr(o)}</table>
 <h2>系統健康監控</h2><div class="grid"><div class="card">FastAPI<br><b id="health_api">🟢 OK</b></div><div class="card">Risk Timer<br><b id="health_risk">🟢 ON</b></div><div class="card">Daily Report<br><b id="health_report">🟢 ON</b></div><div class="card">Optimizer<br><b id="health_optimizer">🟢 ON</b></div><div class="card">最後更新<br><b id="last_update">-</b></div><div class="card">Uptime<br><b id="uptime">-</b></div></div><h2>資金曲線</h2><div class="card"><canvas id="equityChart" height="120"></canvas></div><h2>排行榜</h2><div class="grid"><div class="card"><h3>🏆 Top Winners</h3><div id="top_winners">Loading...</div></div><div class="card"><h3>💀 Top Losers</h3><div id="top_losers">Loading...</div></div></div><h2>持倉總覽</h2><div class="grid"><div class="card">🟢 獲利持倉<br><b id="profit_positions">0</b></div><div class="card">🔴 虧損持倉<br><b id="loss_positions">0</b></div><div class="card">⚪ 打平持倉<br><b id="flat_positions">0</b></div><div class="card">📈 最大浮盈<br><b id="max_profit_position">-</b></div><div class="card">📉 最大浮虧<br><b id="max_loss_position">-</b></div></div><h2>目前持倉排行</h2><div class="grid"><div class="card"><h3>🔥 最佳持倉</h3><div id="best_positions">Loading...</div></div><div class="card"><h3>⚠️ 最差持倉</h3><div id="worst_positions">Loading...</div></div><div class="card"><h3>🚨 最接近停損</h3><div id="nearest_sl">Loading...</div></div><div class="card"><h3>🎯 最接近停利</h3><div id="nearest_tp">Loading...</div></div></div>

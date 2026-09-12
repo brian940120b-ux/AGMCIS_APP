@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGMCIS</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/css/home.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-title">
+    <h1>AGMCIS</h1>
+    <p class="tagline">AI PRIVATE TRADING BUTLER</p>
+  </div>
+
+  <!-- 模式放在最顯眼的位置(第九十一節)。一個看不出自己是模擬還是
+       實單的介面,遲早會有人在錯的模式下按錯按鈕。 -->
+  <div id="mode_badge" class="mode-badge mode-unknown">載入中…</div>
+</header>
+
+<section class="status-band">
+  <div class="status-item"><span class="label">SYSTEM STATUS</span><b id="system_status">-</b></div>
+  <div class="status-item"><span class="label">EXCHANGE</span><b id="exchange">-</b></div>
+  <div class="status-item"><span class="label">MARKETS</span><b id="markets">-</b></div>
+  <div class="status-item"><span class="label">MODE</span><b id="mode">-</b></div>
+  <div class="status-item"><span class="label">AI AGENTS</span><b id="agent_count">-</b></div>
+  <div class="status-item"><span class="label">AUTO TRADING</span><b id="auto_trading">-</b></div>
+</section>
+
+<div id="live_warning" class="live-warning" hidden></div>
+
+<h2>🤖 AI Agents</h2>
+<p class="muted">
+  每個 Agent 現在在做什麼,以及它對最近掃描的標的投了什麼票。
+  <b>棄權不是反對</b> —— 棄權代表那個 Agent 沒有拿到它需要的資料。
+</p>
+<div id="agent_grid" class="agent-grid">載入中…</div>
+
+<h2>🎯 Top Opportunities</h2>
+<p class="muted">
+  品質不足就<b>不硬選</b>(第五十三節)。一個永遠有三個推薦的系統,
+  在沒有機會的時候會推薦三個最不差的 —— 而「最不差」不是「好」。
+</p>
+<div id="opportunities">載入中…</div>
+
+<h2>🔍 這一輪掃過但沒有入選的</h2>
+<p class="muted">
+  把它們列出來是為了讓「系統沒在跑」與「系統跑了但沒有機會」
+  看起來不一樣。
+</p>
+<div id="considered">載入中…</div>
+
+<nav class="links">
+  <a href="/dashboard">→ 完整儀表板</a>
+  <a href="/transparency">→ 透明度面板</a>
+  <a href="/health">→ 健康檢查</a>
+</nav>
+
+<script src="/static/js/home.js?v=1"></script>
+</body>
+</html>
