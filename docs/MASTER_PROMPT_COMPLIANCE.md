@@ -158,7 +158,7 @@
 | 九十二 | LIVE Confirmation | ⚠️ | `scripts/live_confirm.py` 逐項問完第九十二節列的七件事(Account / Exchange / Market / Risk / Leverage / Daily Loss / API),每一項顯示**當下的實際值**,最後逐字輸入確認句。簽的是**那一組設定**:確認檔存設定指紋,之後有人改了風控參數就作廢 ——「批准過一次」不等於「批准所有設定」。UI 只顯示唯讀狀態,**刻意不做網頁按鈕**(表達不了 24 小時失效與指名金額)|
 | 九十三 | No Hidden Trading | ✅ | 所有下單進 DB + log + journal;`/transparency` 可查 |
 | 九十四 | No Silent Failure | ✅ | `test_production_safety.py` 以 AST 掃描 `except: pass` |
-| 九十五 | Code Quality | ⚠️ | `agmcis/` 套件內符合。Dashboard Lite 的 handler 從一個二十行的 f-string 拆成 `api/dashboard_rows.py` + template ——**它藏著損益公式的第二份拷貝**,而兩份公式只會有一份被修到。`analytics.get_trade_analytics` 從 147 行拆成三個純函式。**還剩**:`paper_trading.create_paper_trade`(154 行)、`strategy.analyze_symbol`(132 行)、`risk_control.get_risk_control_status`(116 行)。`database_service` 的兩個 atomic 函式刻意不拆 —— 拆開會破壞交易的原子性 |
+| 九十五 | Code Quality | ✅ | God Function 全部處理完:Dashboard Lite(藏著損益公式的第二份拷貝)、`analytics.get_trade_analytics`、`risk_control.get_risk_control_status`(九項限制變成九個可單獨測的函式)、`paper_trading.create_paper_trade`(驗證 / 成本 / 成本後驗證分開)、`auto_trader.run_auto_trader`(逐檔評估拆出來)。`strategy.analyze_symbol` 是**死碼,直接刪掉** —— 拆開一段沒有人呼叫的評分公式只會讓它看起來更值得保留。`tests/test_god_function_split.py` 用**敘述數**(不是行數,註解密度會騙人)擋回歸,例外只有兩個 atomic 交易函式且要寫理由 |
 | 九十六 | Coding Rule | ✅ | Phase 0–17 每階段都有 BUILD→TEST→VERIFY→REPORT 報告 |
 | 九十七 | 不要一次重寫 | ✅ | 舊模組用 shim 轉接,沒有大爆炸式重寫 |
 | 九十八 | 每次修改必須說明 | ✅ | `docs/PHASE_*_REPORT.md` |
@@ -177,13 +177,13 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 94 |
-| ⚠️ 部分做到 | 12 |
+| ✅ 已做到 | 95 |
+| ⚠️ 部分做到 | 11 |
 | ❌ 沒做 | 0 |
 
-## 還沒補完的 12 節,以及為什麼
+## 還沒補完的 11 節,以及為什麼
 
-原本的 12 個「❌ 沒做」全部補完了。剩下的 12 個「部分做到」分成三類。
+原本的 12 個「❌ 沒做」全部補完了。剩下的 11 個「部分做到」分成三類。
 **這一份不含「快做完了」這種說法** —— 每一條都寫缺什麼,而不是缺多少。
 
 ### 一、刻意不做(4 節)
@@ -209,12 +209,11 @@
 | 一百零四 | 組合風險與相關性的程式碼在 `agmcis/risk/portfolio.py`,但沒有跑過真實的多倉情境 |
 | 一百零六 | 第 1–16 條達成。第 17 條「任何開倉都必須有風險保護」的六步驟緊急保護寫完了,但**沒有在真的下單失敗時觸發過** |
 
-### 三、規模或優先順序(2 節)
+### 三、規模或優先順序(1 節)
 
 | 節 | 缺什麼 |
 |---|---|
 | 三十 | 12 個 Agent 齊了,但 Macro Agent 只會投 WAIT —— 它沒有總經資料來源,而一個猜方向的總經 Agent 比沒有更糟 |
-| 九十五 | Dashboard Lite 與 analytics 拆完了。還剩 `paper_trading.create_paper_trade`、`strategy.analyze_symbol`、`risk_control.get_risk_control_status` 三個長函式 —— 它們都在交易路徑上,拆開的風險高於現在的收益,排在真實資料驗證之後 |
 
 ## 這些缺口要怎麼補
 

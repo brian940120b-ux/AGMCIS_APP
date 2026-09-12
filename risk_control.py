@@ -30,99 +30,240 @@ def _alert(level, title, message):
     return {"level": level, "title": title, "message": message}
 
 
-def get_risk_control_status():
+# ---------------- 風控檢查 ----------------
+#
+# 每一項限制是一個函式,吃一份快照回一個 Breach 或 None。
+#
+# 原本這裡是一個 116 行的函式,九項檢查全部展開在裡面(第九十五節的
+# God Function)。那個形狀有一個具體的問題:**加一條限制要改那個函式**,
+# 而那個函式是自動交易唯一的帳戶層閘門。每一次動它都在動所有九項。
+#
+# 現在加一條限制是在 CHECKS 裡多一個項目,而每一項都可以單獨測。
+
+
+class Breach:
+    """
+    一項限制被觸發。
+
+    `emergency` 與 `blocker` 是分開的兩件事:
+      blocker    擋住新開倉。
+      emergency  進一步把系統狀態標成 EMERGENCY_STOP。
+
+    回撤、單日虧損與緊急停止檔會設 emergency;持倉數達上限不會 ——
+    後者是「今天不要再開了」,前者是「有事情不對勁」。
+    把兩者混為一談,會讓一個正常的滿倉狀態看起來像出事了。
+    """
+
+    def __init__(self, code, level, title, message, emergency=False,
+                 blocks=True):
+        self.code = code
+        self.level = level
+        self.title = title
+        self.message = message
+        self.emergency = emergency
+        self.blocks = blocks
+
+    def alert(self):
+        return _alert(self.level, self.title, self.message)
+
+
+def _check_emergency_file(_):
+    if not Path(risk_limits.EMERGENCY_STOP_FILE).exists():
+        return None
+    return Breach(
+        "EMERGENCY_STOP_FILE", "HIGH", "緊急停止",
+        "偵測到 emergency.stop,暫停新開倉。", emergency=True,
+    )
+
+
+def _check_pause_file(_):
+    if not Path(risk_limits.TRADING_PAUSE_FILE).exists():
+        return None
+    return Breach(
+        "TRADING_PAUSE_FLAG", "MEDIUM", "交易暫停",
+        "偵測到 trading_pause.flag,暫停新開倉。",
+    )
+
+
+def _check_drawdown(snapshot):
+    value = snapshot["max_drawdown"]
+    if value < risk_limits.MAX_DRAWDOWN_PCT:
+        return None
+    return Breach(
+        "MAX_DRAWDOWN", "HIGH", "最大回撤過高",
+        f"目前最大回撤 {value}%,已超過限制 "
+        f"{risk_limits.MAX_DRAWDOWN_PCT}%。",
+        emergency=True,
+    )
+
+
+def _check_exposure(snapshot):
+    value = snapshot["exposure_ratio"]
+    if value < risk_limits.MAX_EXPOSURE_PCT:
+        return None
+    return Breach(
+        "MAX_EXPOSURE", "HIGH", "總曝險過高",
+        f"目前曝險 {value}%,已超過限制 {risk_limits.MAX_EXPOSURE_PCT}%。",
+    )
+
+
+def _check_open_positions(snapshot):
+    value = snapshot["open_positions"]
+    if value < risk_limits.MAX_OPEN_POSITIONS:
+        return None
+    return Breach(
+        "MAX_OPEN_POSITIONS", "MEDIUM", "持倉數已達上限",
+        f"目前 {value} 筆,上限 {risk_limits.MAX_OPEN_POSITIONS} 筆。",
+    )
+
+
+def _check_open_loss(snapshot):
+    value = snapshot["total_open_upnl"]
+    if value > risk_limits.MAX_TOTAL_OPEN_LOSS_USDT:
+        return None
+    return Breach(
+        "MAX_TOTAL_OPEN_LOSS", "HIGH", "總浮虧過高",
+        f"目前總浮虧 {value} USDT,已低於限制 "
+        f"{risk_limits.MAX_TOTAL_OPEN_LOSS_USDT} USDT。",
+    )
+
+
+def _check_daily_loss(snapshot):
+    value = snapshot["daily_pnl"]
+    # 用 -abs():設定寫成 50 或 -50 都要當成「虧 50」。
+    if value > -abs(risk_limits.MAX_DAILY_LOSS_USDT):
+        return None
+    return Breach(
+        "MAX_DAILY_LOSS", "HIGH", "單日虧損達上限",
+        f"近 24 小時已實現損益 {round(value, 2)} USDT,"
+        f"已達單日虧損上限 {risk_limits.MAX_DAILY_LOSS_USDT} USDT。",
+        emergency=True,
+    )
+
+
+def _check_consecutive_losses(snapshot):
+    value = snapshot["consecutive_losses"]
+    if value < risk_limits.MAX_CONSECUTIVE_LOSSES:
+        return None
+    return Breach(
+        "MAX_CONSECUTIVE_LOSSES", "HIGH", "連續虧損熔斷",
+        f"已連續虧損 {value} 筆,達熔斷門檻 "
+        f"{risk_limits.MAX_CONSECUTIVE_LOSSES} 筆。",
+    )
+
+
+def _check_trades_today(snapshot):
+    value = snapshot["trades_today"]
+    if value < risk_limits.MAX_TRADES_PER_DAY:
+        return None
+    return Breach(
+        "MAX_TRADES_PER_DAY", "MEDIUM", "單日交易次數達上限",
+        f"近 24 小時已開倉 {value} 筆,上限 "
+        f"{risk_limits.MAX_TRADES_PER_DAY} 筆。",
+    )
+
+
+def _check_profit_factor(snapshot):
+    """
+    Profit Factor 偏低是**警告不是封鎖**(blocks=False)。
+
+    理由:它是一個回顧性的統計,而且 0 代表「還沒有資料」不是
+    「表現很差」—— 所以 0 不觸發。用它擋住新開倉,會讓一個剛開始
+    跑的系統永遠開不了第一筆。
+    """
+    value = snapshot["profit_factor"]
+    if value == 0 or value >= risk_limits.MIN_PROFIT_FACTOR:
+        return None
+    return Breach(
+        "LOW_PROFIT_FACTOR", "MEDIUM", "Profit Factor 偏低",
+        f"目前 Profit Factor {value},低於建議值 "
+        f"{risk_limits.MIN_PROFIT_FACTOR}。",
+        blocks=False,
+    )
+
+
+# 順序就是顯示順序。緊急停止排最前面 —— 它是最需要先看到的一項。
+CHECKS = (
+    _check_emergency_file,
+    _check_pause_file,
+    _check_drawdown,
+    _check_exposure,
+    _check_open_positions,
+    _check_open_loss,
+    _check_daily_loss,
+    _check_consecutive_losses,
+    _check_trades_today,
+    _check_profit_factor,
+)
+
+
+def build_snapshot():
+    """
+    跑一次檢查需要的所有數字。**一次抓齊** ——
+    分次抓的話,回撤與曝險可能來自不同的時刻,而那兩個數字
+    會並排顯示在同一個畫面上。
+    """
     analytics = get_trade_analytics()
     portfolio = get_portfolio_summary()
 
-    alerts = []
-    blockers = []
-    emergency_stop = False
+    return {
+        "max_drawdown": analytics.get("max_drawdown", 0),
+        "profit_factor": analytics.get("profit_factor", 0),
+        "exposure_ratio": portfolio.get("exposure_ratio", 0),
+        "open_positions": portfolio.get("open_positions", 0),
+        "total_open_upnl": portfolio.get("total_open_upnl", 0),
+        "daily_pnl": get_realized_pnl_since(24),
+        "trades_today": count_trades_since(24),
+        "consecutive_losses": get_consecutive_losses(),
+    }
 
-    if Path(risk_limits.EMERGENCY_STOP_FILE).exists():
-        alerts.append(_alert("HIGH", "緊急停止", "偵測到 emergency.stop,暫停新開倉。"))
-        blockers.append("EMERGENCY_STOP_FILE")
-        emergency_stop = True
 
-    if Path(risk_limits.TRADING_PAUSE_FILE).exists():
-        alerts.append(_alert("MEDIUM", "交易暫停", "偵測到 trading_pause.flag,暫停新開倉。"))
-        blockers.append("TRADING_PAUSE_FLAG")
+def evaluate_limits(snapshot, checks=CHECKS):
+    """
+    跑完所有檢查。純函式 —— 吃一份快照,回一串 Breach。
 
-    max_drawdown = analytics.get("max_drawdown", 0)
-    profit_factor = analytics.get("profit_factor", 0)
-    exposure_ratio = portfolio.get("exposure_ratio", 0)
-    open_positions = portfolio.get("open_positions", 0)
-    total_open_upnl = portfolio.get("total_open_upnl", 0)
+    **一項檢查拋例外算成「這一項沒過」**,不是「跳過」。
+    一個在自己壞掉時放行的風控檢查不是風控檢查。
+    """
+    breaches = []
 
-    daily_pnl = get_realized_pnl_since(24)
-    trades_today = count_trades_since(24)
-    consecutive_losses = get_consecutive_losses()
+    for check in checks:
+        try:
+            breach = check(snapshot)
+        except Exception as exc:
+            logger.exception("風控檢查失敗 | %s", getattr(check, "__name__", check))
+            breach = Breach(
+                f"CHECK_FAILED_{getattr(check, '__name__', 'UNKNOWN')}",
+                "HIGH", "風控檢查失敗",
+                f"{type(exc).__name__}: {exc} —— 算成沒通過。",
+            )
 
-    if max_drawdown >= risk_limits.MAX_DRAWDOWN_PCT:
-        alerts.append(_alert(
-            "HIGH", "最大回撤過高",
-            f"目前最大回撤 {max_drawdown}%,已超過限制 {risk_limits.MAX_DRAWDOWN_PCT}%。",
-        ))
-        blockers.append("MAX_DRAWDOWN")
-        emergency_stop = True
+        if breach is not None:
+            breaches.append(breach)
 
-    if exposure_ratio >= risk_limits.MAX_EXPOSURE_PCT:
-        alerts.append(_alert(
-            "HIGH", "總曝險過高",
-            f"目前曝險 {exposure_ratio}%,已超過限制 {risk_limits.MAX_EXPOSURE_PCT}%。",
-        ))
-        blockers.append("MAX_EXPOSURE")
+    return breaches
 
-    if open_positions >= risk_limits.MAX_OPEN_POSITIONS:
-        alerts.append(_alert(
-            "MEDIUM", "持倉數已達上限",
-            f"目前 {open_positions} 筆,上限 {risk_limits.MAX_OPEN_POSITIONS} 筆。",
-        ))
-        blockers.append("MAX_OPEN_POSITIONS")
 
-    if total_open_upnl <= risk_limits.MAX_TOTAL_OPEN_LOSS_USDT:
-        alerts.append(_alert(
-            "HIGH", "總浮虧過高",
-            f"目前總浮虧 {total_open_upnl} USDT,已低於限制 "
-            f"{risk_limits.MAX_TOTAL_OPEN_LOSS_USDT} USDT。",
-        ))
-        blockers.append("MAX_TOTAL_OPEN_LOSS")
+def get_risk_control_status():
+    """
+    帳戶層級的風控現況。
 
-    if daily_pnl <= -abs(risk_limits.MAX_DAILY_LOSS_USDT):
-        alerts.append(_alert(
-            "HIGH", "單日虧損達上限",
-            f"近 24 小時已實現損益 {round(daily_pnl, 2)} USDT,"
-            f"已達單日虧損上限 {risk_limits.MAX_DAILY_LOSS_USDT} USDT。",
-        ))
-        blockers.append("MAX_DAILY_LOSS")
-        emergency_stop = True
+    這個函式現在只做組裝:抓快照 → 跑檢查 → 把結果攤平成
+    呼叫端要的那份 dict。每一項限制的判斷在自己的函式裡。
+    """
+    snapshot = build_snapshot()
+    breaches = evaluate_limits(snapshot)
 
-    if consecutive_losses >= risk_limits.MAX_CONSECUTIVE_LOSSES:
-        alerts.append(_alert(
-            "HIGH", "連續虧損熔斷",
-            f"已連續虧損 {consecutive_losses} 筆,達熔斷門檻 "
-            f"{risk_limits.MAX_CONSECUTIVE_LOSSES} 筆。",
-        ))
-        blockers.append("MAX_CONSECUTIVE_LOSSES")
-
-    if trades_today >= risk_limits.MAX_TRADES_PER_DAY:
-        alerts.append(_alert(
-            "MEDIUM", "單日交易次數達上限",
-            f"近 24 小時已開倉 {trades_today} 筆,上限 "
-            f"{risk_limits.MAX_TRADES_PER_DAY} 筆。",
-        ))
-        blockers.append("MAX_TRADES_PER_DAY")
-
-    if profit_factor != 0 and profit_factor < risk_limits.MIN_PROFIT_FACTOR:
-        alerts.append(_alert(
-            "MEDIUM", "Profit Factor 偏低",
-            f"目前 Profit Factor {profit_factor},低於建議值 "
-            f"{risk_limits.MIN_PROFIT_FACTOR}。",
-        ))
-
+    blockers = [b.code for b in breaches if b.blocks]
+    emergency_stop = any(b.emergency for b in breaches)
     allow_new_trade = not blockers
 
+    alerts = [b.alert() for b in breaches]
     if not alerts:
-        alerts.append(_alert("NORMAL", "風控狀態正常", "回撤、曝險、持倉數與虧損額度皆在安全範圍內。"))
+        alerts.append(_alert(
+            "NORMAL", "風控狀態正常",
+            "回撤、曝險、持倉數與虧損額度皆在安全範圍內。",
+        ))
 
     if emergency_stop:
         system_status = "EMERGENCY_STOP"
@@ -136,14 +277,14 @@ def get_risk_control_status():
         "allow_new_trade": allow_new_trade,
         "emergency_stop": emergency_stop,
         "blockers": blockers,
-        "max_drawdown": max_drawdown,
-        "exposure_ratio": exposure_ratio,
-        "open_positions": open_positions,
-        "profit_factor": profit_factor,
-        "total_open_upnl": total_open_upnl,
-        "daily_realized_pnl": round(daily_pnl, 2),
-        "trades_last_24h": trades_today,
-        "consecutive_losses": consecutive_losses,
+        "max_drawdown": snapshot["max_drawdown"],
+        "exposure_ratio": snapshot["exposure_ratio"],
+        "open_positions": snapshot["open_positions"],
+        "profit_factor": snapshot["profit_factor"],
+        "total_open_upnl": snapshot["total_open_upnl"],
+        "daily_realized_pnl": round(snapshot["daily_pnl"], 2),
+        "trades_last_24h": snapshot["trades_today"],
+        "consecutive_losses": snapshot["consecutive_losses"],
         "limits": risk_limits.as_dict(),
         "alerts": alerts,
     }

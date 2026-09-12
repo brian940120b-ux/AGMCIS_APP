@@ -287,22 +287,54 @@ class TestTheRecordIsWrittenBeforeTheOrder(unittest.TestCase):
     """
 
     def test_auto_trader_records_before_it_executes(self):
+        """
+        掃**逐檔評估**那個函式,不是 run_auto_trader ——
+        送單發生在那裡。這條斷言跟著程式碼走:哪個函式呼叫
+        execute(),就在那個函式裡檢查紀錄有沒有寫在它前面。
+        """
         import inspect
 
         import auto_trader
 
-        source = inspect.getsource(auto_trader.run_auto_trader)
+        source = inspect.getsource(auto_trader._evaluate_candidate)
         record_at = source.index("decision_log.record(pending)")
         execute_at = source.index("execute(decision)")
 
         self.assertLess(record_at, execute_at)
+
+    def test_only_one_function_sends_orders(self):
+        """
+        上一條測試只看一個函式。它成立的前提是**只有那個函式送單** ——
+        多一條送單路徑,上面的順序保證就只涵蓋其中一條。
+        """
+        import ast
+        import pathlib
+
+        tree = ast.parse(
+            pathlib.Path("auto_trader.py").read_text(encoding="utf-8"),
+        )
+
+        senders = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for inner in ast.walk(node):
+                if (isinstance(inner, ast.Call)
+                        and isinstance(inner.func, ast.Attribute)
+                        and inner.func.attr == "execute"):
+                    senders.add(node.name)
+
+        self.assertEqual(senders, {"_evaluate_candidate"})
 
     def test_auto_trader_records_rejections_too(self):
         import inspect
 
         import auto_trader
 
-        source = inspect.getsource(auto_trader.run_auto_trader)
+        source = (
+            inspect.getsource(auto_trader._evaluate_candidate)
+            + inspect.getsource(auto_trader._rejected)
+        )
         self.assertIn("REJECTED_BY_RISK", source)
         self.assertIn("decision_log.WAIT", source)
 

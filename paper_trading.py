@@ -69,6 +69,125 @@ def _fail(message):
     return {"success": False, "message": message}
 
 
+# ---------------- 開倉前的驗證 ----------------
+#
+# 原本這三段全部展開在 create_paper_trade 裡,那個函式有 154 行
+# (第九十五節的 God Function)。拆開的理由不只是行數:
+#
+# **這裡的每一條規則都是一個「不開倉」的理由**,而它們是這個系統
+# 最重要的保護。混在一個長函式裡,加一條規則要在一百多行中間插入,
+# 而讀的人分不出哪幾條是驗證、哪幾條是計算。
+#
+# 每個驗證函式回傳錯誤訊息字串或 None。**回字串代表拒絕** ——
+# 不用布林值是因為每一條拒絕都有自己的理由,而那個理由要進 log
+# 與回傳值(第九十四節:沒有靜默失敗)。
+
+
+def _validate_inputs(symbol, signal, entry_price, size_usdt, leverage,
+                     stoploss, takeprofit):
+    """
+    下單參數本身合不合理。**在碰成本模型之前**先跑完 ——
+    一組數字不合法的訂單,不值得為它去查合約規格。
+    """
+    if not is_directional(signal):
+        return f"{symbol} 方向無法辨識 ({signal!r}),拒絕開倉"
+
+    try:
+        entry_price = float(entry_price)
+        size_usdt = float(size_usdt)
+        leverage = float(leverage)
+    except (TypeError, ValueError):
+        return f"{symbol} 進場價 / 倉位 / 槓桿 數值異常,拒絕開倉"
+
+    if entry_price <= 0:
+        return f"{symbol} 進場價必須大於 0"
+
+    if size_usdt <= 0:
+        return f"{symbol} 倉位必須大於 0"
+
+    if leverage <= 0:
+        return f"{symbol} 槓桿必須大於 0"
+
+    # 強制停損:沒有停損的倉位等於沒有風險上限,一律不允許開倉。
+    if not stop_loss_is_valid(signal, entry_price, stoploss):
+        return (
+            f"{symbol} 停損無效({signal} entry={entry_price} sl={stoploss})。"
+            "開倉必須有停損,且做多停損須低於進場價、做空停損須高於進場價。"
+        )
+
+    # 停利允許不設,但設了就必須在正確方向。
+    if takeprofit is not None and not take_profit_is_valid(
+            signal, entry_price, takeprofit):
+        return (
+            f"{symbol} 停利無效({signal} entry={entry_price} tp={takeprofit})。"
+            "做多停利須高於進場價、做空停利須低於進場價。"
+        )
+
+    return None
+
+
+def _validate_after_costs(symbol, signal, requested_entry_price, entry_price,
+                          stoploss, liquidation_price, leverage):
+    """
+    成交價確定之後才問得出來的兩個問題。
+
+    **這兩條必須在成本套用之後檢查**,不能沿用下單價的結論 ——
+    滑價會把停損推到錯邊,而強平價要用成交價才算得準。
+    在成本之前檢查等於用一組不會發生的數字做判斷。
+    """
+    long_side = is_long(signal)
+
+    # 滑價之後停損可能已經在錯邊了 —— 那張單一開就會被停掉。
+    if not stop_loss_is_valid(signal, entry_price, stoploss):
+        return (
+            f"{symbol} 滑價後停損失效(下單價 {requested_entry_price} -> "
+            f"成交價 {entry_price:.8f},停損 {stoploss})。停損距離太近,拒絕開倉。"
+        )
+
+    if liquidation_price is None:
+        return None
+
+    # 強平價比停損還近的倉位,實際上根本用不到停損。
+    too_close = (
+        liquidation_price >= stoploss if long_side
+        else liquidation_price <= stoploss
+    )
+    if too_close:
+        return (
+            f"{symbol} 強平價 {liquidation_price:.8f} 比停損 {stoploss} "
+            f"更接近進場價,槓桿 {leverage}x 太高,拒絕開倉"
+        )
+
+    return None
+
+
+def _apply_costs(symbol, signal, entry_price, size_usdt, leverage,
+                 position_value):
+    """
+    成交價、手續費、強平價(Phase 10)。
+
+    回傳 (成交價, 名目價值, 進場費, 強平價)。
+    費率依合約而異 —— 有校準過的規格就用那個標的的實際費率。
+    """
+    long_side = is_long(signal)
+    costs = paper_costs.get_cost_model(symbol)
+
+    filled = paper_costs.fill_price(
+        entry_price, long_side, is_entry=True, model=costs,
+    )
+
+    if position_value is None:
+        position_value = size_usdt * leverage
+
+    # 名目價值要帶進去 —— 維持保證金率依倉位大小分層,
+    # 用單一數字會低估大倉位的強平風險。
+    liquidation_price = paper_costs.liquidation_price(
+        filled, leverage, long_side, symbol=symbol, notional=position_value,
+    )
+
+    return filled, position_value, costs.fee(position_value), liquidation_price
+
+
 def create_paper_trade(
     symbol,
     entry_price,
@@ -85,87 +204,38 @@ def create_paper_trade(
     confidence=None,
 ):
     """
-    agent_votes / market_regime / strategy / confidence 是 Phase 15 的歸因欄位。
+    開一筆模擬倉。
 
-    **必須在開倉當下記下來。** Agent 的投票取決於當下的指標,而指標會隨時間變 ——
-    事後推不回來,那筆交易的歸因就永遠遺失了。
+    agent_votes / market_regime / strategy / confidence 是 Phase 15 的
+    歸因欄位。**必須在開倉當下記下來** —— Agent 的投票取決於當下的
+    指標,而指標會隨時間變,事後推不回來,那筆交易的歸因就永遠遺失了。
+
+    順序是:參數驗證 → 套成本 → 成本後驗證 → 寫入。
+    那個順序有意義,見 `_validate_after_costs` 的說明。
     """
-    if not is_directional(signal):
-        return _fail(f"{symbol} 方向無法辨識 ({signal!r}),拒絕開倉")
+    problem = _validate_inputs(
+        symbol, signal, entry_price, size_usdt, leverage, stoploss, takeprofit,
+    )
+    if problem:
+        return _fail(problem)
 
-    try:
-        entry_price = float(entry_price)
-        size_usdt = float(size_usdt)
-        leverage = float(leverage)
-    except (TypeError, ValueError):
-        return _fail(f"{symbol} 進場價 / 倉位 / 槓桿 數值異常,拒絕開倉")
-
-    if entry_price <= 0:
-        return _fail(f"{symbol} 進場價必須大於 0")
-
-    if size_usdt <= 0:
-        return _fail(f"{symbol} 倉位必須大於 0")
-
-    if leverage <= 0:
-        return _fail(f"{symbol} 槓桿必須大於 0")
-
-    # 強制停損:沒有停損的倉位等於沒有風險上限,一律不允許開倉。
-    if not stop_loss_is_valid(signal, entry_price, stoploss):
-        return _fail(
-            f"{symbol} 停損無效({signal} entry={entry_price} sl={stoploss})。"
-            "開倉必須有停損,且做多停損須低於進場價、做空停損須高於進場價。"
-        )
-
-    # 停利允許不設,但設了就必須在正確方向。
-    if takeprofit is not None and not take_profit_is_valid(signal, entry_price, takeprofit):
-        return _fail(
-            f"{symbol} 停利無效({signal} entry={entry_price} tp={takeprofit})。"
-            "做多停利須高於進場價、做空停利須低於進場價。"
-        )
-
+    entry_price = float(entry_price)
+    size_usdt = float(size_usdt)
+    leverage = float(leverage)
     stoploss = float(stoploss)
     takeprofit = float(takeprofit) if takeprofit is not None else None
 
-    # ---- Phase 10:成交價含成本 ----
-    long_side = is_long(signal)
-    # 費率依合約而異 —— 有校準過的規格就用那個標的的實際費率
-    costs = paper_costs.get_cost_model(symbol)
-
     requested_entry_price = entry_price
-    entry_price = paper_costs.fill_price(entry_price, long_side, is_entry=True,
-                                         model=costs)
-
-    if position_value is None:
-        position_value = size_usdt * leverage
-
-    entry_fee = costs.fee(position_value)
-    # 名目價值要帶進去 —— 維持保證金率依倉位大小分層,
-    # 用單一數字會低估大倉位的強平風險。
-    liquidation_price = paper_costs.liquidation_price(
-        entry_price, leverage, long_side, symbol=symbol,
-        notional=position_value,
+    entry_price, position_value, entry_fee, liquidation_price = _apply_costs(
+        symbol, signal, entry_price, size_usdt, leverage, position_value,
     )
 
-    # 滑價之後停損可能已經在錯邊了 —— 那張單一開就會被停掉。
-    # 這種情況下不開倉才是對的。
-    if not stop_loss_is_valid(signal, entry_price, stoploss):
-        return _fail(
-            f"{symbol} 滑價後停損失效(下單價 {requested_entry_price} -> "
-            f"成交價 {entry_price:.8f},停損 {stoploss})。停損距離太近,拒絕開倉。"
-        )
-
-    # 強平價比停損還近的倉位,實際上根本用不到停損。
-    if liquidation_price is not None:
-        if long_side and liquidation_price >= stoploss:
-            return _fail(
-                f"{symbol} 強平價 {liquidation_price:.8f} 比停損 {stoploss} 更接近進場價,"
-                f"槓桿 {leverage}x 太高,拒絕開倉"
-            )
-        if not long_side and liquidation_price <= stoploss:
-            return _fail(
-                f"{symbol} 強平價 {liquidation_price:.8f} 比停損 {stoploss} 更接近進場價,"
-                f"槓桿 {leverage}x 太高,拒絕開倉"
-            )
+    problem = _validate_after_costs(
+        symbol, signal, requested_entry_price, entry_price,
+        stoploss, liquidation_price, leverage,
+    )
+    if problem:
+        return _fail(problem)
 
     try:
         trade_id = insert_trade(
@@ -194,6 +264,7 @@ def create_paper_trade(
         from journal_service import log_open
         log_open(symbol, signal, entry_price, "Paper trade opened")
     except Exception as exc:
+        # 日誌寫不進去不該讓一筆已經成立的開倉失敗,但一定要喊。
         logger.exception("Journal OPEN failed for %s: %s", symbol, exc)
 
     logger.info(

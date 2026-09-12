@@ -65,7 +65,23 @@ def _agent_intent(symbol, timeframe=None):
     return deliberation.intent, None, deliberation, report
 
 
+# 這一輪要不要繼續看下一檔。
+#
+# 把「繼續」與「這一輪到此為止」寫成兩個明確的值,而不是靠
+# `continue` 與 `return` 散在一個 136 行的函式裡(第九十五節的
+# God Function)。三個早退點裡有一個是 NAKED_POSITION ——
+# 那一個如果被改成 continue,系統會在剛剛出過裸倉的情況下繼續開倉。
+NEXT_CANDIDATE = None
+
+
 def run_auto_trader(max_candidates=10):
+    """
+    自動交易的一輪。
+
+    帳戶層級的閘門 → 掃描 → 逐檔評估。逐檔的部分在
+    `_evaluate_candidate()`,它回傳 None 代表「看下一檔」,
+    回傳 dict 代表「這一輪到此為止,而這是結果」。
+    """
     # 帳戶層級的閘門先跑 —— 它很便宜(只查資料庫),
     # 而掃描要打交易所 API。被擋下時沒必要浪費那些請求。
     allowed, reason, status = assert_can_open()
@@ -91,117 +107,147 @@ def run_auto_trader(max_candidates=10):
 
         considered.append(symbol)
 
-        intent, problem, deliberation, report = _agent_intent(symbol)
-
-        if intent is None:
-            logger.info("Auto Trader | NO_INTENT | %s | %s", symbol, problem)
-            if deliberation is not None:
-                decision_log.record(decision_log.from_deliberation(
-                    deliberation, report,
-                    outcome=decision_log.WAIT, reason=problem,
-                ))
-            continue
-
-        # ---------- HARD GATE:風控決定要不要開、開多大、幾倍 ----------
-        decision = evaluate_intent(
-            intent,
-            atr=candidate.get("indicators", {}).get("atr"),
-            mtf_score=candidate.get("mtf_score"),
-        )
-
-        if not decision.approved:
-            decision_log.record(decision_log.from_deliberation(
-                deliberation, report,
-                outcome=decision_log.REJECTED_BY_RISK,
-                decision=decision, reason=decision.reason,
-            ))
-            decision_log.record_risk_event(
-                "TRADE_REJECTED", symbol=symbol, severity="INFO",
-                blockers=decision.blockers, detail=decision.reason,
-            )
-
-            # 帳戶層級的封鎖對所有標的都一樣,沒必要再試下一檔
-            if decision.blockers and decision.blockers[0] not in (
-                "DUPLICATE_POSITION", "SIZING_REJECTED", "LIQUIDATION_BEFORE_STOP"
-            ):
-                logger.warning(
-                    "Auto Trader | BLOCKED_BY_RISK | %s", decision.reason,
-                )
-                return {
-                    "status": "BLOCKED_BY_RISK",
-                    "reason": decision.reason,
-                    "blockers": decision.blockers,
-                }
-
-            logger.info(
-                "Auto Trader | REJECTED | %s | %s", symbol, decision.reason,
-            )
-            continue
-
-        # 決策紀錄在**送單之前**寫。送單當下當機的話,那筆決策不能
-        # 跟著消失 —— 事後要能查到「系統當時打算做什麼」。
-        # trade_id 要等成交才知道,所以分兩步:先寫紀錄,成交後再連起來。
-        pending = decision_log.from_deliberation(
-            deliberation, report, outcome=decision_log.OPENED, decision=decision,
-        )
-        decision_log.record(pending)
-
-        # ---------- Execution Engine:送單 + 狀態機 + 停損保護 ----------
-        result = execution.get_engine().execute(decision)
-
-        logger.info(
-            "Auto Trader | EXECUTE | %s | %s | size=%.2f lev=%gx 風險=%.2f | %s | %s",
-            symbol, intent.direction.value, decision.size_usdt,
-            decision.leverage, decision.risk_usdt or 0,
-            result.status, result.reason or "",
-        )
-
-        if not result.ok and not result.naked_position_closed:
-            decision_log.record_risk_event(
-                "EXECUTION_REJECTED", symbol=symbol, severity="WARNING",
-                detail=f"{result.status}: {result.reason}",
-            )
-
-        if result.naked_position_closed:
-            # 開了倉但沒有停損保護,已經被緊急平掉。
-            # 這不是「換下一個候選」的小事 —— 這一輪直接停,讓人去看為什麼。
-            logger.critical(
-                "Auto Trader | NAKED_POSITION | %s | 已緊急平倉,本輪中止", symbol,
-            )
-            decision_log.record_risk_event(
-                "NAKED_POSITION", symbol=symbol, severity="CRITICAL",
-                detail=result.reason,
-                payload=(result.protection.to_dict() if result.protection else None),
-            )
-            return {
-                "status": "NAKED_POSITION_CLOSED",
-                "symbol": symbol,
-                "reason": result.reason,
-                "execution": result.to_dict(),
-            }
-
-        if result.ok:
-            _link_decision(pending, symbol)
-            notify_open_trade(
-                symbol, intent.direction.value,
-                result.fill_price or intent.entry,
-                intent.stop_loss, intent.take_profit,
-                leverage=decision.leverage,
-                confidence=intent.confidence,
-                mtf_status=candidate.get("mtf_status"),
-            )
-            return {
-                "status": "OPENED",
-                "symbol": symbol,
-                "decision": decision.to_dict(),
-                "execution": result.to_dict(),
-            }
-
-        # 送單被拒(規則不符、已有持倉等)不算致命,換下一個候選
-        continue
+        outcome = _evaluate_candidate(candidate, symbol)
+        if outcome is not NEXT_CANDIDATE:
+            return outcome
 
     logger.info("Auto Trader | NO_TRADE_SIGNAL | 評估過 %d 檔", len(considered))
     return {"status": "NO_TRADE_SIGNAL", "considered": considered}
+
+
+def _evaluate_candidate(candidate, symbol):
+    """
+    一檔標的走完整條鏈:Agent 共識 → Risk Engine → Execution Engine。
+
+    回傳 NEXT_CANDIDATE(None)代表這一檔不開,看下一檔;
+    回傳 dict 代表**這一輪結束**,而那個 dict 就是 run_auto_trader
+    的回傳值。
+
+    三種「這一輪結束」:
+      BLOCKED_BY_RISK        帳戶層級的封鎖 —— 對所有標的都一樣,再試也沒用。
+      NAKED_POSITION_CLOSED  開了倉但沒有停損保護,已緊急平掉。
+      OPENED                 開成了。一輪只開一筆。
+    """
+    intent, problem, deliberation, report = _agent_intent(symbol)
+
+    if intent is None:
+        logger.info("Auto Trader | NO_INTENT | %s | %s", symbol, problem)
+        if deliberation is not None:
+            decision_log.record(decision_log.from_deliberation(
+                deliberation, report,
+                outcome=decision_log.WAIT, reason=problem,
+            ))
+        return NEXT_CANDIDATE
+
+    # ---------- HARD GATE:風控決定要不要開、開多大、幾倍 ----------
+    decision = evaluate_intent(
+        intent,
+        atr=candidate.get("indicators", {}).get("atr"),
+        mtf_score=candidate.get("mtf_score"),
+    )
+
+    if not decision.approved:
+        return _rejected(symbol, decision, deliberation, report)
+
+    # 決策紀錄在**送單之前**寫。送單當下當機的話,那筆決策不能
+    # 跟著消失 —— 事後要能查到「系統當時打算做什麼」。
+    # trade_id 要等成交才知道,所以分兩步:先寫紀錄,成交後再連起來。
+    pending = decision_log.from_deliberation(
+        deliberation, report, outcome=decision_log.OPENED, decision=decision,
+    )
+    decision_log.record(pending)
+
+    # ---------- Execution Engine:送單 + 狀態機 + 停損保護 ----------
+    result = execution.get_engine().execute(decision)
+
+    logger.info(
+        "Auto Trader | EXECUTE | %s | %s | size=%.2f lev=%gx 風險=%.2f | %s | %s",
+        symbol, intent.direction.value, decision.size_usdt,
+        decision.leverage, decision.risk_usdt or 0,
+        result.status, result.reason or "",
+    )
+
+    if not result.ok and not result.naked_position_closed:
+        decision_log.record_risk_event(
+            "EXECUTION_REJECTED", symbol=symbol, severity="WARNING",
+            detail=f"{result.status}: {result.reason}",
+        )
+
+    if result.naked_position_closed:
+        return _naked_position(symbol, result)
+
+    if result.ok:
+        _link_decision(pending, symbol)
+        notify_open_trade(
+            symbol, intent.direction.value,
+            result.fill_price or intent.entry,
+            intent.stop_loss, intent.take_profit,
+            leverage=decision.leverage,
+            confidence=intent.confidence,
+            mtf_status=candidate.get("mtf_status"),
+        )
+        return {
+            "status": "OPENED",
+            "symbol": symbol,
+            "decision": decision.to_dict(),
+            "execution": result.to_dict(),
+        }
+
+    # 送單被拒(規則不符、已有持倉等)不算致命,換下一個候選
+    return NEXT_CANDIDATE
+
+
+# 這幾個封鎖原因只影響單一標的,換下一檔仍然有機會。
+# 其餘的封鎖是帳戶層級的 —— 對所有標的都一樣,再試也沒用。
+PER_SYMBOL_BLOCKERS = (
+    "DUPLICATE_POSITION", "SIZING_REJECTED", "LIQUIDATION_BEFORE_STOP",
+)
+
+
+def _rejected(symbol, decision, deliberation, report):
+    """風控擋下來了。記錄,然後決定是換下一檔還是整輪停下。"""
+    decision_log.record(decision_log.from_deliberation(
+        deliberation, report,
+        outcome=decision_log.REJECTED_BY_RISK,
+        decision=decision, reason=decision.reason,
+    ))
+    decision_log.record_risk_event(
+        "TRADE_REJECTED", symbol=symbol, severity="INFO",
+        blockers=decision.blockers, detail=decision.reason,
+    )
+
+    if decision.blockers and decision.blockers[0] not in PER_SYMBOL_BLOCKERS:
+        logger.warning("Auto Trader | BLOCKED_BY_RISK | %s", decision.reason)
+        return {
+            "status": "BLOCKED_BY_RISK",
+            "reason": decision.reason,
+            "blockers": decision.blockers,
+        }
+
+    logger.info("Auto Trader | REJECTED | %s | %s", symbol, decision.reason)
+    return NEXT_CANDIDATE
+
+
+def _naked_position(symbol, result):
+    """
+    開了倉但沒有停損保護,已經被緊急平掉。
+
+    這不是「換下一個候選」的小事 —— 這一輪直接停,讓人去看為什麼。
+    """
+    logger.critical(
+        "Auto Trader | NAKED_POSITION | %s | 已緊急平倉,本輪中止", symbol,
+    )
+    decision_log.record_risk_event(
+        "NAKED_POSITION", symbol=symbol, severity="CRITICAL",
+        detail=result.reason,
+        payload=(result.protection.to_dict() if result.protection else None),
+    )
+    return {
+        "status": "NAKED_POSITION_CLOSED",
+        "symbol": symbol,
+        "reason": result.reason,
+        "execution": result.to_dict(),
+    }
 
 
 def _link_decision(pending, symbol):
