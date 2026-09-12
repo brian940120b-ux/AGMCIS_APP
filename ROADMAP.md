@@ -24,6 +24,30 @@
 | 16 | Production Safety | `docs/PHASE_16_REPORT.md` |
 | 17 | LIVE SAFETY GATE | `docs/PHASE_17_REPORT.md` |
 
+## 已完成:Master Prompt 106 節逐節補齊
+
+Phase 0–17 之後,把 Master Prompt 全部 106 節重新對照了一次,
+把 12 個「完全沒做」的節補完。對照表在
+[`docs/MASTER_PROMPT_COMPLIANCE.md`](docs/MASTER_PROMPT_COMPLIANCE.md),
+目前是 **84 已做到 / 22 部分做到 / 0 沒做**。
+
+| 節 | 補了什麼 |
+|---|---|
+| 十八 | SL 失敗六步驟緊急保護(先重試、再縮倉、才平倉、停新單、通知) |
+| 二十 / 五十九 / 六十 | 組合相關性風險與週虧損上限 |
+| 四十六 | SAFE LIVE MODE(只能收緊不能放寬) |
+| 五十一 | 重大事件時間窗封鎖 + 未排程衝擊偵測 |
+| 七十三 ~ 七十六 | 策略生命週期、回撤自動停用、績效與市況漂移偵測 |
+| 五十五 ~ 五十八 | 分批停利、移到成本、ATR / 結構型移動停損、時間出場 |
+| 六十四 / 六十九 ~ 七十一 | 決策持久化與「為什麼開這一單」 |
+| 六十五 / 六十六 | 稽核與不需金鑰的 `/health` |
+| 三十三 / 三十七 | 回測 Partial Fill / Partial Close / Trailing,成本敏感度 |
+| 二十三 ~ 二十五 / 三十八 | 市場結構、MTF 階層、PANIC 市況、五個新策略 |
+| 八十六 ~ 九十二 / 一百零五 | 新首頁、模式徽章、Agent 面板、TOP 機會與 WHY |
+| 四十一 / 六十七 / 八十一 / 八十二 / 八十五 | 完整日誌、模擬測試、環境分離、Docker、API 補齊 |
+
+測試從 969 增加到 1415。
+
 ---
 
 ## 需要人操作才能繼續
@@ -31,7 +55,7 @@
 ### 在 VPS 上(需要 API 金鑰)
 
 ```bash
-.venv/bin/python scripts/migrate.py                    # 套用 migration 003-006
+.venv/bin/python scripts/migrate.py                    # 套用 migration 003-008
 .venv/bin/python scripts/verify_bingx.py               # 唯讀連線驗證
 .venv/bin/python scripts/verify_bingx.py --write-specs # 合約規格快照
 .venv/bin/python scripts/calibration_report.py         # 確認校準
@@ -72,6 +96,13 @@
 4. **停損在模擬盤不是交易所掛單。** 實盤要處理「進場成交但停損單被拒」。
 5. **Survivorship bias 還在。** 需要含已下市標的的歷史資料。
 6. **舊的 Dashboard Lite 還是一個巨大的 f-string。**
+   它已經不是首頁了(移到 `/dashboard`),但還沒重寫。
+7. **實單訂單型別只走 MARKET。** LIMIT / STOP / TRAILING_STOP 的型別
+   定義好了,執行層還沒用。沒有 LiveBroker 之前也無從驗證。
+8. **加倉與反手沒有實作。** 兩者都會改變一個已存在部位的風險,
+   而目前的風控是為「開新倉」設計的。要做之前風控要先想清楚。
+9. **TP/SL 的參數還沒經過回測驗證。** 1R/2R/3R 與 30/30/40 是起點,
+   不是結論 —— 第五十六與五十七節都要求由回測決定。
 
 ### 已修掉
 
