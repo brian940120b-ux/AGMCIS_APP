@@ -46,6 +46,15 @@ def confirmation(phrase=None, hours_ago=0.0, notional=20.0, **overrides):
     return handle.name
 
 
+def _fresh_calendar():
+    """一份剛維護過的事件日曆。過期的日曆會擋住實單(第五十一節)。"""
+    from datetime import datetime, timezone
+
+    from agmcis.risk.news_risk import Calendar
+
+    return Calendar(generated_at=datetime.now(timezone.utc), events=[])
+
+
 def passing_providers(**overrides):
     providers = {
         "preflight": lambda: [],
@@ -69,6 +78,7 @@ def passing_providers(**overrides):
             "reconciliation_critical": 0, "alerts": [],
         },
         "kill_switch": lambda: {"can_close_positions": True, "armed": False},
+        "news_calendar": _fresh_calendar,
     }
     providers.update(overrides)
     return providers

@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "重大經濟事件日曆(Master Prompt 第五十一節)。",
+    "把這個檔複製成 config/news_calendar.json 再填入實際時間。",
+    "",
+    "impact 有三級:",
+    "  HIGH   時間窗內不開新倉(FOMC / CPI / NFP / 利率決議)",
+    "  MEDIUM 時間窗內倉位減半",
+    "  LOW    只記錄,不改變行為",
+    "",
+    "時間一律用 UTC。before_minutes / after_minutes 是公布前後的封鎖分鐘數,",
+    "不填就用預設的 30 / 30。",
+    "",
+    "generated_at 是這份日曆什麼時候維護的。超過 7 天沒更新就視為不可信:",
+    "模擬盤只會警告,實單會被 LIVE SAFETY GATE 擋下來。",
+    "沒有 generated_at 等同於過期 —— 一個沒說自己什麼時候做的日曆不可信。"
+  ],
+  "generated_at": "2026-09-01T00:00:00Z",
+  "events": [
+    {
+      "name": "FOMC 利率決議",
+      "at": "2026-09-17T18:00:00Z",
+      "impact": "HIGH",
+      "before_minutes": 60,
+      "after_minutes": 90
+    },
+    {
+      "name": "美國 CPI",
+      "at": "2026-09-10T12:30:00Z",
+      "impact": "HIGH",
+      "before_minutes": 30,
+      "after_minutes": 60
+    },
+    {
+      "name": "美國非農就業 NFP",
+      "at": "2026-09-04T12:30:00Z",
+      "impact": "HIGH"
+    },
+    {
+      "name": "美國 PPI",
+      "at": "2026-09-11T12:30:00Z",
+      "impact": "MEDIUM"
+    }
+  ]
+}

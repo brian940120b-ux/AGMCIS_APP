@@ -204,7 +204,23 @@ def evaluate_intent(intent, atr=None, mtf_score=None,
         contract_max_leverage=contract_max_leverage,
         min_notional=min_notional,
         correlation=_correlation_for(intent, state),
+        news=_news_risk(),
     )
+
+
+def _news_risk():
+    """
+    消息面風險(第五十一節)。取不到就回 None ——
+    None 代表「這一層沒有生效」,而那件事由 LIVE SAFETY GATE
+    在實單那一側擋住,不是靠這裡假裝一切正常。
+    """
+    from agmcis.risk import news_risk
+
+    try:
+        return news_risk.current()
+    except Exception as exc:
+        logger.warning("消息面風險取得失敗 | %s", exc)
+        return None
 
 
 def _correlation_for(intent, state):

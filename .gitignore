@@ -57,3 +57,4 @@ config_audit.log
 # 可重新抓取的資料,而且量很大。
 data/history/
 data/strategy_lab_report.json
+config/news_calendar.json

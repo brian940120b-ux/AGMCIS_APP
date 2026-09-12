@@ -160,7 +160,7 @@ class RiskEngine:
 
     def evaluate(self, intent: TradeIntent, state: AccountState,
                  atr=None, mtf_score=None, contract_max_leverage=None,
-                 min_notional=None, correlation=None) -> RiskDecision:
+                 min_notional=None, correlation=None, news=None) -> RiskDecision:
         """
         對一個 TradeIntent 做完整裁決。
 
@@ -186,6 +186,24 @@ class RiskEngine:
                 blockers=["DUPLICATE_POSITION"],
             )
 
+        # ---- 消息面:重大事件時間窗內不開新倉 ----
+        # 放在算倉位之前 —— 不開就不用算。平倉不走這條路徑,
+        # 所以消息面永遠不會擋住出場。
+        risk_multiplier = 1.0
+
+        if news is not None:
+            if news.blocks_entry:
+                logger.warning(
+                    "Risk Engine | REJECT | %s | 消息面:%s",
+                    intent.symbol, " / ".join(news.reasons),
+                )
+                return RiskDecision(
+                    intent=intent, approved=False,
+                    reason=" / ".join(news.reasons) or "重大事件時間窗",
+                    blockers=["NEWS_BLACKOUT"],
+                )
+            risk_multiplier = max(0.0, min(1.0, float(news.risk_multiplier)))
+
         stop_distance_pct = intent.stop_distance_pct
 
         # ---- 槓桿:由停損距離與波動度決定,不是信心分數 ----
@@ -203,7 +221,10 @@ class RiskEngine:
             equity=state.equity,
             stop_distance_pct=stop_distance_pct,
             leverage=leverage_decision.leverage,
-            risk_per_trade_pct=self._limit("MAX_RISK_PER_TRADE_PCT", 1.0),
+            # 消息面只會讓風險變小:multiplier 在上面被夾在 [0, 1]。
+            risk_per_trade_pct=(
+                self._limit("MAX_RISK_PER_TRADE_PCT", 1.0) * risk_multiplier
+            ),
             available_balance=state.available_balance,
             current_exposure_usdt=state.current_exposure_usdt,
             max_exposure_pct=self._limit("MAX_EXPOSURE_PCT", 80),
@@ -282,7 +303,9 @@ class RiskEngine:
             leverage=leverage_decision.leverage,
             reason=None,
             blockers=[],
-            warnings=list(exposure.warnings),
+            warnings=list(exposure.warnings) + (
+                list(news.reasons) + list(news.warnings) if news is not None else []
+            ),
         )
 
 

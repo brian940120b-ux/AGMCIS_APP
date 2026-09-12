@@ -94,7 +94,7 @@
 
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
-| 五十一 | News Risk | ❌ | **完全沒有**。沒有 FOMC/CPI/NFP 事件行事曆、沒有重大事件前後的封鎖窗口。NewsAgent 只吃一個 impact 分數 |
+| 五十一 | News Risk | ✅ | `agmcis/risk/news_risk.py`。已排程事件走時間窗封鎖(HIGH 不開新倉 / MEDIUM 倉位減半),未排程衝擊走標題關鍵字。日曆過期在模擬盤只警告,實單由 LIVE GATE 擋 |
 | 五十二 | Opportunity Scanner | ✅ | `exchange_universe.py` 動態取得合約清單 + 流動性/量/波動度過濾,沒有寫死 symbol |
 | 五十三 | TOP 3 | ⚠️ | 有排名(TOP_N=5),但**沒有「品質不足就不硬選」的門檻** |
 | 五十四 | 每個訊號解釋原因 | ✅ | `Signal.reasons` + `/transparency` 顯示每個 Agent 的理由 |
@@ -177,9 +177,9 @@
 
 | 判定 | 節數 |
 |---|---|
-| ✅ 已做到 | 55 |
+| ✅ 已做到 | 56 |
 | ⚠️ 部分做到 | 42 |
-| ❌ 沒做 | 9 |
+| ❌ 沒做 | 8 |
 
 ## 缺口排序(由大到小)
 
@@ -188,7 +188,7 @@
 1. ~~**十八 — SL 失敗六步驟**~~ ✅ 已補(`agmcis/execution/emergency.py`,27 個測試)。
 2. ~~**五十九 + 六十 + 二十 — 組合風險與相關性**~~ ✅ 已補(`agmcis/risk/{correlation,portfolio}.py`,41 個測試)。
 3. ~~**四十六 — SAFE LIVE MODE**~~ ✅ 已補(`agmcis/safety/safe_live.py`,22 個測試)。
-4. **五十一 — News Risk 封鎖窗口**(安全)FOMC/CPI 當下系統會照常開單。
+4. ~~**五十一 — News Risk 封鎖窗口**~~ ✅ 已補(`agmcis/risk/news_risk.py`,33 個測試)。
 5. **七十四 + 七十五 + 七十六 — 策略退化偵測**(安全)策略壞掉不會自己停。
 6. **五十七 + 五十八 — Partial TP 與 ATR/結構型移動停損**(績效)
 7. **六十四 + 六十九 + 七十 + 七十一 — 決策持久化**(可解釋性)

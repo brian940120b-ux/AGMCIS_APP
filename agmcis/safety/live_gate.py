@@ -473,6 +473,47 @@ class LiveGate:
             f"當日 ≤ {effective.get('MAX_TRADES_PER_DAY')} 筆",
         )
 
+    def check_news_calendar(self):
+        """
+        重大事件日曆必須是新的(第五十一節)。
+
+        日曆過期代表「不知道 FOMC 是不是十分鐘後」。模擬盤不因此停止
+        交易 —— 停掉一個模擬盤沒有意義,而且一個沒人更新的檔案會讓
+        系統永遠不交易,那不是保守,那是故障。
+
+        實單不一樣:真錢進場之前,「不知道今天有沒有 FOMC」不是可以
+        接受的狀態。所以這一項只在這裡擋。
+        """
+        from agmcis.risk import news_risk
+
+        provider = self._provider("news_calendar", news_risk.load_calendar)
+
+        try:
+            calendar = provider()
+        except Exception as exc:
+            return GateCheck(
+                "重大事件日曆", False, f"讀取失敗:{type(exc).__name__}: {exc}",
+            )
+
+        now = self._now()
+
+        if calendar.is_stale(now):
+            age = (
+                "從來沒有更新過" if calendar.generated_at is None
+                else f"已經 {(now - calendar.generated_at).days} 天沒更新"
+            )
+            detail = f"事件日曆{age}。"
+            if calendar.errors:
+                detail += " " + " / ".join(calendar.errors)
+            return GateCheck("重大事件日曆", False, detail)
+
+        upcoming = [e for e in calendar.events if e.at >= now]
+
+        return GateCheck(
+            "重大事件日曆", True,
+            f"{calendar.generated_at.date()} 更新,尚有 {len(upcoming)} 筆未來事件",
+        )
+
     def check_live_broker_absent(self):
         """
         即使全部通過,系統仍然無法下實單 —— LiveBroker 不存在。
@@ -509,6 +550,7 @@ class LiveGate:
         "check_reconciliation",
         "check_kill_switch",
         "check_safe_live_limits",
+        "check_news_calendar",
         "check_live_broker_absent",
         "check_confirmation",
     )
