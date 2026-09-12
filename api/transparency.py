@@ -631,6 +631,37 @@ def _risk():
     })
 
 
+@router.get("/api/proposals")
+def api_proposals():
+    return _proposals()
+
+
+def _proposals():
+    """
+    改進提案(第四十二 / 七十七 / 七十八節)。
+
+    `awaiting_human` 是這一塊唯一需要人動作的部分:走完模擬盤之後,
+    **只有人能批准**。一個沒有人看的待審清單等於這整套機制不存在。
+    """
+    def run():
+        from agmcis.review.proposals import PAPER, get_store
+
+        store = get_store()
+        pending = store.pending()
+
+        return {
+            "proposals": [p.to_dict() for p in pending],
+            "count": len(pending),
+            "awaiting_human": [
+                p.to_dict() for p in pending if p.status == PAPER
+            ],
+        }
+
+    return _safe("proposals", run, {
+        "proposals": [], "count": 0, "awaiting_human": [],
+    })
+
+
 @router.get("/api/transparency_summary")
 def api_transparency_summary():
     return _summary()
@@ -647,8 +678,18 @@ def _summary():
     calibration = _calibration()
     reconciliation = _reconciliation()
     strategies = _strategy_health()
+    proposals = _proposals()
 
     alerts = []
+
+    if proposals.get("awaiting_human"):
+        alerts.append({
+            "level": "warning",
+            "message": (
+                f"{len(proposals['awaiting_human'])} 個改進提案走完模擬盤,"
+                f"等待人工核可。AI 不能自己批准(第七十八節)。"
+            ),
+        })
 
     if strategies.get("paused_count"):
         alerts.append({
@@ -715,7 +756,8 @@ def _summary():
             "message": "合約規格尚未校準,強平價與成本都是估計值",
         })
 
-    for source in (orders, calibration, reconciliation, review, config, strategies):
+    for source in (orders, calibration, reconciliation, review, config,
+                   strategies, proposals):
         if source.get("error"):
             alerts.append({"level": "critical", "message": source["error"]})
 
@@ -730,4 +772,5 @@ def _summary():
         "config_risk_increases": config.get("risk_increase_count", 0),
         "paused_strategies": strategies.get("paused_count", 0),
         "drifted_strategies": strategies.get("drifted_count", 0),
+        "proposals_awaiting_human": len(proposals.get("awaiting_human", [])),
     }

@@ -80,7 +80,7 @@
 | 節 | 主題 | 判定 | 說明 |
 |---|---|---|---|
 | 四十一 | Trade Journal | ✅ | `agmcis/review/journal.py` 27 欄。滑點、R 倍數、持有時間是**算**出來的不是存的(存衍生值遲早與來源不一致);拼不起來的欄位會列在 `missing` 而不是填 0 |
-| 四十二 | Self Learning | ⚠️ | `agmcis/review/self_review.py` 會產出結論與 open questions,但沒有正式的 PROPOSE CHANGE → Backtest → Human Approval 流程物件 |
+| 四十二 | Self Learning | ✅ | `agmcis/review/proposals.py`。狀態不能跳、每一步要附數字、**批准只有人做得到**(看起來像系統的名字會拋 NotAHuman) |
 | 四十三 | Paper Trading | ✅ | `agmcis/execution/paper_costs.py` 含手續費/滑點/資金費用/強平 |
 | 四十四 | Trading Modes | ✅ | `TradingMode` MANUAL/PAPER/TEST/LIVE |
 | 四十五 | LIVE SAFETY GATE | ✅ | `agmcis/safety/live_gate.py` 13 項檢查,任何檢查不到都算「未通過」而非「略過」 |
@@ -130,7 +130,7 @@
 | 七十四 | Strategy Kill Switch | ✅ | 回撤超過 20% 自動 PAUSE。只做 PAUSE 不改參數 —— 第七十八節明講 AI 不得自己改策略 |
 | 七十五 | Performance Drift Detection | ✅ | 近期 30 筆 vs 歷史,用**標準誤檢定**而不是比大小。漂移不自動停 —— 它是「去看一下」,不是「已經壞了」 |
 | 七十六 | Market Regime Drift | ✅ | `regime_fit()` 比較策略在各市況的期望值。樣本不足的市況不列入比較 —— 三筆交易的「期望值」不是期望值 |
-| 七十七 | Research Loop | ⚠️ | 各環節都在,但沒有串成自動循環 |
+| 七十七 | Research Loop | ✅ | 排程的 research_loop 把檢討結論變成有編號、有狀態的提案草稿。它**只做草稿** —— 第七十八節禁止的是整條鏈 |
 | 七十八 | 禁止 AI 無限自改 | ✅ | 沒有任何自動改策略的路徑;LiveGate 要求人工核可 |
 | 七十九 | Live 絕對安全原則 | ✅ | `live_gate.py` 九項任一失敗即 NO TRADE,且失敗預設是「未通過」 |
 | 八十 | Configuration | ✅ | `agmcis/config/settings.py` 全部走環境變數;Standard/Perpetual 靠設定切換 |

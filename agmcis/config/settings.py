@@ -190,6 +190,9 @@ SCHEDULER_CONFIG_AUDIT_INTERVAL = env_int("SCHEDULER_CONFIG_AUDIT_INTERVAL", 360
 # 策略退化偵測。跑太密沒有意義 —— 判斷的基礎是「最近 30 筆交易」,
 # 而那個數字不會在一小時內變。
 SCHEDULER_DRIFT_MONITOR_INTERVAL = env_int("SCHEDULER_DRIFT_MONITOR_INTERVAL", 3600)
+# 研究循環。一天一次就夠 —— 它的輸入是自我檢討,
+# 而自我檢討的輸入是已平倉交易,那個數字不會在幾小時內有意義地改變。
+SCHEDULER_RESEARCH_INTERVAL = env_int("SCHEDULER_RESEARCH_INTERVAL", 86400)
 EXCHANGE_RATE_LIMIT_PERIOD = env_float("EXCHANGE_RATE_LIMIT_PERIOD", 10.0)
 
 # 本機時鐘與交易所允許的最大偏差。超過就會開始被拒簽章,

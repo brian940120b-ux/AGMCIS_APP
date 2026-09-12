@@ -140,6 +140,8 @@ class TestSummaryOnlyReportsWhatNeedsAttention(unittest.TestCase):
              patch.object(transparency, "_self_review", return_value=review), \
              patch.object(transparency, "_strategy_health",
                           return_value=strategies), \
+             patch.object(transparency, "_proposals",
+                          return_value={"awaiting_human": []}), \
              patch.object(transparency, "_config_changes", return_value=config):
             return transparency._summary()
 
@@ -298,6 +300,8 @@ class TestPausedStrategiesAreVisible(unittest.TestCase):
                           return_value={"verdict": "HEALTHY"}), \
              patch.object(transparency, "_strategy_health",
                           return_value=strategies), \
+             patch.object(transparency, "_proposals",
+                          return_value={"awaiting_human": []}), \
              patch.object(transparency, "_config_changes",
                           return_value={"risk_increase_count": 0}):
             return transparency._summary()

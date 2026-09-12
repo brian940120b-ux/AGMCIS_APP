@@ -193,6 +193,25 @@ def _job_config_audit():
     )
 
 
+def _job_research_loop():
+    """
+    研究循環(第七十七節)。把自我檢討的結論變成有編號、有狀態、
+    追蹤得到的提案草稿。
+
+    它**不改任何東西**,也不推進任何提案 —— 第七十八節禁止的是
+    「自己修改 → 自己測試 → 自己批准 → 自己 Live」這一整條鏈,
+    這個工作刻意只做第一個箭頭之前的那一步。
+    """
+    from agmcis.review.proposals import run_research_loop
+
+    return Job(
+        name="research_loop",
+        run=run_research_loop,
+        interval_seconds=settings.SCHEDULER_RESEARCH_INTERVAL,
+        tags=["research"],
+    )
+
+
 def _job_pending_orders():
     """
     掛單巡檢(第十三節):到期的取消、觸價的成交。
@@ -309,7 +328,7 @@ JOB_SETS = {
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
         _job_naked_position_sweep, _job_reconciliation, _job_risk_alert,
         _job_rate_limit_cleanup, _job_config_audit, _job_drift_monitor,
-        _job_pending_orders, _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
+        _job_pending_orders, _job_research_loop, _job_auto_trader, _job_opportunity_scanner, _job_daily_report,
     ],
     JOB_SET_POSITION: [
         _job_position_monitor, _job_trailing_stop, _job_exit_manager,
