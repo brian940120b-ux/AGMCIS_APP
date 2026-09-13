@@ -404,9 +404,17 @@ class TestAnEmptyPositionListMustBeTrustworthy(unittest.TestCase):
 
         self.assertTrue(note["disagreed"])
 
-    def test_genuinely_empty_is_reported_as_asked_both_ways(self):
+    def test_an_empty_result_never_claims_more_than_it_checked(self):
         """
-        兩種都問過都是空的 —— 那時候「沒有倉」才是可信的。
+        ⚠️ 2026-09-13 被這件事騙過一次。
+
+        逐幣備援只問了策略的七個幣,而執政官在 App 上開的是
+        AVA-USDT —— 不在那七個裡面。於是整批回 0、逐幣七個都沒有,
+        程式說「兩種都問過了,可信」。
+
+        **那句話是錯的。** 它只證明了「這幾個幣沒有倉」。
+
+        所以 method 不可以是任何聽起來像「確認沒有倉」的字。
         """
         session = FakeSession([
             FakeResponse(body={"code": 0, "data": []}),
@@ -418,7 +426,10 @@ class TestAnEmptyPositionListMustBeTrustworthy(unittest.TestCase):
 
         self.assertEqual(got, [])
         self.assertFalse(note["disagreed"])
-        self.assertEqual(note["method"], "兩種都是空的")
+        self.assertTrue(note["scoped"], "要標明這個結論只涵蓋問過的幣")
+        self.assertIn("1", note["method"], "要說出問了幾個")
+        for lie in ("兩種都是空的", "沒有倉", "確認"):
+            self.assertNotIn(lie, note["method"])
 
     def test_a_per_symbol_failure_is_recorded_not_swallowed(self):
         session = FakeSession([
@@ -494,7 +505,11 @@ class TestAnIncompleteProbeIsNotAnEmptyAnswer(unittest.TestCase):
         self.assertNotEqual(note["method"], "兩種都是空的")
         self.assertIn("沒問完", note["method"])
 
-    def test_a_complete_empty_probe_is_allowed_to_say_so(self):
+    def test_a_finished_probe_is_distinguished_from_an_aborted_one(self):
+        """
+        問完了(但範圍有限)與 被限流中止 是兩種不同的狀態,
+        而且都不是「沒有倉」。
+        """
         session = FakeSession([
             FakeResponse(body={"code": 0, "data": []}),
             FakeResponse(body={"code": 0, "data": []}),
@@ -502,8 +517,8 @@ class TestAnIncompleteProbeIsNotAnEmptyAnswer(unittest.TestCase):
 
         _got, note = client(session=session).positions_everywhere(["A-USDT"])
 
-        self.assertEqual(note["method"], "兩種都是空的")
-        self.assertFalse(note.get("incomplete"))
+        self.assertFalse(note.get("incomplete"), "這一次是問完了的")
+        self.assertTrue(note.get("scoped"), "但範圍只有給的那些幣")
 
 
 class TestTheBurstWasLoweredAfterARealRejection(unittest.TestCase):

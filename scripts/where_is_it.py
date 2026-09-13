@@ -43,7 +43,7 @@ from core.config import load_env
 from exchange.bingx import private
 
 
-def look(mode: str) -> dict:
+def look(mode: str, symbol: str | None = None) -> dict:
     """一個環境的快照。任何一項失敗都照實記下來,不讓它中斷另一項。"""
     out = {"mode": mode, "host": private.host(mode)}
     try:
@@ -52,11 +52,18 @@ def look(mode: str) -> dict:
         out["error"] = str(e)
         return out
 
-    for label, call in (
-            ("balance", client.balance),
-            ("perp", client.positions),
-            ("standard", client.standard_positions),
-            ("open_orders", client.open_orders)):
+    jobs = [
+        ("balance", client.balance),
+        ("perp", client.positions),
+        ("standard", client.standard_positions),
+        ("open_orders", client.open_orders),
+    ]
+    if symbol:
+        # 指名問一個幣。整批查詢回空**不代表沒有倉** —— 有些端點
+        # 不帶 symbol 就回空,而逐幣備援只問策略的那幾個幣。
+        jobs.append((f"perp:{symbol}", lambda: client.positions(symbol)))
+
+    for label, call in jobs:
         try:
             out[label] = call()
         except (private.PrivateCallFailed, ratelimit.RateLimited) as e:
@@ -98,6 +105,14 @@ def count(value):
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="那個倉到底在哪裡")
+    ap.add_argument("--symbol", default=None,
+                    help="指名問一個幣(例如 AVA-USDT)—— "
+                         "整批查詢回空不代表沒有倉")
+    args = ap.parse_args()
+
     load_env()
 
     try:
@@ -113,7 +128,7 @@ def main() -> int:
 
     found_live = False
     for mode in ("demo", "live"):
-        snap = look(mode)
+        snap = look(mode, args.symbol)
         print()
         print(f"  【{'Demo(VST 虛擬)' if mode == 'demo' else '實盤(真錢)'}】"
               f"  {snap['host']}")
@@ -125,7 +140,18 @@ def main() -> int:
         print(f"    標準持倉  {count(snap['standard'])}")
         print(f"    掛單      {count(snap['open_orders'])}")
 
+        named = snap.get(f"perp:{args.symbol}") if args.symbol else None
+        if named is not None:
+            print(f"    {args.symbol:<9} {count(named)}(指名查詢)")
+
         rows = snap["perp"]
+        if not (isinstance(rows, list) and rows) and isinstance(named, list) \
+                and named:
+            rows = named
+            print()
+            print("    ⚠️  **整批查詢說沒有,指名查詢說有。**")
+            print("        代表持倉端點不帶 symbol 時回的是空清單 ——")
+            print("        一個看起來確定、實際上是錯的答案。")
         if isinstance(rows, list) and rows:
             if mode == "live":
                 found_live = True
