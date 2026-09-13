@@ -1366,9 +1366,35 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    build = _build()
+    try:
+        srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    except OSError as e:
+        # ⚠️ 2026-09-13:這是整輪「面板換不掉」最可能的原因,而它
+        #    原本只會噴一行 OSError。
+        #
+        #    埠被別人占著 -> 新的行程當場死掉 -> **而舊的還在服務**。
+        #    systemd 的 Type=simple 在 fork 出來那一刻就報 active,
+        #    所以 `systemctl restart` 看起來成功、`is-active` 說
+        #    active、瀏覽器也照常有畫面 —— 只是那個畫面是舊的。
+        #
+        #    一個「看起來成功的失敗」是最貴的一種。所以講清楚。
+        print(f"✗ 綁不上 {PORT} 埠:{e}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  這幾乎一定表示**已經有另一個行程占著這個埠**。", file=sys.stderr)
+        print("  重點:舊的那個會繼續服務,所以外面看起來一切正常,",
+              file=sys.stderr)
+        print("  而你看到的畫面永遠是舊版的。", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  查是誰:  .venv/bin/python scripts/why_old.py",
+              file=sys.stderr)
+        print(f"  或:      ss -lptn 'sport = :{PORT}'", file=sys.stderr)
+        return 2
+
     srv.daemon_threads = True
-    print(f"AGMCIS 交易台 · http://0.0.0.0:{PORT}")
+    # 版本印在啟動日誌裡 —— journalctl 第一行就看得到這個行程是哪一版。
+    print(f"AGMCIS 交易台 · http://0.0.0.0:{PORT} · {build.describe()}")
+    sys.stdout.flush()
     srv.serve_forever()
     return 0
 

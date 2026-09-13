@@ -48,6 +48,17 @@ git log --oneline -1
 
 # ── 三、重啟 ────────────────────────────────────────
 say "三、重啟 $UNIT"
+
+# ⚠️ systemd 的 Type=simple 在**行程 fork 出來的那一刻**就報 active,
+#    而不是在它成功 bind 到埠的時候。所以「active」不代表新的那個
+#    真的在服務 —— 如果埠被別人占著,新的會 Address already in use
+#    死掉,而你連到的還是舊的那個。
+#
+#    先看重啟**之前**誰在聽,這樣待會兒對得起來。
+BEFORE_PIDS="$(ss -lptnH "sport = :${PORT}" 2>/dev/null \
+  | grep -o 'pid=[0-9]*' | sort -u | tr '\n' ' ')"
+[ -n "$BEFORE_PIDS" ] && echo "  重啟前在聽 ${PORT} 的:${BEFORE_PIDS}"
+
 systemctl restart "$UNIT" || die "重啟失敗。看:journalctl -u $UNIT -n 40"
 
 # ⚠️ 2026-09-13:第一版 sleep 3 之後看到 activating 就判死。
@@ -87,11 +98,30 @@ done
 if [ -z "$SERVED" ]; then
   echo "  /health 沒有回 build.commit。"
   echo
-  echo "  兩種可能:"
-  echo "    · 服務跑的是 2026-09-13 之前的程式碼(那時還沒有版本戳)"
-  echo "    · 在聽 ${PORT} 的是**另一個行程**"
+  echo "  ── /health 到底回了什麼(前 600 字)──────────────"
+  printf '  %s\n' "$(printf '%s' "$BODY" | head -c 600)"
+  echo "  ───────────────────────────────────────────────"
   echo
-  echo "  跑這個問清楚:.venv/bin/python scripts/why_old.py"
+  # ⚠️ 不要只說「跑另一支去查」。2026-09-13 的教訓:每多一次
+  #    來回,兩邊就多猜一輪。查得出來的就當場查完。
+  echo "  ── 誰在聽 ${PORT} ─────────────────────────────"
+  "${REPO}/.venv/bin/python" "${REPO}/scripts/why_old.py" 2>/dev/null \
+    | sed -n '/二、誰在聽/,/三、問服務/p' | sed 's/^/  /'
+  echo "  ───────────────────────────────────────────────"
+  echo
+  echo "  最常見的原因:**另一個行程占著 ${PORT}**。新的起不來"
+  echo "  (Address already in use),systemd 只看到 fork 成功就報"
+  echo "  active,而你連到的還是那個舊的。"
+  echo
+  echo "  上面如果看到不只一個 pid、或工作目錄不是 ${REPO},就是它。"
+  echo "  另一個嫌疑犯:agmcis-wild(CLAUDE.md 說已停用,但它在跑)。"
+  echo
+  echo "  ── $UNIT 最後 25 行日誌 ────────────────────────"
+  journalctl -u "$UNIT" -n 25 --no-pager 2>/dev/null | sed 's/^/  /'
+  echo "  ───────────────────────────────────────────────"
+  echo
+  echo "  日誌裡如果有「綁不上 ${PORT} 埠」,那就確定是埠被占了。"
+  echo "  處理:找出占著的那個 pid,停掉它的服務,再跑一次這一支。"
   die "驗證不過 —— **不要當成換好了**"
 fi
 
