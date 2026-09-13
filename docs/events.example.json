@@ -1,0 +1,25 @@
+{
+  "_說明": [
+    "事件日曆(第五十一條)。複製成 data/events.json 再填。",
+    "",
+    "⚠️ 這份範例裡的日期是**假的佔位**,不要照抄。",
+    "真正的日期要從發布單位拿:",
+    "  FOMC  https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+    "  CPI / NFP  https://www.bls.gov/schedule/news_release/",
+    "  PCE   https://www.bea.gov/news/schedule",
+    "",
+    "為什麼不內建:憑記憶寫下的日期會讓人以為有在看,而內容是錯的。",
+    "一份錯的日曆比沒有日曆危險。",
+    "",
+    "date  YYYY-MM-DD(UTC)",
+    "kind  FOMC / CPI / NFP / PCE / UNLOCK / HALVING / OTHER",
+    "level HIGH / MEDIUM",
+    "note  自由文字,會顯示在面板上"
+  ],
+  "events": [
+    {"date": "2099-01-01", "kind": "FOMC", "level": "HIGH",
+     "note": "佔位範例 —— 換成真的日期"},
+    {"date": "2099-01-15", "kind": "CPI", "level": "HIGH",
+     "note": "佔位範例 —— 換成真的日期"}
+  ]
+}

@@ -147,6 +147,29 @@ def _fresh_bars(symbols=None, lookback_days=None
     return dates, idx
 
 
+def _events_on(exec_day) -> list | None:
+    """
+    成交日當天的已知事件。
+
+    **回 None 代表「不知道」**(沒有日曆),回 [] 代表「確定沒有」。
+    兩者在帳本裡是不同的字,之後回頭看才分得出來 ——
+    把「沒查」寫成「沒有」,是把一個空白偽裝成一個結論。
+    """
+    from datetime import date
+
+    from portfolio import events
+
+    try:
+        day = exec_day if isinstance(exec_day, date) else date.fromisoformat(
+            str(exec_day))
+        return [e.to_dict() for e in events.on_day(day)]
+    except events.CalendarMissing:
+        return None
+    except Exception as e:
+        log.warning(f"事件日曆讀取失敗(不影響記帳):{e}")
+        return None
+
+
 def _append(path: Path, rec: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
@@ -380,7 +403,11 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
         # 風控否決是重大事件 —— 只留在 log 等於沒人會看到
         "risk_verdict": risk.verdict,
         "risk_rejected": sorted(risk.rejected_symbols) or None,
-        "risk_failures": [c.name for c in risk.failures()] or None})
+        "risk_failures": [c.name for c in risk.failures()] or None,
+        # 事件日曆(第五十一條)—— 只記錄,不影響決策。
+        # 記進帳本是為了之後回頭看得出「那天是什麼日子」;
+        # 事後才想查,資料就已經不在了。
+        "events": _events_on(p["exec_day"])})
 
     # 風控的完整判決落地 —— 面板與 /health 要看得到每一條檢查說了什麼。
     # 特別是相關性集中度(第六十條):它的上限還沒設定,而**沒有上限

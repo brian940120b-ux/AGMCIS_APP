@@ -685,6 +685,58 @@ def block_correlation() -> str:
             '</div>')
 
 
+def block_events() -> str:
+    """
+    事件日曆(第五十一條)。
+
+    這張卡在**沒有日曆的時候照樣顯示** —— 而且顯示的是
+    「沒有在看」,不是「今天沒事」。把卡片藏起來會讓人以為
+    這件事有人在管。
+    """
+    from portfolio import events
+
+    try:
+        st = events.status()
+    except Exception as e:
+        return ('<div class="card"><h2>事件日曆</h2>'
+                f'<p class="note">讀取失敗:{html.escape(str(e))}</p></div>')
+
+    if not st["loaded"] or st["stale"]:
+        why = html.escape(str(st.get("reason") or ""))
+        return ('<div class="card"><h2>事件日曆</h2>'
+                '<div class="big dim">未載入</div>'
+                f'<p class="note">{why}</p>'
+                '<div class="flag"><b>「沒有載入日曆」不等於「今天沒有'
+                '事件」。</b>前者是我不知道,後者是一個確定的判斷 —— '
+                '而這裡不知道。<br>'
+                '日期要從發布單位拿(聯準會 / BLS / BEA),'
+                '格式見 <code>docs/events.example.json</code>。'
+                '憑記憶寫下的日期會讓人以為有在看,而內容是錯的 —— '
+                '一份錯的日曆比沒有日曆危險。</div></div>')
+
+    def row(e):
+        return (f'<tr><td class="sym">{html.escape(e["date"])}</td>'
+                f'<td>{html.escape(e["kind"])}</td>'
+                f'<td><div class="why">{html.escape(e["note"])}</div></td>'
+                '</tr>')
+
+    today = st["today"]
+    head = (f'<div class="big warn">今天:'
+            + "、".join(html.escape(e["kind"]) for e in today) + '</div>'
+            if today else '<div class="big dim">今天無事件</div>')
+
+    rows = "".join(row(e) for e in st["upcoming"])
+    table = ('<div class="scroll"><table><tbody>' + rows + '</tbody></table>'
+             '</div>') if rows else '<p class="note">未來 14 天內沒有事件。</p>'
+
+    return ('<div class="card"><h2>事件日曆</h2>' + head + table +
+            '<div class="flag">這條策略回測 3.3 年約<b>每月換手一次</b>,'
+            '持有的倉會原封不動地穿過事件 —— 躲不掉。<br>'
+            '所以這裡只做<b>看得見</b>,<b>不改變任何交易決策</b>。'
+            '要擋單就會改變進場日期,而那等於換一條策略,'
+            'Calmar 1.33 要重新驗證。</div></div>')
+
+
 def block_contract() -> str:
     c = _json(DATA / "portfolio_contract.json")
     if not c:
@@ -927,8 +979,8 @@ def render() -> str:
     now = datetime.now(timezone.utc)
     desk = block_account() + block_orders() + block_positions() + block_curve()
     signals = block_signals() + block_monitor()
-    system = (block_correlation() + block_contract() + block_system()
-              + block_wild())
+    system = (block_events() + block_correlation() + block_contract()
+              + block_system() + block_wild())
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">

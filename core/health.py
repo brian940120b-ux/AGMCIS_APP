@@ -188,8 +188,39 @@ def check_contract() -> Check:
     return _guard("實盤資格契約", run)
 
 
+def check_events() -> Check:
+    """
+    事件日曆(第五十一條)。
+
+    「沒有載入日曆」與「今天沒有事件」是兩句完全不同的話,
+    這裡不會把前者講成後者。
+
+    沒有日曆算不健康嗎?**算。** 不是因為今天會出事,是因為
+    這一項本來就該有人維護,而沒有維護是一個要被看見的狀態 ——
+    一份停在半年前的日曆會永遠回「沒有事件」,那是最安靜的壞法。
+    """
+    def run():
+        from portfolio import events
+        # 明確帶路徑,不吃 events 模組自己的常數 —— 這一支的 DATA
+        # 是唯一的來源,測試才有辦法把整組檢查放進沙盒。
+        st = events.status(path=DATA / "events.json")
+        if not st["loaded"]:
+            return Check("事件日曆", False,
+                         "沒有載入 —— 這代表沒有在看,不代表沒有事件")
+        if st["stale"]:
+            return Check("事件日曆", False, st["reason"])
+        today = st["today"]
+        soon = st["upcoming"]
+        if today:
+            names = "、".join(e["kind"] for e in today)
+            return Check("事件日曆", True, f"今天:{names}")
+        return Check("事件日曆", True,
+                     f"今天無事件,未來 14 天內 {len(soon)} 筆")
+    return _guard("事件日曆", run)
+
+
 CHECKS = (check_bookkeeping, check_exchange_specs, check_live_gate,
-          check_risk, check_rate_limit, check_contract)
+          check_risk, check_rate_limit, check_contract, check_events)
 
 
 def report(detailed: bool = False) -> tuple:

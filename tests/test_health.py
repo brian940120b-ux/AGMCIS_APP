@@ -67,6 +67,11 @@ class Sandbox(unittest.TestCase):
                    {"updated": time.time(), "contracts": {"BTC-USDT": {}}})
         self.write("portfolio_risk.json", {"verdict": "ALLOW", "checks": []})
         self.write("portfolio_contract.json", {"passed": 2, "total": 8})
+        from datetime import datetime, timedelta, timezone
+        soon = (datetime.now(timezone.utc) + timedelta(days=3)).date()
+        self.write("events.json", {"events": [
+            {"date": soon.isoformat(), "kind": "FOMC", "level": "HIGH",
+             "note": "測試"}]})
 
 
 class TestItCanSayOk(Sandbox):
@@ -90,6 +95,8 @@ class TestItRefusesToPretend(Sandbox):
         failed = [c["name"] for c in payload["checks"] if not c["ok"]]
         self.assertIn("記帳", failed)
         self.assertIn("交易所規格", failed)
+        # 沒有日曆也算不健康 —— 它代表沒有人在維護這一項
+        self.assertIn("事件日曆", failed)
 
     def test_stale_bookkeeping_fails(self):
         """
