@@ -64,6 +64,11 @@ STOP_MARKET = "STOP_MARKET"
 BUY, SELL = "BUY", "SELL"
 LONG, SHORT = "LONG", "SHORT"
 
+# 單向持倉模式下,positionSide 必須是 BOTH。送 LONG 會被拒,
+# 而錯誤訊息通常只說「參數錯誤」,不會告訴你是哪一個。
+BOTH = "BOTH"
+
+
 # 後備停損要擺在進場價下方多少 %。
 #
 # **None 代表「還沒有人決定」,不是「不設停損」。**
@@ -80,6 +85,27 @@ class NotAllowed(RuntimeError):
 
 class OrderFailed(RuntimeError):
     """交易所拒單。訊息不含簽章(見 private.py)。"""
+
+
+def side_for_mode(mode: str | None, wanted: str = LONG) -> str:
+    """
+    照持倉模式決定 positionSide。
+
+    **mode 是 None(查不到)時拋例外,不預設成任何一邊。**
+    猜錯的代價是下單被拒,而在實盤那可能是「該平的倉沒平掉」。
+    """
+    if mode == "hedge":
+        return wanted
+    if mode == "one_way":
+        return BOTH
+    raise NotAllowed(
+        "查不到帳戶是單向還是雙向持倉模式,而 positionSide 要送什麼"
+        "完全取決於它:\n"
+        "  · 雙向 -> LONG / SHORT\n"
+        "  · 單向 -> BOTH\n"
+        "猜錯會被拒單,而錯誤訊息通常只說「參數錯誤」。\n"
+        "在 BingX 網頁的合約設定裡確認一次,或傳明確的 mode 進來。")
+
 
 
 def client_order_id(strategy: str, symbol: str, signal_day: str,
@@ -175,20 +201,50 @@ def backstop_price(entry: float, pct: float | None = None) -> float:
     return entry * (1 - use / 100.0)
 
 
+def check_size(symbol: str, quantity: float, price: float) -> None:
+    """
+    交易所的最小量與最小名目(第十二條)。
+
+    ═══ 為什麼這裡要再檢查一次 ═══
+    `orders.py` 已經檢查過了,但那條路是「策略產生訂單」。
+    任何**繞過 build_orders() 直接組單**的地方(例如驗證腳本)
+    就沒有人檢查 —— 而 2026-09-09 的事故正是「七個持倉的數量全部
+    不符精度,真的送出去會被直接拒單」。
+
+    紙上看不出來。所以檢查要放在**最靠近送出的地方**,不是只放在
+    產生訂單的地方。
+    """
+    from portfolio import specs
+
+    floor_qty = specs.min_qty(symbol)
+    if quantity < floor_qty:
+        raise NotAllowed(
+            f"{symbol} 數量 {quantity} 低於交易所最小量 {floor_qty} "
+            "—— 送出去一定被拒")
+
+    notional = quantity * price
+    floor_notional = specs.min_notional(symbol)
+    if notional < floor_notional:
+        raise NotAllowed(
+            f"{symbol} 名目 {notional:.4f} 低於交易所最小名目 "
+            f"{floor_notional} —— 送出去一定被拒")
+
+
 def plan_entry(symbol: str, quantity: float, strategy: str, signal_day: str,
-               reason: str = "") -> OrderPlan:
+               position_side: str = LONG, reason: str = "") -> OrderPlan:
     """開倉(只做多 —— 這條策略沒有做空,見 §13/§14 的刻意分歧)。"""
     if quantity <= 0:
         raise ValueError(f"數量要是正數,收到 {quantity}")
     return OrderPlan(
-        symbol=symbol, side=BUY, position_side=LONG, order_type=MARKET,
-        quantity=quantity,
+        symbol=symbol, side=BUY, position_side=position_side,
+        order_type=MARKET, quantity=quantity,
         client_id=client_order_id(strategy, symbol, signal_day, "entry"),
         reason=reason or "開倉")
 
 
 def plan_backstop(symbol: str, quantity: float, entry: float, strategy: str,
-                  signal_day: str, pct: float | None = None) -> OrderPlan:
+                  signal_day: str, pct: float | None = None,
+                  position_side: str = LONG) -> OrderPlan:
     """
     災難後備停損。**只減倉**,永遠不會反手開空。
 
@@ -198,7 +254,7 @@ def plan_backstop(symbol: str, quantity: float, entry: float, strategy: str,
     if quantity <= 0:
         raise ValueError(f"數量要是正數,收到 {quantity}")
     return OrderPlan(
-        symbol=symbol, side=SELL, position_side=LONG,
+        symbol=symbol, side=SELL, position_side=position_side,
         order_type=STOP_MARKET, quantity=quantity,
         stop_price=backstop_price(entry, pct),
         reduce_only=True,

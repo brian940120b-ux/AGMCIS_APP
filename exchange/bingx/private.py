@@ -77,6 +77,9 @@ READ_ONLY = {
     "std_balance": "/openApi/contract/v1/balance",
     "std_positions": "/openApi/contract/v1/allPosition",
     "std_orders": "/openApi/contract/v1/allOrders",
+    # 單向 / 雙向持倉模式。這個查詢決定下單時 positionSide 要送什麼,
+    # 送錯直接被拒 —— 見 position_mode()。
+    "position_mode": "/openApi/swap/v1/positionSide/dual",
 }
 
 # 餘額端點在 v2 / v3 之間改過版。**不猜是哪一個** —— 兩個都問,
@@ -287,6 +290,42 @@ class ReadOnlyClient:
 
     def standard_positions(self) -> Any:
         return self.get(READ_ONLY["std_positions"])
+
+    def position_mode(self) -> str | None:
+        """
+        單向(one-way)還是雙向(hedge)持倉模式。
+
+        ═══ 為什麼這件事非查不可 ═══
+        它決定下單時 `positionSide` 要送什麼:
+
+          · 雙向模式 -> 必須送 LONG 或 SHORT
+          · 單向模式 -> 必須送 BOTH(送 LONG 會被拒)
+
+        **不可以猜。** 猜錯的症狀是下單被拒,而錯誤訊息通常只說
+        「參數錯誤」,不會告訴你是哪一個參數。
+
+        查不到就回 None —— **不回一個預設值**。呼叫端要自己決定
+        「不知道」該怎麼辦,而不是拿到一個看起來確定的答案。
+        """
+        try:
+            data = self.get(READ_ONLY["position_mode"])
+        except PrivateCallFailed as e:
+            log.warning(f"查不到持倉模式:{e}")
+            return None
+
+        raw = data
+        if isinstance(data, dict):
+            raw = data.get("dualSidePosition", data.get("dualSide"))
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            raw = raw.strip().lower()
+            if raw in ("true", "1"):
+                return "hedge"
+            if raw in ("false", "0"):
+                return "one_way"
+            return None
+        return "hedge" if bool(raw) else "one_way"
 
     # ── 自我驗證 ────────────────────────────────────────
     def verify(self) -> dict:

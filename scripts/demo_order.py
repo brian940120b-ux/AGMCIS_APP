@@ -56,6 +56,8 @@ def main() -> int:
                     help="真的送出(不帶就只是乾跑)")
     ap.add_argument("--close", action="store_true",
                     help="平掉這個倉,而不是開倉")
+    ap.add_argument("--side", choices=["BOTH", "LONG"], default=None,
+                    help="持倉模式查不到時,直接指定 positionSide")
     args = ap.parse_args()
 
     load_env()
@@ -76,6 +78,24 @@ def main() -> int:
 
     reader = private.ReadOnlyClient()
 
+    # ── 持倉模式:決定 positionSide 要送什麼 ──────────────
+    # 單向送 BOTH、雙向送 LONG。**猜錯直接被拒**,而錯誤訊息通常
+    # 只說「參數錯誤」,不會告訴你是哪一個參數。
+    mode = reader.position_mode()
+    try:
+        position_side = trade.side_for_mode(mode)
+    except trade.NotAllowed as e:
+        print(f"\n{e}\n")
+        print("  查不到的話,可以直接指定:")
+        print("      --side BOTH   (單向持倉,BingX 預設)")
+        print("      --side LONG   (雙向持倉)\n")
+        if not args.side:
+            return 2
+        position_side = args.side
+    if args.side:
+        position_side = args.side
+    print(f"\n  持倉模式  {mode or '查不到'} -> positionSide={position_side}")
+
     # 現在的倉
     positions = reader.positions(SYMBOL) or []
     rows = [p for p in positions
@@ -88,7 +108,7 @@ def main() -> int:
             return 0
         amount = abs(float(rows[0]["positionAmt"]))
         plan = trade.OrderPlan(
-            symbol=SYMBOL, side=trade.SELL, position_side=trade.LONG,
+            symbol=SYMBOL, side=trade.SELL, position_side=position_side,
             order_type=trade.MARKET, quantity=amount, reduce_only=True,
             client_id=trade.client_order_id("demo", SYMBOL, "close", "exit"),
             reason="平掉驗證用的 Demo 倉")
@@ -122,7 +142,18 @@ def main() -> int:
             print("  把 NOTIONAL_VST 調大一點再試。\n")
             return 1
 
+        # 交易所的最小量與最小名目(第十二條)。
+        # 這一條之前漏了 —— 這支繞過 build_orders() 直接組單,
+        # 而那條路上的檢查在這裡沒有人做。
+        try:
+            trade.check_size(SYMBOL, quantity, price)
+        except trade.NotAllowed as e:
+            print(f"\n  ✗ {e}")
+            print(f"    把 NOTIONAL_VST(目前 {NOTIONAL_VST})調大再試。\n")
+            return 1
+
         plan = trade.plan_entry(SYMBOL, quantity, "demo", "shape-check",
+                                position_side=position_side,
                                 reason=f"驗證持倉欄位形狀(約 "
                                        f"{quantity * price:.2f} VST)")
 

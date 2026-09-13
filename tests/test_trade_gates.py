@@ -302,3 +302,79 @@ class TestProtectionMustBeOnTheExchange(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPositionSideMustNotBeGuessed(unittest.TestCase):
+    """
+    單向持倉模式下 positionSide 必須是 BOTH,雙向必須是 LONG/SHORT。
+    猜錯會被拒單,而錯誤訊息通常只說「參數錯誤」。
+    """
+
+    def test_hedge_mode_uses_long(self):
+        self.assertEqual(trade.side_for_mode("hedge"), trade.LONG)
+
+    def test_one_way_mode_uses_both(self):
+        self.assertEqual(trade.side_for_mode("one_way"), trade.BOTH)
+
+    def test_unknown_mode_raises_rather_than_defaulting(self):
+        """
+        **這是重點。** 預設成任何一邊都是猜,而猜錯在實盤可能是
+        「該平的倉沒平掉」。
+        """
+        with self.assertRaises(trade.NotAllowed) as caught:
+            trade.side_for_mode(None)
+
+        text = str(caught.exception)
+        self.assertIn("BOTH", text)
+        self.assertIn("LONG", text)
+
+    def test_the_probe_returns_none_when_it_cannot_tell(self):
+        session = FakeSession([FakeResponse(status=404)])
+        reader = private.ReadOnlyClient(CREDS, mode="demo", session=session)
+
+        self.assertIsNone(reader.position_mode())
+
+    def test_the_probe_reads_dual_side_position(self):
+        for raw, expected in ((True, "hedge"), (False, "one_way"),
+                              ("true", "hedge"), ("false", "one_way")):
+            with self.subTest(raw=raw):
+                session = FakeSession([FakeResponse(
+                    body={"code": 0, "data": {"dualSidePosition": raw}})])
+                reader = private.ReadOnlyClient(CREDS, mode="demo",
+                                                session=session)
+                self.assertEqual(reader.position_mode(), expected)
+
+
+class TestMinimumSizeIsCheckedNearTheSend(unittest.TestCase):
+    """
+    2026-09-09 的事故:七個持倉的數量全部不符精度,真的送出去會被
+    直接拒單 —— 而紙上完全看不出來。
+
+    orders.py 已經檢查過,但那是「策略產生訂單」那條路。
+    任何繞過 build_orders() 直接組單的地方都沒有人檢查。
+    """
+
+    def fake_specs(self, min_qty=0.001, min_notional=5.0):
+        from unittest.mock import patch
+        from portfolio import specs
+        return (patch.object(specs, "min_qty", lambda s: min_qty),
+                patch.object(specs, "min_notional", lambda s: min_notional))
+
+    def test_a_size_above_both_floors_passes(self):
+        a, b = self.fake_specs()
+        with a, b:
+            trade.check_size("BTC-USDT", 0.01, 80000.0)
+
+    def test_below_the_minimum_quantity_is_refused(self):
+        a, b = self.fake_specs(min_qty=0.01)
+        with a, b:
+            with self.assertRaises(trade.NotAllowed) as caught:
+                trade.check_size("BTC-USDT", 0.001, 80000.0)
+        self.assertIn("最小量", str(caught.exception))
+
+    def test_below_the_minimum_notional_is_refused(self):
+        a, b = self.fake_specs(min_qty=0.00001, min_notional=100.0)
+        with a, b:
+            with self.assertRaises(trade.NotAllowed) as caught:
+                trade.check_size("BTC-USDT", 0.0001, 80000.0)
+        self.assertIn("最小名目", str(caught.exception))
