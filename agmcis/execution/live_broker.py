@@ -48,6 +48,7 @@ LiveBroker:真的會送出真實訂單的那一個。
 import logging
 import time
 
+from agmcis.core import numbers
 from agmcis.core.enums import MarketType, OrderSide, OrderType, PositionSide
 from agmcis.execution.broker import Broker, FillResult
 
@@ -95,14 +96,9 @@ _ORDER_STATES = {
 HISTORY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000
 
 
-def _as_float(value):
-    """None 就是 None。缺資料不可以變成 0 —— 0 是一個會被拿去算的數字。"""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+# None 就是 None。缺資料不可以變成 0 —— 0 是一個會被拿去算的數字。
+# 規則寫在 agmcis/core/numbers.py。
+_as_float = numbers.as_float
 
 
 class LiveBroker(Broker):

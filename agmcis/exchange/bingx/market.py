@@ -19,18 +19,16 @@ long/short 比與爆倉,而標記價不保證出現在 ticker 裡。
 """
 import logging
 
+from agmcis.core import numbers
 from agmcis.core.enums import MarketType
 from agmcis.exchange.bingx.client import ccxt_type
 
 logger = logging.getLogger("agmcis.exchange.bingx.market")
 
 
-def as_float(value):
-    """轉不動就回 None。回 0 會被當成「標記價是 0」,那比沒有更糟。"""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+# 轉不動就回 None。回 0 會被當成「標記價是 0」,那比沒有更糟。
+# 規則寫在 agmcis/core/numbers.py —— 同一段轉型原本散在三個地方。
+as_float = numbers.as_float
 
 
 def _pick(raw, *keys):

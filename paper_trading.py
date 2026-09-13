@@ -34,6 +34,7 @@ from database_service import (
     reduce_trade_atomic,
     update_account,
 )
+from agmcis.core import numbers
 from agmcis.execution import paper_costs
 from direction import is_directional, is_long, stop_loss_is_valid, take_profit_is_valid
 from logger_service import logger
@@ -450,11 +451,17 @@ def _cost_summary(closed_trades):
     with_costs = [t for t in closed_trades if t.get("cost_basis") == "WITH_COSTS"]
     legacy_count = len(closed_trades) - len(with_costs)
 
-    fees = sum((t.get("entry_fee") or 0) + (t.get("exit_fee") or 0)
-               for t in with_costs)
-    funding = sum(t.get("funding_usdt") or 0 for t in with_costs)
-    gross = sum(t.get("gross_pnl_usdt") or 0 for t in with_costs)
-    net = sum(t.get("pnl_usdt") or 0 for t in with_costs)
+    # `or 0` 會把「這一筆沒有量到」安靜地變成「這一筆是零」,
+    # 然後總成本就少算了,而少算多少完全看不出來(第九十四節)。
+    # numbers.sum_field 會把量不到的筆數一起回報。
+    fees, fees_missing = numbers.sum_fields(with_costs, "entry_fee", "exit_fee")
+    funding, funding_missing = numbers.sum_field(with_costs, "funding_usdt")
+    gross, gross_missing = numbers.sum_field(with_costs, "gross_pnl_usdt")
+    net, net_missing = numbers.sum_field(with_costs, "pnl_usdt")
+
+    # 毛損益與淨損益少了任何一邊,兩者的差就不是成本拖累。
+    # 那個數字寧可是 None,也不要是一個算錯的數字。
+    drag = None if (gross_missing or net_missing) else round(gross - net, 4)
 
     return {
         "trades_with_costs": len(with_costs),
@@ -463,7 +470,14 @@ def _cost_summary(closed_trades):
         "total_funding": round(funding, 4),
         "gross_pnl": round(gross, 4),
         "net_pnl": round(net, 4),
-        "cost_drag": round(gross - net, 4),
+        "cost_drag": drag,
+        # 這幾筆的數字量不到,所以沒有進上面的總和。
+        "unmeasured": {
+            "fees": fees_missing,
+            "funding": funding_missing,
+            "gross_pnl": gross_missing,
+            "net_pnl": net_missing,
+        },
         "liquidations": len([
             t for t in with_costs if t.get("close_reason") == "強制平倉"
         ]),

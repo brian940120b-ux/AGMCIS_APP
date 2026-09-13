@@ -178,6 +178,17 @@ async function loadCosts() {
            Phase 10 之前的交易不含成本,未計入上表。</p>`
         : "";
 
+    // 量不到的筆數要看得見。只在後端記錄而不顯示,等於沒有記錄 ——
+    // 上面那些總和會少算,而少算多少沒有人知道。
+    const unmeasured = costs.unmeasured || {};
+    const gaps = Object.entries(unmeasured)
+        .filter(([, count]) => count)
+        .map(([field, count]) => `${esc(field)} ${esc(count)} 筆`);
+    const missing = gaps.length
+        ? `<p class="neg">⚠️ 有欄位量不到,<b>沒有</b>計入上表的總和:
+           ${gaps.join("、")}。成本拖累因此顯示為 -。</p>`
+        : "";
+
     render("costs", `
         <table class="tp">
           <tr><th>含成本交易筆數</th><td>${esc(costs.trades_with_costs ?? 0)}</td></tr>
@@ -188,7 +199,7 @@ async function loadCosts() {
           <tr><th>成本拖累</th><td>${num(costs.cost_drag, 4)} USDT</td></tr>
           <tr><th>強制平倉次數</th><td>${esc(costs.liquidations ?? 0)}</td></tr>
           <tr><th>單趟往返成本</th><td>${num(model.round_trip_cost_pct * 100, 4)}%</td></tr>
-        </table>${legacy}`);
+        </table>${legacy}${missing}`);
 }
 
 /* ---------------- 自我檢討 ---------------- */

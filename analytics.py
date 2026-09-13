@@ -15,6 +15,7 @@ Phase 0.5 之前寫入的已平倉資料,損益漏乘了槓桿。那些歷史數
   - 舊基準的交易另外列在 legacy 區塊,並標明不可與新資料直接比較
   - 兩者的筆數都會回報,不會讓人以為交易紀錄消失了
 """
+from agmcis.core import numbers
 from config import PAPER_START_BALANCE
 from paper_trading import load_account, load_trades
 
@@ -44,13 +45,7 @@ def pnl_of(trade):
     會讓「已實現收益」少算、讓勝率的分母多一個非勝利。
     **算不出來就排除,並且把排除幾筆講出來**(第九十四節)。
     """
-    value = trade.get("pnl_usdt")
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return numbers.field_of(trade, "pnl_usdt")
 
 
 def with_pnl(closed_trades):

@@ -321,5 +321,92 @@ class TestCostSummaryKeepsLegacyRowsSeparate(unittest.TestCase):
         self.assertEqual(summary["cost_drag"], 0)
 
 
+class TestMissingCostFieldsAreNotCountedAsZero(unittest.TestCase):
+    """
+    第九十四節。`or 0` 會把「這一筆沒有量到」安靜地變成「這一筆是零」,
+    然後總成本就少算了 —— 而少算多少完全看不出來。
+
+    這一類錯誤最貴的地方在於它是隱形的:總和看起來很正常。
+    """
+
+    def rows(self, **overrides):
+        row = {
+            "cost_basis": "WITH_COSTS", "entry_fee": 1.0, "exit_fee": 1.0,
+            "funding_usdt": 0.5, "gross_pnl_usdt": 100.0, "pnl_usdt": 97.5,
+        }
+        row.update(overrides)
+        return [row]
+
+    def test_a_null_funding_is_excluded_and_counted(self):
+        summary = paper_trading._cost_summary(self.rows(funding_usdt=None))
+
+        self.assertEqual(summary["total_funding"], 0)
+        self.assertEqual(summary["unmeasured"]["funding"], 1)
+
+    def test_a_real_zero_is_not_counted_as_missing(self):
+        """0.0 是一個量到的值。它跟 None 不是同一件事。"""
+        summary = paper_trading._cost_summary(self.rows(funding_usdt=0.0))
+
+        self.assertEqual(summary["total_funding"], 0)
+        self.assertEqual(summary["unmeasured"]["funding"], 0)
+
+    def test_half_a_fee_pair_counts_as_missing(self):
+        """
+        只加得到一半的手續費,比完全沒有數字更誤導 ——
+        它看起來像一個完整的答案。
+        """
+        summary = paper_trading._cost_summary(self.rows(exit_fee=None))
+
+        self.assertEqual(summary["total_fees"], 0)
+        self.assertEqual(summary["unmeasured"]["fees"], 1)
+
+    def test_cost_drag_is_none_when_either_side_is_unmeasured(self):
+        """
+        毛損益少了一筆,兩者的差就不是成本拖累。
+        那個數字寧可是 None,也不要是一個算錯的數字。
+        """
+        summary = paper_trading._cost_summary(self.rows(gross_pnl_usdt=None))
+
+        self.assertIsNone(summary["cost_drag"])
+
+    def test_a_complete_row_still_reports_the_drag(self):
+        summary = paper_trading._cost_summary(self.rows())
+
+        self.assertAlmostEqual(summary["cost_drag"], 2.5, places=6)
+        self.assertEqual(
+            summary["unmeasured"],
+            {"fees": 0, "funding": 0, "gross_pnl": 0, "net_pnl": 0},
+        )
+
+    def test_an_unparseable_value_is_missing_not_zero(self):
+        summary = paper_trading._cost_summary(self.rows(funding_usdt="n/a"))
+
+        self.assertEqual(summary["unmeasured"]["funding"], 1)
+
+
+class TestTheNumberRulesAreSharedNotCopied(unittest.TestCase):
+    """
+    同一段 None-safe 轉型原本散在三個地方(BingX market mixin、
+    LiveBroker、analytics)。三份就是三種可能不一致的行為。
+    """
+
+    def test_the_three_call_sites_use_the_same_function(self):
+        from agmcis.core import numbers
+        from agmcis.exchange.bingx import market
+        from agmcis.execution import live_broker
+
+        self.assertIs(market.as_float, numbers.as_float)
+        self.assertIs(live_broker._as_float, numbers.as_float)
+
+    def test_analytics_pnl_uses_it_too(self):
+        import analytics
+        from agmcis.core import numbers
+
+        self.assertIsNone(analytics.pnl_of({"pnl_usdt": None}))
+        self.assertIsNone(analytics.pnl_of({}))
+        self.assertEqual(analytics.pnl_of({"pnl_usdt": "1.5"}), 1.5)
+        self.assertIsNone(numbers.field_of({"x": "abc"}, "x"))
+
+
 if __name__ == "__main__":
     unittest.main()
