@@ -366,3 +366,50 @@ def verify(ticket: Ticket, position, qty_tolerance: float = 1e-8
                             else -diff * 100.0)
 
     return out
+
+
+# ══════════════════════════════════════════════════════════
+# 從今日計畫產生指令單
+# ══════════════════════════════════════════════════════════
+#
+# 這一段本來住在 scripts/ticket.py 裡,2026-09-13 搬過來 ——
+# 因為面板也要用它,而**面板不該 import 一支 CLI 腳本**:
+# 那會讓「跑腳本」的副作用(argparse、interpreter.require)
+# 變成網頁請求的一部分。
+
+def app_symbol(symbol: str) -> str:
+    """`BTC-USDT` → `BTCUSDT`。
+
+    App 與 allPosition 用的是無槓的寫法(實測 FLOCKUSDT),
+    而策略內部用有槓的。轉換只做一次,放在這裡。
+    """
+    return symbol.replace("-", "")
+
+
+def make_tickets(plan: dict, stop_pct: float, leverage: float) -> tuple:
+    """把今日訂單變成指令單。
+
+    回 (開得出來的, 開不出來的)。**開不出來的不會消失** ——
+    一張被閘門擋下的單如果安靜地不見了,看板上就會是「今天沒事」,
+    而實際上是「今天有事,但系統拒絕告訴你」。
+    """
+    made, refused = [], []
+    for order in plan.get("orders") or []:
+        is_close = getattr(order, "weight_to", 0.0) == 0.0
+        action = (CLOSE if is_close else
+                  OPEN_LONG if order.side == "BUY" else OPEN_SHORT)
+        try:
+            made.append(build(
+                symbol=app_symbol(order.symbol),
+                action=action,
+                quantity=abs(order.qty),
+                price=order.price,
+                leverage=leverage,
+                stop_pct=stop_pct,
+                strategy=str(plan.get("cfg").strategy if plan.get("cfg")
+                             else ""),
+                signal_day=str(plan.get("signal_day") or ""),
+            ))
+        except TicketRefused as e:
+            refused.append((order.symbol, str(e)))
+    return made, refused

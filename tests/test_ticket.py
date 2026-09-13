@@ -189,3 +189,74 @@ def test_close_tickets_do_not_invent_a_direction():
     assert t.est_liq_price is None
     ex = verify(t, a_position(side="SHORT"))
     assert not any("方向" in m for m in ex.mismatches)
+
+
+# ══════════════════════════════════════════════════════════
+# 五、從今日計畫產生指令單
+# ══════════════════════════════════════════════════════════
+from dataclasses import dataclass  # noqa: E402
+
+from portfolio.ticket import app_symbol, make_tickets  # noqa: E402
+
+
+@dataclass
+class FakeOrder:
+    symbol: str
+    side: str
+    qty: float
+    price: float
+    weight_to: float = 0.1
+
+
+class FakeCfg:
+    strategy = "50MA"
+
+
+def a_plan(orders):
+    return {"orders": orders, "cfg": FakeCfg(), "signal_day": "2026-09-13"}
+
+
+def test_symbols_are_converted_to_the_app_spelling():
+    """App 與 allPosition 用無槓的寫法(實測 FLOCKUSDT)。"""
+    assert app_symbol("BTC-USDT") == "BTCUSDT"
+    assert app_symbol("BTCUSDT") == "BTCUSDT"
+
+
+def test_a_zero_target_weight_becomes_a_close_not_a_short():
+    """目標歸零是**平倉**,不是反手做空。搞混會開出一個反向的新倉。"""
+    made, refused = make_tickets(
+        a_plan([FakeOrder("BTC-USDT", "SELL", 0.01, 76000.0, weight_to=0.0)]),
+        stop_pct=25.0, leverage=3.0)
+    assert not refused
+    assert made[0].action == CLOSE
+    assert made[0].position_side is None
+
+
+def test_a_refused_ticket_is_reported_not_dropped():
+    """一張被閘門擋下的單如果安靜地不見了,看板上就會是「今天沒事」。
+
+    而實際上是「今天有事,但系統拒絕告訴你」。
+    """
+    made, refused = make_tickets(
+        a_plan([FakeOrder("BTC-USDT", "BUY", 0.01, 76000.0)]),
+        stop_pct=25.0, leverage=20.0)          # 20× 的強平比停損還近
+    assert made == []
+    assert len(refused) == 1
+    assert refused[0][0] == "BTC-USDT"
+    assert "強平" in refused[0][1]
+
+
+def test_the_decided_backstop_survives_the_leverage_cap():
+    """執政官裁定的 25% + 上限 3× 必須開得出單來。
+
+    這兩個數字是分開決定的,而它們**必須相容** —— 不相容的話
+    系統每天都會印一張「開不出來」,而沒有人會發現那是設定衝突。
+    """
+    from exchange.bingx.trade import BACKSTOP_PCT
+    from portfolio.paper import LEVERAGE_CAP
+
+    made, refused = make_tickets(
+        a_plan([FakeOrder("BTC-USDT", "BUY", 0.01, 76000.0)]),
+        stop_pct=BACKSTOP_PCT, leverage=LEVERAGE_CAP)
+    assert not refused, refused
+    assert made[0].stop_price == pytest.approx(76000.0 * 0.75)

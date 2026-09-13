@@ -291,6 +291,20 @@ tbody tr:first-child td{border-top:none}
 .flag.ok{border-color:var(--up-bd);background:var(--up-bg)}
 .flag b{font-weight:700;color:var(--ink)}
 
+/* 指令單。刻意做得像一張紙 —— 它是要照著按的東西,不是一份報表。
+   單欄:在 iPhone 上要能一眼看完一張,不用左右捲。 */
+.tickets{display:grid;gap:12px;margin-top:12px}
+.ticket{border:1px solid var(--line);border-radius:12px;padding:12px 13px;
+ background:var(--el)}
+.ticket .t-head{display:flex;align-items:center;gap:10px;
+ padding-bottom:9px;margin-bottom:4px;border-bottom:1px solid var(--line)}
+.ticket .t-head .sym{font:700 17px var(--mono);letter-spacing:.4px}
+.ticket table{width:100%;border-collapse:collapse}
+.ticket td{padding:6px 0;vertical-align:top;font-size:13px}
+.ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
+.ticket td:last-child{font-family:var(--mono);text-align:right}
+.ticket .why{text-align:right}
+
 code{font:11.5px var(--mono);background:var(--el2);padding:2px 6px;
  border-radius:5px;border:1px solid var(--line)}
 
@@ -409,7 +423,7 @@ def block_orders() -> str:
             return {"error": f"{type(e).__name__}: {e}"}
     p = _cached("plan", 180, _plan)
     if "error" in p:
-        return ('<div class="card"><h2>今日訂單</h2>'
+        return ('<div class="card"><h2>今日訂單(紙上帳本)</h2>'
                 f'<p class="note">尚未就緒:{html.escape(p["error"])}</p></div>')
     rows = []
     for o in p.get("orders", []):
@@ -431,12 +445,171 @@ def block_orders() -> str:
         '這條策略本來就不常動(回測 3.3 年約每月換手一次),'
         '換手少正是它摩擦低的原因。</p>')
     done = "已執行" if p.get("already_done") else "待執行"
-    return ('<div class="card"><h2>今日訂單</h2>'
+    return ('<div class="card"><h2>今日訂單(紙上帳本)</h2>'
             f'<p class="note">訊號日 {p["signal_day"][:10]} 收盤 → 成交日 '
             f'{p["exec_day"][:10]} 開盤 · <b>{done}</b>。'
             '出場線 = 該幣的 50 日均線,也就是策略本身的出場規則 —— '
             '<b>不是另外挑的百分比</b>,它每天跟著均線移動。</p>'
-            + body + '</div>')
+            + body
+            + '<div class="flag">⚠️ 這一塊是<b>紙上帳本自己成交的</b>。'
+              '要你真的去 App 按的是最上面那塊<b>指令單</b> —— '
+              '兩個混在一起,遲早會有人以為紙上動了實際就動了。</div>'
+            '</div>')
+
+
+def block_tickets() -> str:
+    """指令單 —— **這一塊是整個面板現在最重要的東西。**
+
+    2026-09-13:執政官選定 U 本位標準合約,而那個產品**沒有下單 API**
+    (GET+POST 都問過,對照組證實)。所以整條鏈只有最後一吋是人做的,
+    而那一吋就在這裡:系統把數量、槓桿、停損算好,人照著按。
+
+    ⚠️ 這一塊不是「今日訂單」的另一種寫法。「今日訂單」是**紙上帳本**
+    自己成交的那些;指令單是**要你真的去 App 按**的那些。兩個混在
+    一起,遲早會有人以為紙上動了實際就動了。
+    """
+    def _build():
+        try:
+            from exchange.bingx.trade import BACKSTOP_PCT
+            from portfolio.paper import LEVERAGE_CAP, plan
+            from portfolio.ticket import make_tickets
+            p = plan()
+            if p.get("error"):
+                return {"error": p["error"]}
+            if BACKSTOP_PCT is None:
+                return {"error": "BACKSTOP_PCT 還沒有人決定(§102)"}
+            made, refused = make_tickets(p, BACKSTOP_PCT, LEVERAGE_CAP)
+            return {"made": made, "refused": refused, "plan": p}
+        except Exception as e:                       # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("tickets", 180, _build)
+    head = ('<div class="card"><h2>指令單 —— 要你自己按的</h2>'
+            '<p class="note">U 本位標準合約<b>沒有下單 API</b>'
+            '(2026-09-13 GET+POST 各問一次,對照組證實)。'
+            '訊號、部位大小、風控、強平距離全部自動,'
+            '<b>只有送單這一吋是手動的</b>。</p>')
+
+    if got.get("error"):
+        return (head + '<p class="note">算不出來:'
+                f'{html.escape(str(got["error"]))}</p></div>')
+
+    made = got.get("made") or []
+    refused = got.get("refused") or []
+
+    if not made and not refused:
+        return (head + '<p class="note">今天沒有要按的。目標配置與'
+                '現有持倉一致 —— 這條策略本來就不常動。</p></div>')
+
+    cards = []
+    for t in made:
+        warn = "".join(f'<div class="why">⚠️ {html.escape(w)}</div>'
+                       for w in t.warnings)
+        liq = (f'{t.est_liq_price:,.6g}' if t.est_liq_price is not None
+               else '—')
+        margin = (f'{t.est_margin:,.2f}' if t.est_margin is not None else '—')
+        cards.append(
+            '<div class="ticket">'
+            f'<div class="t-head"><span class="sym">'
+            f'{html.escape(t.symbol)}</span>'
+            f'<span class="pill {"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
+            f'{html.escape(t.tap)}</span></div>'
+            '<table><tbody>'
+            f'<tr><td>數量</td><td><b>{t.quantity:.8g}</b></td></tr>'
+            f'<tr><td>槓桿</td><td><b>{t.leverage:g}×</b></td></tr>'
+            f'<tr><td>保證金</td><td><b>{html.escape(t.margin_mode)}</b></td></tr>'
+            f'<tr><td>停損</td><td class="down"><b>{t.stop_price:,.6g}</b>'
+            '<div class="why">一定要設 —— 這是機器死掉時的唯一保護</div>'
+            '</td></tr>'
+            f'<tr><td>預估佔用</td><td>{margin} USDT</td></tr>'
+            f'<tr><td>預估強平</td><td>{liq}'
+            '<div class="why">我方算的,交易所這個產品不回</div></td></tr>'
+            f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
+            f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
+            '</td></tr>'
+            f'<tr><td>有效到</td><td>{html.escape(t.valid_until_utc)}</td></tr>'
+            f'<tr><td>單號</td><td class="why">{html.escape(t.ticket_id)}</td>'
+            '</tr>'
+            '</tbody></table>' + warn + '</div>')
+
+    body = '<div class="tickets">' + "".join(cards) + '</div>' if cards else ''
+
+    if refused:
+        body += ('<h3 class="sub">開不出來的</h3>' + "".join(
+            f'<div class="flag"><b>{html.escape(sym)}</b><br>'
+            f'{html.escape(why)}</div>' for sym, why in refused))
+
+    from portfolio.costs import standard_cost_caveat
+    caveat = standard_cost_caveat()
+    tail = (f'<div class="flag">⚠️ {html.escape(caveat)}</div>'
+            if caveat else '')
+    tail += ('<div class="flag">按完之後在 VPS 上跑 '
+             '<code>scripts/ticket.py --verify</code> —— 它會拿交易所實際的'
+             '持倉回頭比對數量、方向、槓桿、保證金模式。'
+             '<b>手動下單的系統不知道自己送了什麼</b>,那一步是唯一的檢查。'
+             '</div>')
+    return head + body + tail + '</div>'
+
+
+def block_gaps() -> str:
+    """還沒關掉的洞 —— **把它放在面板上,不是放在某份文件裡。**
+
+    2026-09-13 測試組死了 73.7 小時沒人管,而巡檢每 10 分鐘就報一次。
+    那次的教訓不是「要多報一點」,是**沒有被看見的警告等於不存在**。
+    """
+    from exchange.bingx.trade import BACKSTOP_DECISION, BACKSTOP_PCT
+    from portfolio.costs import STANDARD_COSTS_VERIFIED
+
+    rows = []
+
+    def gap(ok: bool, name: str, detail: str) -> None:
+        rows.append(
+            f'<tr><td class="{"up" if ok else "down"}">'
+            f'{"✓" if ok else "✗"}</td>'
+            f'<td class="sym">{html.escape(name)}</td>'
+            f'<td><div class="why">{detail}</div></td></tr>')
+
+    gap(BACKSTOP_PCT is not None, "後備停損",
+        (f'<b>{BACKSTOP_PCT}%</b> —— '
+         f'{html.escape(str(BACKSTOP_DECISION["decided_by"]))} '
+         f'{html.escape(str(BACKSTOP_DECISION["decided_on"]))} 裁定(§102)。'
+         '20% 是分水嶺:從那裡開始被掃出去的部位沒有一段最後是賺的;'
+         '選 25% 是因為這是<b>災難後備</b>,20% 每二十次進場就碰一次,太常。'
+         if BACKSTOP_PCT is not None else
+         '<b>還沒有人決定</b>。指令單開不出來 —— '
+         '一張沒有停損的單不該存在(§19)。'))
+
+    gap(False, "交易池",
+        'U 本位標準合約<b>沒有 contracts 端點</b>,程式問不到有哪些幣'
+        '可以交易。<code>allOrders</code> 認得 SOL / BNB / AAVE / UNI,'
+        '但那是<b>必要條件,不是充分條件</b>(它可能拿全交易所的代號表'
+        '驗證)。<b>只能在 App 上把那份清單翻到底。</b>'
+        '若真的缺,交易池要改,而回測的 Calmar 1.33 就不是這個池子的'
+        '數字了,要重跑(§6)。')
+
+    gap(STANDARD_COSTS_VERIFIED, "成本",
+        '手續費、資金費、滑點<b>一個字都沒驗證過</b>。'
+        'costs.py 的每個數字都是量<b>永續</b>量出來的 —— '
+        '不要因為「都是 BingX、都是 U 本位」就沿用,'
+        '那正是舊系統十一次「兩把尺」的形狀。'
+        '<code>allOrders</code> 的 cumQuote 與 executedQty 比對得出實際'
+        '成交價,有幾筆標準合約成交就量得出來。')
+
+    gap(False, "持倉欄位",
+        '這個產品的持倉回應<b>沒有 liquidationPrice 也沒有 markPrice</b>'
+        '(官方欄位表確認),餘額<b>沒有 equity</b>。'
+        '強平價由我方算(線性合約,公式與 account.py 同一條)—— '
+        '但那個估計<b>偏樂觀</b>:MMR 取定值、未計維持保證金分層,'
+        '實際強平會更近。而且目前 0 筆標準合約持倉,'
+        '<b>這套補值邏輯到今天還沒有跑過真實樣本</b>。')
+
+    return ('<div class="card"><h2>還沒關掉的洞</h2>'
+            '<div class="scroll"><table><tbody>' + "".join(rows)
+            + '</tbody></table></div>'
+            '<div class="flag">2026-09-13:測試組死了 73.7 小時沒人管,'
+            '而巡檢每 10 分鐘就報一次。那次的教訓不是「要多報一點」,是'
+            '<b>沒有被看見的警告等於不存在</b> —— 所以這一塊在面板上,'
+            '不在某份文件裡。</div></div>')
 
 
 def block_positions() -> str:
@@ -821,10 +994,13 @@ def block_system() -> str:
 # ══════════════════════════════════════════════════════════
 def render() -> str:
     now = datetime.now(timezone.utc)
-    desk = block_account() + block_orders() + block_positions() + block_curve()
+    # 指令單排在第一個 —— 它是**現在唯一需要人動手**的東西。
+    # 帳戶餘額很好看,但看它不會讓任何事情發生。
+    desk = (block_tickets() + block_account() + block_orders()
+            + block_positions() + block_curve())
     signals = block_signals() + block_monitor()
-    system = (block_events() + block_correlation() + block_contract()
-              + block_system())
+    system = (block_gaps() + block_events() + block_correlation()
+              + block_contract() + block_system())
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -834,6 +1010,7 @@ def render() -> str:
 <div class="wrap">
 <header><h1>AGMCIS</h1>
   <span class="tag paper">PAPER · 模擬金</span>
+  <span class="tag">U 本位標準合約 · 手動送單</span>
   <span class="tag">{now:%m-%d %H:%M} UTC</span>
 </header>
 <nav>
@@ -844,7 +1021,7 @@ def render() -> str:
 <div class="tabpane on" id="desk">{desk}</div>
 <div class="tabpane" id="signals">{signals}</div>
 <div class="tabpane" id="system">{system}</div>
-<footer>紙上交易,非真錢 · 每日 00:30 UTC 記帳</footer>
+<footer>紙上帳本非真錢 · 每日 00:30 UTC 記帳 · U 本位標準合約沒有下單 API,實際送單由人在 App 完成</footer>
 </div>
 <script>
 document.querySelectorAll('nav a').forEach(function(a){{

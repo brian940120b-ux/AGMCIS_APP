@@ -52,41 +52,9 @@ interpreter.require()
 
 from core.config import load_env
 from portfolio import paper, ticket as tk
+from portfolio.ticket import app_symbol, make_tickets  # noqa: F401
 
 LINE = "═" * 50
-
-
-def app_symbol(symbol: str) -> str:
-    """`BTC-USDT` → `BTCUSDT`。
-
-    App 與 allPosition 用的是無槓的寫法(實測 FLOCKUSDT),
-    而策略內部用有槓的。轉換只做一次,放在這裡。
-    """
-    return symbol.replace("-", "")
-
-
-def make_tickets(plan: dict, stop_pct: float, leverage: float) -> tuple:
-    """把今日訂單變成指令單。**開不出來的那些不會消失,會被列出來。**"""
-    made, refused = [], []
-    for order in plan.get("orders") or []:
-        is_close = getattr(order, "weight_to", 0.0) == 0.0
-        action = (tk.CLOSE if is_close else
-                  tk.OPEN_LONG if order.side == "BUY" else tk.OPEN_SHORT)
-        try:
-            made.append(tk.build(
-                symbol=app_symbol(order.symbol),
-                action=action,
-                quantity=abs(order.qty),
-                price=order.price,
-                leverage=leverage,
-                stop_pct=stop_pct,
-                strategy=str(plan.get("cfg").strategy if plan.get("cfg")
-                             else ""),
-                signal_day=str(plan.get("signal_day") or ""),
-            ))
-        except tk.TicketRefused as e:
-            refused.append((order.symbol, str(e)))
-    return made, refused
 
 
 def cmd_show(args) -> int:
