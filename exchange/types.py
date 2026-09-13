@@ -20,10 +20,35 @@ from enum import Enum
 
 
 class MarketType(str, Enum):
-    """市場類型。**任何合約規格、帳本、訂單都必須標明。**"""
+    """市場類型 —— **這是「交易所把它放在哪個產品線」,不是合約的性質。**
 
-    PERPETUAL = "PERPETUAL"     # 永續:無到期日,收資金費
-    STANDARD = "STANDARD"       # 標準:有到期日,不收資金費
+    2026-09-13 訂正。原本這裡寫著:
+
+        STANDARD = 標準:有到期日,不收資金費
+
+    兩句都是錯的,而且錯得很有代表性 —— 它是照「標準期貨」這個
+    **中文詞的字面意思**推論出來的,沒有人去問過交易所。
+
+    BingX App 裡的「標準合約」有兩種,官方 API 文件對它們的說法是:
+
+      · U 本位標準合約  → /openApi/contract/v1
+        只有三個 GET 端點(allPosition / allOrders / balance),
+        **沒有下單 API**。文件自陳 "currently in internal testing"。
+
+      · 幣本位標準合約  → /openApi/cswap/v1
+        官方文件的標題是 **"Coin-M perpetual contracts"** ——
+        它是**永續**:沒有到期日,而且**有資金費**
+        (/openApi/cswap/v1/market/premiumIndex 回 lastFundingRate,
+        實測 2026-09-13 拿到 0.000071)。
+        它跟 U 本位永續的真正差別是**以幣結算**(反向合約)。
+
+    所以「STANDARD」在這份程式碼裡的意思,從今天起只剩一個:
+    **交易所把它歸在標準合約產品線**。到期日、資金費、正向反向,
+    一律看 Contract 上的欄位,**不准從這個 enum 推論**。
+    """
+
+    PERPETUAL = "PERPETUAL"     # BingX 產品線:永續合約(U 本位)
+    STANDARD = "STANDARD"       # BingX 產品線:標準合約(U 本位 / 幣本位)
     SPOT = "SPOT"               # 現貨:無槓桿、無強平
 
 
@@ -86,13 +111,38 @@ class Contract:
     margin_asset: str = "USDT"
     settlement_asset: str = "USDT"
     tradable: bool = True
-    # 標準合約才有:到期時間(永續為 None)
+    #: 到期時間。永續(含幣本位標準合約)為 None。
     expiry: str | None = None
+
+    #: 反向合約(幣本位):面額以 USD 計價,盈虧與保證金**以幣結算**。
+    #:
+    #: 這一個布林值會改變**每一條**損益與部位大小的算式:
+    #:   正向(inverse=False):名目 = 數量 × 價格         盈虧以 USDT 計
+    #:   反向(inverse=True) :名目 = 張數 × 面額(USD)  盈虧以幣計
+    #: 反向合約的盈虧對價格是**非線性**的,做多的下檔損失有上限、
+    #: 做空的上檔損失無上限 —— 跟正向合約剛好相反。
+    #: account.py / paper.py 目前只寫了正向,所以 inverse=True 的標的
+    #: **在帳本改寫完成前不得下單**。
+    inverse: bool = False
+
+    #: 收不收資金費。**None = 沒有人查證過,不是「不收」。**
+    #:
+    #: 2026-09-13 之前這裡是一個從 market_type 推導的 property,
+    #: 它對「標準合約」給出的答案是錯的(見 MarketType 的說明)。
+    #: 一個推導出來的錯答案,比一個承認不知道的 None 危險得多 ——
+    #: 少算資金費,回測會系統性地比實際好看。
+    funding: bool | None = None
 
     @property
     def has_funding(self) -> bool:
-        """只有永續收資金費。標準合約靠到期收斂,不收資金費。"""
-        return self.market_type is MarketType.PERPETUAL
+        """收不收資金費。**沒查證過就拋,不猜。**"""
+        if self.funding is None:
+            raise Unverified(
+                f"{self.symbol} 收不收資金費**沒有人查證過** —— "
+                "不要從市場類型猜(2026-09-13 已經證明會猜錯:"
+                "BingX 幣本位「標準合約」其實是 Coin-M perpetual,有資金費)。"
+                "請在建立 Contract 時明確填 funding=True/False。")
+        return self.funding
 
 
 @dataclass
@@ -145,3 +195,15 @@ class ExchangeError(RuntimeError):
 
 class NotSupported(ExchangeError):
     """這個交易所/市場不支援這個操作。**明確拋出,不要靜靜回 None。**"""
+
+
+class Unverified(ExchangeError):
+    """這件事**沒有人向交易所查證過**。
+
+    跟 NotSupported 的差別很重要:
+      · NotSupported = 查證過了,交易所不提供
+      · Unverified   = 還沒查,所以任何答案都是猜的
+
+    把 Unverified 當成 False 處理,就是 2026-09-13 那個錯誤的形狀:
+    「標準合約不收資金費」聽起來像一個結論,其實只是一句沒問過的話。
+    """

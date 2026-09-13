@@ -54,6 +54,8 @@ class BingXPerpetual(ExchangeAdapter):
                 contract_size=sp.get("size", 1.0),
                 tradable=sp.get("status") == 1,
                 expiry=None,                 # 永續無到期
+                inverse=False,               # U 本位:以 USDT 結算
+                funding=True,                # 已查證:swap/v2 有資金費歷史
             )
         return out
 

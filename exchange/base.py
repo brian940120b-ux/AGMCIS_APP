@@ -57,8 +57,17 @@ class ExchangeAdapter(ABC):
 
     def funding_rates(self, symbol: str, since_ms: int,
                       until_ms: int) -> list[dict]:
-        """區間內**實際結算**的資金費。非永續市場應拋 NotSupported。"""
-        raise NotSupported(f"{self.name} 不提供資金費")
+        """區間內**實際結算**的資金費。
+
+        2026-09-13 訂正:原本這行寫「非永續市場應拋 NotSupported」,
+        暗示「標準合約 = 不收資金費」。**那是錯的。**
+        BingX 幣本位標準合約(/openApi/cswap/v1)官方文件的定義是
+        Coin-M **perpetual**,premiumIndex 會回 lastFundingRate。
+
+        會不會收資金費,看 Contract.funding,**不要看市場類型**。
+        真的不提供的介面才拋 NotSupported。
+        """
+        raise NotSupported(f"{self.name} 未實作資金費查詢")
 
     # ── 交易(私有,需金鑰)──────────────────────────────
     @abstractmethod

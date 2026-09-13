@@ -74,9 +74,23 @@ READ_ONLY = {
     "perp_balance_v2": "/openApi/swap/v2/user/balance",
     "perp_positions": "/openApi/swap/v2/user/positions",
     "perp_open_orders": "/openApi/swap/v2/trade/openOrders",
+    # ── U 本位標準合約(App 的「U本位標準合約」)────────────
+    # 官方文件 BingX-API/BingX-Standard-Contract-doc 全文只有這三個
+    # 端點,而且全是 GET。**沒有下單 API**(2026-09-13 覆核)。
     "std_balance": "/openApi/contract/v1/balance",
     "std_positions": "/openApi/contract/v1/allPosition",
     "std_orders": "/openApi/contract/v1/allOrders",
+    # ── 幣本位標準合約(App 的「幣本位標準合約」= Coin-M)──────
+    # 這一組**有**完整交易 API,但下面只列唯讀的那些。
+    # 會改變帳戶狀態的路徑一律不准出現在這份清單裡(有測試檢查)。
+    "coinm_contracts": "/openApi/cswap/v1/market/contracts",
+    "coinm_ticker": "/openApi/cswap/v1/market/ticker",
+    "coinm_klines": "/openApi/cswap/v1/market/klines",
+    "coinm_premium": "/openApi/cswap/v1/market/premiumIndex",
+    "coinm_balance": "/openApi/cswap/v1/user/balance",
+    "coinm_positions": "/openApi/cswap/v1/user/positions",
+    "coinm_commission": "/openApi/cswap/v1/user/commissionRate",
+    "coinm_open_orders": "/openApi/cswap/v1/trade/openOrders",
     # 單向 / 雙向持倉模式。這個查詢決定下單時 positionSide 要送什麼,
     # 送錯直接被拒 —— 見 position_mode()。
     "position_mode": "/openApi/swap/v1/positionSide/dual",
@@ -368,6 +382,42 @@ class ReadOnlyClient:
 
     def standard_positions(self) -> Any:
         return self.get(READ_ONLY["std_positions"])
+
+    # ── 幣本位標準合約(Coin-M)──────────────────────────
+    #
+    # 跟上面的 standard_* 是**兩個不同的產品**,不是同一件事的兩種寫法。
+    # U 本位標準合約(contract/v1)沒有下單 API;
+    # 幣本位標準合約(cswap/v1)有。混在一起會得出一個錯誤的結論 ——
+    # 2026-09-10 就是這樣把整個標準合約市場一起判死的。
+
+    def coinm_contracts(self, symbol: str | None = None) -> Any:
+        """幣本位可交易標的與規格。**下單精度的唯一來源。**"""
+        params = {"symbol": symbol} if symbol else None
+        return self.get(READ_ONLY["coinm_contracts"], params)
+
+    def coinm_balance(self, symbol: str | None = None) -> Any:
+        params = {"symbol": symbol} if symbol else None
+        return self.get(READ_ONLY["coinm_balance"], params)
+
+    def coinm_positions(self, symbol: str | None = None) -> Any:
+        """幣本位持倉。**這一組有 liquidationPrice**(U 本位標準合約沒有)。"""
+        params = {"symbol": symbol} if symbol else None
+        return self.get(READ_ONLY["coinm_positions"], params)
+
+    def coinm_premium(self, symbol: str) -> Any:
+        """標記價 + 指數價 + **資金費率**。
+
+        它會回 lastFundingRate —— 這就是「標準合約不收資金費」
+        那句話被推翻的地方。
+        """
+        return self.get(READ_ONLY["coinm_premium"], {"symbol": symbol})
+
+    def coinm_commission(self) -> Any:
+        return self.get(READ_ONLY["coinm_commission"])
+
+    def coinm_open_orders(self, symbol: str | None = None) -> Any:
+        params = {"symbol": symbol} if symbol else None
+        return self.get(READ_ONLY["coinm_open_orders"], params)
 
     def position_mode(self) -> str | None:
         """

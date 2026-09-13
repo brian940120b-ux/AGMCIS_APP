@@ -17,13 +17,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from exchange.base import ExchangeAdapter
 from exchange.bingx.perpetual import BingXPerpetual
-from exchange.bingx.standard import BingXStandard
+from exchange.bingx.standard import (BingXStandard, BingXStandardCoinM,
+                                     BingXStandardUSDT)
 from exchange.paper import PaperExchange
 from exchange.types import (Contract, MarketType, NotSupported, OrderRequest,
-                            OrderSide, OrderStatus, OrderType)
+                            OrderSide, OrderStatus, OrderType, Unverified)
 
 
-ADAPTERS = [PaperExchange(), BingXPerpetual(), BingXStandard()]
+ADAPTERS = [PaperExchange(), BingXPerpetual(),
+            BingXStandardUSDT(), BingXStandardCoinM()]
 
 
 # ══════════════════════════════════════════════════════════
@@ -66,30 +68,85 @@ def test_paper_and_perpetual_share_the_same_contract_specs():
 
 
 def test_contract_knows_whether_it_has_funding():
-    """永續收資金費、標準合約不收 —— 這個差別必須在型別裡。"""
+    """收不收資金費是一個**被查證過的事實**,不是從市場類型推導的。"""
     c = PaperExchange().contracts()["BTC-USDT"]
     assert c.market_type is MarketType.PERPETUAL
     assert c.has_funding is True
-    std = Contract(symbol="X", market_type=MarketType.STANDARD,
-                   quantity_precision=2, price_precision=2, min_qty=1,
-                   min_notional=2, taker_fee_pct=0.05, maker_fee_pct=0.02)
-    assert std.has_funding is False
+
+
+def test_unverified_funding_raises_instead_of_answering_false():
+    """沒查證過就拋 —— **不准回 False。**
+
+    2026-09-13 的教訓:原本 has_funding 從 market_type 推導,
+    對「標準合約」回 False。而 BingX 幣本位標準合約其實是
+    Coin-M perpetual,**有**資金費。一個推導出來的錯答案,
+    會讓回測少扣一筆持續性成本,而且不會有人發現。
+    """
+    unknown = Contract(symbol="X", market_type=MarketType.STANDARD,
+                       quantity_precision=2, price_precision=2, min_qty=1,
+                       min_notional=2, taker_fee_pct=0.05,
+                       maker_fee_pct=0.02)
+    assert unknown.funding is None
+    with pytest.raises(Unverified):
+        unknown.has_funding
+
+
+def test_market_type_no_longer_decides_funding_or_expiry():
+    """標準合約**可以**是永續、可以收資金費。型別層必須容得下這件事。"""
+    coinm = Contract(symbol="BTC-USD", market_type=MarketType.STANDARD,
+                     quantity_precision=0, price_precision=1, min_qty=1,
+                     min_notional=10, taker_fee_pct=0.05, maker_fee_pct=0.02,
+                     inverse=True, funding=True, expiry=None)
+    assert coinm.has_funding is True
+    assert coinm.expiry is None
+    assert coinm.inverse is True
 
 
 # ══════════════════════════════════════════════════════════
 # 三、不支援的必須明確拋出
 # ══════════════════════════════════════════════════════════
-def test_standard_futures_raises_with_a_verifiable_reason():
-    """標準合約必須拋出,而且理由要說得出是交易所端的限制。
+def test_usdt_standard_futures_raises_with_a_verifiable_reason():
+    """U 本位標準合約必須拋出,而且理由要說得出是交易所端的限制。
 
     一個「看起來存在、實際無作用」的東西比沒有更糟(舊系統教訓四)。
     """
-    ad = BingXStandard()
+    ad = BingXStandardUSDT()
     with pytest.raises(NotSupported) as e:
         ad.contracts()
     msg = str(e.value)
-    assert "internal testing" in msg or "私有" in msg
-    assert "2026-09-10" in msg, "必須註明查證日期,否則無法判斷是否過時"
+    assert "internal testing" in msg
+    assert "2026-09-13" in msg, "必須註明查證日期,否則無法判斷是否過時"
+    assert "cswap" in msg, "必須指出另一個產品可以下單,否則會再判死一次"
+
+
+def test_the_old_name_still_points_at_the_usdt_product():
+    """BingXStandard 這個舊名指的是 U 本位 —— 別名不得換了意思。"""
+    assert BingXStandard is BingXStandardUSDT
+
+
+def test_coinm_blocks_orders_for_our_own_reason_not_the_exchanges():
+    """幣本位擋單的理由必須是**我方帳本還沒改寫**,不是交易所不給。
+
+    這兩個理由的差別決定了下一步是「等交易所」還是「我們去寫」。
+    2026-09-10 把後者誤寫成前者,整個市場因此停了三天。
+    """
+    ad = BingXStandardCoinM()
+    req = OrderRequest(symbol="BTC-USD", market_type=MarketType.STANDARD,
+                       side=OrderSide.BUY, order_type=OrderType.MARKET,
+                       qty=1)
+    with pytest.raises(NotSupported) as e:
+        ad.submit(req)
+    msg = str(e.value)
+    assert "反向" in msg, "必須點名反向合約帳本這件事"
+    assert "trade/order" in msg, "必須說清楚交易所這邊是通的"
+
+
+def test_coinm_does_not_pretend_funding_is_zero():
+    """幣本位查不到資金費歷史 —— 但**不准因此當成沒有資金費**。"""
+    ad = BingXStandardCoinM()
+    with pytest.raises(NotSupported) as e:
+        ad.funding_rates("BTC-USD", 0, 1)
+    assert "當成 0" in str(e.value)
 
 
 def test_live_trading_paths_raise_not_silently_fail():
