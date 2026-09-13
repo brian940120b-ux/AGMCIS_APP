@@ -737,3 +737,120 @@ class TestItNeverSwallowsFailures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheEmergencyProtocolAgainstARealBroker(unittest.TestCase):
+    """
+    第十八節的六步驟緊急保護,由一個**真的實作了縮倉**的 broker 走一遍。
+
+    這條路徑模擬盤走不到:PaperBroker 的 reduce_position 一律拋
+    NotImplementedError(它沒辦法定義「縮掉的那一半用什麼價格結算」),
+    所以緊急流程在模擬盤永遠是「重試 → 失敗 → 直接平倉」,
+    中間那一步從來沒有被執行過。
+
+    這裡不是驗「真的下單失敗時會怎樣」—— 那要真錢。
+    這裡驗的是這六步接得起來,而且每一步的方向都對。
+    """
+
+    def protect(self, adapter, **kwargs):
+        from agmcis.execution import emergency
+
+        return emergency.protect(
+            broker(adapter), "BTC-USDT", 49000.0,
+            retries=2, pause_file=os.devnull,
+            disable_orders=False, notifier=lambda *a, **k: None,
+            **kwargs,
+        )
+
+    def test_an_already_protected_position_never_enters_the_protocol(self):
+        adapter = FakeAdapter(
+            positions=[dict(LONG)],
+            open_orders=[{"id": "s", "type": "stop_market",
+                          "reduceOnly": True}],
+        )
+
+        outcome = self.protect(adapter)
+
+        self.assertEqual(outcome.status, "PROTECTED")
+        self.assertNotIn("create_order", adapter.names())
+
+    def test_the_reduce_step_actually_runs_on_a_broker_that_supports_it(self):
+        """
+        重試掛不上 → 縮倉 → 再掛一次 → 成功。中間那一步在模擬盤
+        永遠走不到,因為 PaperBroker 的縮倉會拋 NotImplementedError。
+        """
+        from agmcis.execution import emergency
+
+        stop = {"id": "s", "type": "stop_market", "reduceOnly": True}
+        adapter = FakeAdapter(
+            positions=[dict(LONG)],
+            order={"id": "r", "filled": 0.005, "average": 50000.0},
+        )
+
+        # 掛了三次之後停損才真的出現在交易所上 ——
+        # 前兩次重試看不到它,縮倉之後那一次看得到。
+        placed = []
+        original = adapter.create_order
+
+        def counting_create_order(**kwargs):
+            placed.append(kwargs)
+            if len(placed) >= 4:
+                adapter.open_orders = [stop]
+            return original(**kwargs)
+
+        adapter.create_order = counting_create_order
+
+        outcome = emergency.protect(
+            broker(adapter), "BTC-USDT", 49000.0,
+            retries=2, pause_file=os.devnull,
+            disable_orders=False, notifier=lambda *a, **k: None,
+        )
+
+        self.assertEqual(outcome.status, "PROTECTED_AFTER_REDUCE")
+        self.assertEqual(outcome.reduced_fraction, emergency.DEFAULT_REDUCE_FRACTION)
+
+        reduced = [k for k in placed if k["order_type"] is OrderType.MARKET]
+        self.assertEqual(len(reduced), 1, "縮倉應該只送一張市價單")
+        self.assertTrue(reduced[0]["reduce_only"])
+        self.assertIs(reduced[0]["side"], OrderSide.SELL)
+
+    def test_a_position_that_cannot_be_protected_gets_closed(self):
+        """停損救不回來、縮倉也救不回來 → 平掉。不留裸倉。"""
+        adapter = FakeAdapter(
+            positions=[dict(LONG)],
+            order={"id": "c", "filled": 0.01, "average": 50000.0},
+        )
+
+        outcome = self.protect(adapter)
+
+        self.assertEqual(outcome.status, "CLOSED")
+
+    def test_a_position_that_cannot_even_be_closed_is_STUCK_not_silent(self):
+        """
+        平不掉是最壞的情況,而最壞的情況必須喊出來 ——
+        一個安靜失敗的緊急流程等於沒有緊急流程(第九十四節)。
+        """
+        adapter = FakeAdapter(
+            positions=[dict(LONG)],
+            order={"id": "c", "filled": 0},   # 一直沒成交
+        )
+
+        outcome = self.protect(adapter)
+
+        self.assertEqual(outcome.status, "STUCK")
+        self.assertTrue(outcome.reason)
+
+    def test_a_broker_that_cannot_see_the_exchange_does_not_report_protected(self):
+        """
+        查不到掛單時 has_protection 回 False,所以緊急流程會啟動 ——
+        而不是誤以為「有保護」然後什麼都不做。
+        """
+        adapter = FakeAdapter(
+            positions=[dict(LONG)],
+            order={"id": "c", "filled": 0.01},
+            fail={"get_open_orders"},
+        )
+
+        outcome = self.protect(adapter)
+
+        self.assertNotIn(outcome.status, ("PROTECTED", "PROTECTED_ON_RETRY"))
