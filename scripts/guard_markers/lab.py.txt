@@ -1,0 +1,7 @@
+# research/lab.py 現役功能標記(2026-09-03 建立)
+# 門檻與摩擦檔位是憲法第二條的執行層,消失等於法庭失去牙齒
+FRICTION_TIERS =
+DEV_MAX_EXPECTANCY =
+THRESHOLD_PER_N =
+def current_threshold
+write_json_atomic

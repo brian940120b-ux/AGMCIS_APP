@@ -1,0 +1,32 @@
+[
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "any",
+    "pivot_strength": 5,
+    "ratio_tolerance": 0.05,
+    "require_reversal_candle": false,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "諧波終審 1/3:混測+最大轉折級別(strength=5)。假說:15m 的失敗源於小級別假轉折,放大結構級別後幾何才有意義。"
+  },
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "any",
+    "pivot_strength": 5,
+    "ratio_tolerance": 0.05,
+    "require_reversal_candle": true,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "諧波終審 2/3:大結構+PRZ 反轉 K 棒確認。假說:不摸刀接,等 PRZ 內出現反向收盤才進場,犧牲進場價換完成率。"
+  },
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "any",
+    "pivot_strength": 2,
+    "ratio_tolerance": 0.05,
+    "require_reversal_candle": true,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "諧波終審 3/3:基準級別+反轉確認。對照組:單獨衡量反轉 K 棒過濾器的貢獻,與 v1(無確認)直接可比。"
+  }
+]

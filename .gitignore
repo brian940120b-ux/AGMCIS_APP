@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+*.bak-*
+*.bak_*
+*.log
+.env
+
+# 機密一律不進 git(.env.save 曾經繞過 .env 的保護)
+.env
+.env.*
+*.env

@@ -1,0 +1,7 @@
+# scripts/autopilot.py 現役功能標記(2026-09-03 建立)
+# RESEARCH_MIN_GAP_S 是配額防火牆(曾燒光全日糧倉);快照是九月主野對比前置
+TICK_SECONDS =
+RESEARCH_MIN_GAP_S =
+CONTINUOUS_RESEARCH =
+append_equity_snapshot
+write_json_atomic

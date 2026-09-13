@@ -1,0 +1,38 @@
+[
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "bat",
+    "pivot_strength": 2,
+    "ratio_tolerance": 0.05,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "人工立案:單審蝙蝠(B=0.382~0.50/D=0.886)。v1 四型態混測遭駁回,本案檢驗蝙蝠單獨表現是否被混測稀釋。"
+  },
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "butterfly",
+    "pivot_strength": 2,
+    "ratio_tolerance": 0.05,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "人工立案:單審蝴蝶(B=0.786/D=1.27~1.618)。D 點延伸超過 X 的深反轉結構,與加特利幾何獨立。"
+  },
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "crab",
+    "pivot_strength": 2,
+    "ratio_tolerance": 0.05,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "人工立案:單審螃蟹(B=0.382~0.618/D=1.618)。極端延伸形態,PRZ 最深,理論反轉幅度最大。"
+  },
+  {
+    "entry_type": "harmonic",
+    "harmonic_pattern": "altbat",
+    "pivot_strength": 2,
+    "ratio_tolerance": 0.05,
+    "stop_atr_mult": 2.0,
+    "tp_r": 2.0,
+    "rationale": "人工立案:變形蝙蝠(B=0.382/D=1.13),諧波圖鑑補完計畫首案。幾何已新增於 harmonic_geometry.PATTERNS。"
+  }
+]

@@ -1,0 +1,5 @@
+# strategies/configurable.py 現役功能標記(2026-09-03 建立)
+# _HASH_NEUTRAL_DEFAULTS 消失 = 全帳本 config_hash 漂移 = 舊案身分全毀
+_HASH_NEUTRAL_DEFAULTS =
+class StrategyConfig
+def make_strategy

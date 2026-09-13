@@ -1,0 +1,5 @@
+# scripts/sentinel.py 現役功能標記(2026-09-03 建立)
+# 2026-07-17 覆蓋事故:本檔被放養組哨兵覆蓋,主城巡檢停擺 3 日。
+WILD =
+FRESH_LIMIT_MIN =
+DISK_LIMIT_PCT =
