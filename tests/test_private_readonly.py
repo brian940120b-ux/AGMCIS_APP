@@ -430,3 +430,92 @@ class TestAnEmptyPositionListMustBeTrustworthy(unittest.TestCase):
             ["BTC-USDT"])
 
         self.assertTrue(note["errors"])
+
+
+class TestAnIncompleteProbeIsNotAnEmptyAnswer(unittest.TestCase):
+    """
+    2026-09-13:逐幣查詢在兩秒內打了七個同端點請求,BingX 回 429,
+    而那個例外把**整個對帳**弄掛了。
+
+    兩個教訓:
+      一、一個診斷用的備援查詢,不該弄掛主流程。
+      二、**沒問完就不能說「沒有倉」。** 中止的迴圈與空的結果
+          長得一模一樣,而它們的意思完全不同。
+    """
+
+    def test_throttling_stops_the_loop_instead_of_crashing(self):
+        from core import ratelimit
+
+        class Throttled:
+            def __init__(self):
+                self.n = 0
+
+            def request(self, method, url, **kw):
+                self.n += 1
+                if self.n == 1:
+                    return FakeResponse(body={"code": 0, "data": []})
+                return FakeResponse(status=429)
+
+        session = Throttled()
+        try:
+            got, note = client(session=session).positions_everywhere(
+                ["A-USDT", "B-USDT", "C-USDT"])
+        except ratelimit.RateLimited:
+            self.fail("被限流不該讓整個查詢拋出去")
+        finally:
+            ratelimit.LOCK.unlink(missing_ok=True)
+
+        self.assertEqual(got, [])
+        self.assertTrue(note["throttled"])
+        self.assertTrue(note["incomplete"])
+
+    def test_an_incomplete_probe_never_claims_the_book_is_empty(self):
+        """
+        **這是重點。** method 不可以說「兩種都是空的」——
+        那句話代表「已經確認沒有倉」。
+        """
+        from core import ratelimit
+
+        class Throttled:
+            def __init__(self):
+                self.n = 0
+
+            def request(self, method, url, **kw):
+                self.n += 1
+                return (FakeResponse(body={"code": 0, "data": []})
+                        if self.n == 1 else FakeResponse(status=429))
+
+        try:
+            _got, note = client(session=Throttled()).positions_everywhere(
+                ["A-USDT", "B-USDT"])
+        finally:
+            ratelimit.LOCK.unlink(missing_ok=True)
+
+        self.assertNotEqual(note["method"], "兩種都是空的")
+        self.assertIn("沒問完", note["method"])
+
+    def test_a_complete_empty_probe_is_allowed_to_say_so(self):
+        session = FakeSession([
+            FakeResponse(body={"code": 0, "data": []}),
+            FakeResponse(body={"code": 0, "data": []}),
+        ])
+
+        _got, note = client(session=session).positions_everywhere(["A-USDT"])
+
+        self.assertEqual(note["method"], "兩種都是空的")
+        self.assertFalse(note.get("incomplete"))
+
+
+class TestTheBurstWasLoweredAfterARealRejection(unittest.TestCase):
+
+    def test_the_burst_is_small_enough_not_to_machine_gun_one_endpoint(self):
+        """
+        突發才是問題,不是平均速率。桶允許 10 個瞬間發完,
+        而「同一個端點連續十發」正是觸發交易所逐端點限制的形狀。
+        """
+        from core import ratelimit
+
+        self.assertLessEqual(
+            ratelimit.BURST, 5,
+            "突發額度太大 —— 2026-09-13 就是這樣被 BingX 回 429 的")
+        self.assertLessEqual(ratelimit.RATE_PER_S, 3)

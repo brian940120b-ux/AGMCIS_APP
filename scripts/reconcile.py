@@ -69,12 +69,20 @@ def main() -> int:
 
     from portfolio.paper import SYMBOLS
 
+    from core import ratelimit
+
     try:
         balance = client.balance()
-        positions, how = client.positions_everywhere(SYMBOLS)
-    except private.PrivateCallFailed as e:
-        print(f"\n讀不到交易所帳戶:{e}\n")
+    except (private.PrivateCallFailed, ratelimit.RateLimited) as e:
+        print(f"\n讀不到交易所餘額:{e}\n")
         return 1
+
+    try:
+        positions, how = client.positions_everywhere(SYMBOLS)
+    except (private.PrivateCallFailed, ratelimit.RateLimited) as e:
+        # 持倉查不到不該讓已經查到的餘額白費。照實說,繼續。
+        positions, how = [], {"method": f"查不到({e})", "bulk": None,
+                              "per_symbol": None, "incomplete": True}
 
     book = Account.load(MAIN.state_path)
     ours = {s: p.position_amt for s, p in book.positions.items()}
@@ -96,9 +104,13 @@ def main() -> int:
         print("  ⚠️  **整批查詢說沒有倉,逐幣查詢說有。**")
         print("      這代表持倉端點需要帶 symbol,而不帶的時候會回空 ——")
         print("      一個看起來確定、實際上是錯的答案。風控會以為沒有倉。")
+    if how.get("incomplete"):
+        print()
+        print("  ⚠️  **持倉沒有查完,所以「0 檔」這件事現在不可信。**")
+        print("      沒問完就不能說沒有倉 —— 等一分鐘再跑一次。")
     if how.get("errors"):
         for row in how["errors"]:
-            print(f"      逐幣查詢有失敗:{row}")
+            print(f"      · {row}")
     line()
 
     if not report.differences:
@@ -113,9 +125,12 @@ def main() -> int:
 
     if not report.position_fields.checked:
         print("  ⚠️  持倉欄位還沒有被驗證過 —— 需要至少一個真的倉。")
-        print(f"      (整批查到 {how['bulk']} 筆、逐幣查到 "
-              f"{how['per_symbol']} 筆 —— 兩種都問過了,"
-              "所以「沒有倉」這件事本身是可信的。)")
+        if how.get("incomplete"):
+            print("      (而且這一次持倉沒有查完,連「沒有倉」都還不確定。)")
+        else:
+            print(f"      (整批查到 {how['bulk']} 筆、逐幣查到 "
+                  f"{how['per_symbol']} 筆 —— 兩種都問過了,"
+                  "所以「沒有倉」這件事本身是可信的。)")
         print("      裡面有 liquidationPrice(強平價),算錯的後果不是")
         print("      數字難看,是倉沒了。第一個 Demo 倉開出來的時候,")
         print("      要再跑一次這支。")

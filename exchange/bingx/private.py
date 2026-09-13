@@ -310,20 +310,41 @@ class ReadOnlyClient:
             return bulk, note
 
         # 整批是空的。可能真的沒有倉,也可能這個端點需要 symbol。
+        #
+        # ⚠️ 這個迴圈是一串**同端點的連續請求**,也就是最容易踩到
+        # 交易所逐端點限制的形狀(2026-09-13 就踩到了,回 429)。
+        # 所以:被限流就**停下來並照實回報**,不是硬撐、也不是
+        # 把整個對帳拖垮 —— 一個診斷用的備援查詢不該弄掛主流程。
         found = []
         errors = []
+        completed = 0
         for symbol in (symbols or []):
             try:
                 rows = self.positions(symbol) or []
+            except ratelimit.RateLimited as e:
+                errors.append(f"{symbol}: 被限流,逐幣查詢中止({e})")
+                note["throttled"] = True
+                break
             except PrivateCallFailed as e:
                 errors.append(f"{symbol}: {e}")
                 continue
+            completed += 1
             found.extend(r for r in rows if isinstance(r, dict))
 
         note["per_symbol"] = len(found)
+        note["asked"] = completed
+        note["of"] = len(symbols or [])
         note["errors"] = errors
-        note["method"] = "逐幣" if found else "兩種都是空的"
         note["disagreed"] = bool(found)
+
+        if found:
+            note["method"] = "逐幣"
+        elif note.get("throttled") or completed < len(symbols or []):
+            # **沒問完就不能說「沒有倉」。**
+            note["method"] = f"沒問完({completed}/{len(symbols or [])})"
+            note["incomplete"] = True
+        else:
+            note["method"] = "兩種都是空的"
 
         return found, note
 
