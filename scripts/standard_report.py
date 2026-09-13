@@ -24,6 +24,7 @@ from core import interpreter
 
 interpreter.require()
 
+from core.config import load_env
 from exchange.bingx.private import (Credentials, CredentialsMissing,
                                     PrivateCallFailed, ReadOnlyClient,
                                     host, is_live)
@@ -51,6 +52,9 @@ def _try(label, fn, *args, **kwargs):
 
 
 def main(argv) -> int:
+    # 2026-09-13:漏了這一行,於是 .env 沒被讀進來,腳本報「缺金鑰」——
+    # 而金鑰明明就在 .env 裡。每一支要碰私有端點的腳本都得先呼叫它。
+    load_env()
     try:
         creds = Credentials.from_env()
     except CredentialsMissing as e:

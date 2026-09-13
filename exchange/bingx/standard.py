@@ -99,14 +99,18 @@ USDT_CHECKED_ON = "2026-09-13"
 
 USDT_REASON = (
     "BingX **U 本位**標準合約(/openApi/contract/v1)沒有下單 API —— "
-    "原因在交易所端。官方文件 BingX-API/BingX-Standard-Contract-doc 的 "
-    "REST API 全文只有三個端點,而且全部是 GET:"
-    "allPosition(查持倉)、allOrders(查歷史訂單)、balance(查餘額)。"
-    "文件並自陳 'currently in internal testing'、申請頁面尚未開放。"
-    "持倉回應裡連 liquidationPrice(強平價)都沒有。"
-    f"覆核日期 {USDT_CHECKED_ON}。"
-    "要自動下單請改用**幣本位**標準合約(/openApi/cswap/v1),"
-    "見 BingXStandardCoinM。"
+    "原因在交易所端,而且這次是**實測定案的**,不是照文件推的。"
+    f"\n  {USDT_CHECKED_ON} scripts/probe_ustd_order.py:"
+    "\n    /openApi/contract/v1/order        GET 100400  POST 100400"
+    "\n    /openApi/contract/v1/trade/order  GET 100400  POST 100400"
+    "\n    /openApi/contract/v1/allOrders    GET code 0  POST 100400"
+    "\n    對照組 cswap/v1/trade/order        POST 100004(存在,只缺權限)"
+    "\n  對照組的 POST 問得出東西,allOrders 的 GET 也回了 code 0 —— "
+    "所以「全是 100400」不是探測用錯動詞,是真的沒有這個端點。"
+    "官方文件 BingX-API/BingX-Standard-Contract-doc 也一致:"
+    "REST API 全文只有那三個 GET,並自陳 'currently in internal testing'。"
+    "\n  這個產品走**指令單**路線:portfolio/ticket.py 把已經算好的"
+    "數量、槓桿、停損印成一張可以照著按的單,按完用 --verify 回頭對帳。"
 )
 
 
