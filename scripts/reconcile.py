@@ -84,6 +84,25 @@ def main() -> int:
         positions, how = [], {"method": f"查不到({e})", "bulk": None,
                               "per_symbol": None, "incomplete": True}
 
+    # ── 標準合約是**另一個市場**(第六條)──────────────────
+    #
+    # 2026-09-13:執政官在 App 上開了一個倉,而對帳說交易所 0 檔 ——
+    # 兩種查法都問過、都是空的,所以那個「空」是可信的。
+    #
+    # 線索在最小名目:永續的 BTC 最小是 **2 USDT**,而 App 上顯示的
+    # 是 **100**。那個門檻不是永續的,是**標準合約**的。
+    #
+    # 而對帳只問了永續。一個「交易所沒有這個倉」的結論,建立在
+    # 「我只問了其中一個市場」上面 —— 這跟前兩次踩到的是同一個病:
+    # **一個看起來確定、實際上沒問完的答案。**
+    standard = []
+    std_note = None
+    try:
+        raw = client.standard_positions()
+        standard = [r for r in (raw or []) if isinstance(r, dict)]
+    except (private.PrivateCallFailed, ratelimit.RateLimited) as e:
+        std_note = str(e)
+
     book = Account.load(MAIN.state_path)
     ours = {s: p.position_amt for s, p in book.positions.items()}
 
@@ -98,7 +117,11 @@ def main() -> int:
     show_fields(report.position_fields)
     line()
     print(f"  帳本持倉  {report.ours_count} 檔")
-    print(f"  交易所    {report.theirs_count} 檔({how['method']})")
+    print(f"  永續合約  {report.theirs_count} 檔({how['method']})")
+    if std_note:
+        print(f"  標準合約  查不到({std_note})")
+    else:
+        print(f"  標準合約  {len(standard)} 檔")
     if how.get("disagreed"):
         print()
         print("  ⚠️  **整批查詢說沒有倉,逐幣查詢說有。**")
@@ -122,6 +145,25 @@ def main() -> int:
 
     line("═")
     print()
+
+    if standard:
+        print()
+        print("  ⚠️  **標準合約有倉,而策略完全不知道它的存在。**")
+        print("      標準合約與永續是兩個不同的市場(第六條):合約規格、")
+        print("      精度、槓桿上限都不同,風控與記帳都沒有涵蓋它。")
+        for row in standard[:5]:
+            print(f"        · {row.get('symbol')}  "
+                  f"{row.get('positionAmt', row.get('volume', '?'))}")
+        print()
+        print("      持倉欄位的形狀改用標準合約這一筆來驗:")
+        std_fields = rec.check_fields(standard, rec.POSITION_FIELDS,
+                                      "標準合約持倉")
+        show_fields(std_fields)
+        print()
+        print("      原始欄位名(交易所實際回了什麼):")
+        for key in sorted(standard[0]):
+            print(f"        {key}")
+        print()
 
     if not report.position_fields.checked:
         print("  ⚠️  持倉欄位還沒有被驗證過 —— 需要至少一個真的倉。")
