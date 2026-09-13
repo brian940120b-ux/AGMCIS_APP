@@ -99,6 +99,21 @@ FOMC 當天系統會照常開倉。排程每小時檢查一次,狀態改變時�
 這份報告不會自己套用。要改預設值走提案流程(第七十八節)。
 
 ```
+.venv/bin/python scripts/simulate_live.py
+```
+
+SIMULATED LIVE:把實單路徑整條跑一次,用的是一個假的 BingX
+(`agmcis/exchange/simulated.py`)。**不連線、不需要金鑰、不動真錢**,
+所以任何機器上都跑得起來,包括你的筆電。
+
+11 個情境全部在問同一句話:交易所這樣回應的時候,系統往哪一邊倒。
+停損被拒、掛上又被撤掉、部分成交、送單後斷線、平不掉 —— 那些
+模擬盤一輩子遇不到,而實盤第一週就會遇到。
+
+⚠️ 它**不是**「可以下實單」的證據。模擬器比真實交易所仁慈:
+不會限流、不會有時鐘偏移、不會在半夜改 API。
+
+```
 .venv/bin/python scripts/preflight.py
 .venv/bin/python scripts/live_gate.py
 ```

@@ -31,7 +31,18 @@ READ_ONLY_SCRIPTS = [
     # 實單路徑檢視(第七十八 / 一百零三節)。它印出實單原始碼的雜湊,
     # 然後跑既有的行為測試 —— 不重寫一套檢查,也不碰交易所。
     "verify_live_broker.py",
+    # SIMULATED LIVE(第十八 / 一百零六節)。它跑的是模擬交易所,
+    # 沒有網路、沒有金鑰、沒有真錢 —— 但它會呼叫 create_order,
+    # 所以下面的禁止清單掃描要對它放行那幾個名字,見 SIMULATED。
 ]
+
+# 這一支會呼叫下單相關的名字,但對象是**模擬交易所**,不是 BingX。
+# 整支排除在檢查外是不對的(那等於開一個沒有邊界的洞),所以只放行
+# 它必須用到的那幾個,其餘照掃。
+SIMULATED = {
+    "simulate_live.py": {"create_order", "cancel_order", "set_leverage",
+                         "close_position"},
+}
 
 # 這些腳本會寫檔,而且那就是它們的職責。
 #
@@ -93,6 +104,44 @@ class TestScriptsAreReadOnly(unittest.TestCase):
                 with self.subTest(script=name, call=called):
                     self.assertNotIn(called, FORBIDDEN_CALLS)
 
+    def test_the_simulated_script_only_touches_the_simulator(self):
+        """
+        放行清單必須有邊界。這一支可以呼叫下單相關的名字,但:
+
+          1. 只有明列的那幾個,其餘照擋。
+          2. 它不可以 import 任何真的能連到交易所的東西。
+
+        少了第 2 點,「它跑的是模擬器」就只是一句話而不是一個事實。
+        """
+        for name, allowed in SIMULATED.items():
+            path = os.path.join(SCRIPTS_DIR, name)
+            self.assertTrue(os.path.exists(path), f"{name} 不存在")
+
+            for called in calls_in(path):
+                if called in allowed:
+                    continue
+                with self.subTest(script=name, call=called):
+                    self.assertNotIn(called, FORBIDDEN_CALLS)
+
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read(), filename=path)
+
+            imported = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.update(a.name for a in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.add(node.module)
+
+            for forbidden in ("ccxt", "agmcis.exchange.bingx",
+                              "agmcis.data.market_data", "market_data"):
+                with self.subTest(script=name, imports=forbidden):
+                    self.assertFalse(
+                        any(m == forbidden or m.startswith(forbidden + ".")
+                            for m in imported),
+                        f"{name} import 了 {forbidden} —— 那條路連得到交易所",
+                    )
+
     def test_every_script_in_the_list_still_exists(self):
         """
         腳本被改名或刪掉時,上面的迴圈會靜靜地少檢查一支。
@@ -106,7 +155,8 @@ class TestScriptsAreReadOnly(unittest.TestCase):
         新增一支檢查腳本卻忘了加進清單,等於它沒有被檢查過。
         這裡列出漏掉的,強迫做個決定。
         """
-        known = set(READ_ONLY_SCRIPTS) | set(WRITES_BY_DESIGN) | {"__init__.py"}
+        known = (set(READ_ONLY_SCRIPTS) | set(WRITES_BY_DESIGN)
+                 | set(SIMULATED) | {"__init__.py"})
         present = {
             name for name in os.listdir(SCRIPTS_DIR)
             if name.endswith(".py")
