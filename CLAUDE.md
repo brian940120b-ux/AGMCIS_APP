@@ -21,6 +21,10 @@
 契約   實盤資格八條                      portfolio/contract.py
 串流   交易所 WebSocket 逐筆推播          portfolio/stream.py
 即時   盤中盈虧(只讀不寫)                portfolio/live.py
+相關   七個倉是不是同一個賭注              portfolio/correlation.py
+事件   今天是什麼日子(只記錄)              portfolio/events.py
+限流   跨行程令牌桶                       core/ratelimit.py
+健康   /health,機器問得到                core/health.py
 ```
 
 **帳本是合約規格,不是現貨規格(2026-09-08)**:
@@ -52,6 +56,31 @@ initialMargin / maintenanceMargin / marginRatio / leverage`。
 峰值只由記帳更新(即時價不得墊高它)、過期價格不得回傳、
 串流價格優先於 REST 退路。
 
+**2026-09-13 補的四件事(都不改變交易行為)**:
+
+  · **相關性集中度**(第六十條)。總曝險 49% 只是加總,它不會告訴你
+    七個倉是不是同一個賭注。算 √(wᵀRw) 與有效持倉檔數 ——
+    相關性 1 的時候,七個 7% 的倉等於**一個 49% 的倉**。
+    **上限是 None,而那不是「不限制」**:一條 Risk Limit 不該由程式
+    自己決定(第 102 條),而我算不出依據。檢查每天照跑、數字照記,
+    面板看得到 —— 沒有上限的期間正是最需要看到那個數字的時候。
+  · **事件日曆**(第五十一條)。只做看得見,不閃避:擋單會改變進場
+    日期,那是不同的報酬序列。**這個模組不內建任何日期** ——
+    憑記憶寫下 FOMC 日期再讓風險系統相信它,是最不該做的事;
+    一份錯的日曆比沒有日曆危險。日期由人填進 `data/events.json`。
+  · **限流器**(第四十八條)。四支 systemd 服務各跑各的行程,
+    所以令牌桶用檔案鎖跨行程共用。速率是**我方自訂的地板,不是
+    BingX 公布的上限** —— 接私有端點前要拿文件核對。
+    測試掃 AST 擋住新的繞道:一個可以繞過的限流器只是裝飾品。
+  · **/health**(第六十六條)。巡檢的輸出是給人看的,而
+    「依賴會有人通知我」的監控,壞掉的時候剛好也不會通知你。
+    任何一條不過就回 503,**沒有「大部分還好」這個選項**。
+
+同一天刪掉 `models/signal.py`(160 行,舊系統的 Agent 契約化石,
+沒有任何檔案 import 它),並修掉 `scripts/daily.py` 一個只有
+Python 3.12 讀得懂的 f-string —— 在 3.11 上它是載入時 SyntaxError,
+整支記帳腳本一行都跑不到。
+
 `scripts/daily.py` 每日 00:30 UTC 串起來跑一次
 (`agmcis-portfolio.timer`),`scripts/dashboard.py` 是面板,
 `scripts/sentinel.py` 每 10 分鐘巡檢,`scripts/gauge.py` 收費率快照
@@ -60,6 +89,19 @@ initialMargin / maintenanceMargin / marginRatio / leverage`。
 **沒有常駐迴圈。** 常駐進程會讓「程式改了但沒生效」變成無聲的錯誤 ——
 2026-09-07 就是這樣讓四天的改動一行都沒跑,而測試全過、面板正常、
 哨兵全綠,沒有任何一條檢查會發現。
+
+**跑測試前先跟交易所要一次資料**,否則會看到 23 條紅字:
+
+```
+python -c 'from portfolio.specs import refresh; refresh()'
+python -c 'from portfolio.specs import refresh_funding; \
+           from portfolio.paper import SYMBOLS; refresh_funding(SYMBOLS)'
+```
+
+`data/` 有 gitignore(快取不該進版控),所以乾淨的機器上那些檔案
+不存在。`tests/conftest.py` 會把因此失敗的測試改判成 skip 並附上
+這兩行 —— **skip 不是綠燈**,它只是把「環境沒裝好」與「程式壞了」
+分開。這個 repo 需要 **Python 3.12 以上**。
 
 ## 二、策略與它的證據
 
