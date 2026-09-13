@@ -62,7 +62,7 @@ def main(argv) -> int:
         return 2
 
     print(f"環境  {'實盤' if is_live() else 'Demo(VST)'}  {host()}")
-    print(f"金鑰  {creds.masked}")
+    print(f"金鑰  {creds.masked()}")   # 是方法不是 property
     print("產品  U 本位標準合約  /openApi/contract/v1")
 
     client = ReadOnlyClient(creds)
@@ -160,14 +160,24 @@ def main(argv) -> int:
     print("  ✅ 看得到帳戶、持倉、成交史")
     print("  ✅ 強平價我方算得出來(線性合約,account.py 的公式直接適用)")
     print("  ✅ 精度從真實成交反推得出來")
+    print("  ✅ 下單端點**定案:沒有**(2026-09-13 GET+POST 各問一次,")
+    print("     對照組 cswap POST 回 100004 證明探測本身是好的)")
+    print("     → 最後一吋是人按的:scripts/ticket.py")
     print()
-    print("  ❓ **下單端點還沒定案。** 官方文件沒有,但我之前全部用 GET 問。")
-    print("     跑這一支才算數:")
-    print("       .venv/bin/python scripts/probe_ustd_order.py")
-    print()
-    print("     POST 也全是 100400 → U 本位標準合約不能自動下單,")
-    print("     系統改成「算給你、你自己按」;其餘照常自動。")
-    print("     POST 問得出東西   → 接下單層,三道閘照走。")
+    print("  還沒關掉的洞:")
+    print("    停損擺哪裡  .venv/bin/python scripts/stop_evidence.py")
+    print("    交易池      .venv/bin/python scripts/discover_universe.py")
+
+    from portfolio.costs import standard_cost_caveat
+    caveat = standard_cost_caveat()
+    if caveat:
+        print(f"    成本        {caveat}")
+
+    if rich is not None and not rich:
+        print()
+        print("  ⚠️ 現在 0 筆持倉,所以**持倉欄位到今天還是沒有被驗證過**。")
+        print("     第一個標準合約倉開出來的那一刻,這份報告會是第一個")
+        print("     說話的東西 —— 在那之前不要當成欄位是對的。")
     return 0
 
 
