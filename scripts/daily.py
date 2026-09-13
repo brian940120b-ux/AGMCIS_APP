@@ -118,9 +118,13 @@ def _report() -> str:
                     rows_liq.append(json.loads(ln))
         liq = (rows_liq[-1].get("liquidated") if rows_liq else None) or []
         if liq:
-            lines.insert(1, f"\n💥 <b>強平發生</b>:{esc(', '.join(
-                x.replace('-USDT', '') for x in liq))}"
-                f"\n該倉已於強平價強制平倉,損失止於該倉保證金(逐倉)。")
+            # 這一段的 f-string 刻意不在 {} 裡換行:那是 Python 3.12
+            # 才合法的寫法(PEP 701),而 3.11 會在**載入時**就
+            # SyntaxError —— 整支腳本一行都跑不到。記帳與日報都在這裡。
+            names = ", ".join(x.replace("-USDT", "") for x in liq)
+            lines.insert(1, f"\n💥 <b>強平發生</b>:{esc(names)}"
+                            f"\n該倉已於強平價強制平倉,"
+                            f"損失止於該倉保證金(逐倉)。")
     except OSError:
         pass
 
