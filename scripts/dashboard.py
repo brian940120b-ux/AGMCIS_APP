@@ -30,11 +30,19 @@ import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from core import ratelimit
 
+# ⚠️ **這一行必須在任何 core / portfolio / exchange 的 import 之前。**
+#
+# `python scripts/dashboard.py` 的 sys.path[0] 是 `scripts/`,不是
+# 根目錄 —— 沒有這一行,`from core import ...` 一定 ModuleNotFoundError。
+#
+# 2026-09-13:`from core import ratelimit` 被排到了這一行**上面**,
+# 於是面板從那次 commit 起就再也起不來,systemd 重啟了 93 次。
+# 而 331 條測試全綠 —— 因為 pytest 會自己把根目錄放進 sys.path,
+# systemd 不會。**測試跑得起來,不代表服務跑得起來。**
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import interpreter
+from core import interpreter, ratelimit
 
 # 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
 interpreter.require()

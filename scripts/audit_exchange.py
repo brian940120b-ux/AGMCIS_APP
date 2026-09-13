@@ -17,11 +17,14 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from core import ratelimit
 
+# ⚠️ 這一行必須在任何 core / portfolio / exchange 的 import 之前 ——
+#    `python scripts/audit_exchange.py` 的 sys.path[0] 是 `scripts/`。
+#    2026-09-13:這裡跟 dashboard.py 犯了同一個錯,而 dashboard 那個
+#    讓面板重啟了 93 次。tests/test_scripts_actually_start.py 現在釘著。
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import interpreter
+from core import interpreter, ratelimit
 
 # 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
 interpreter.require()

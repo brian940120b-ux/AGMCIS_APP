@@ -745,6 +745,49 @@ BingX 逐幣真實槓桿上限(20×~150×,依幣種與倉位分層)藏在需要 
 開機自啟已移除」,而 `systemctl` 顯示 `agmcis-wild.service active running`。
 憲法說關了,機器說開著。以機器為準去查,不要以文件為準。
 
+### ⚠ 測試跑得起來,不代表服務跑得起來(2026-09-13)
+
+面板 `agmcis-dash` 從 commit `e4f404a` 起就再也起不來,而**沒有人發現**:
+
+```
+File "/root/agmcis/scripts/dashboard.py", line 33, in <module>
+    from core import ratelimit
+ModuleNotFoundError: No module named 'core'
+agmcis-dash.service: Scheduled restart job, restart counter is at 93
+```
+
+原因只有一行:`from core import ratelimit` 被排到了
+`sys.path.insert(0, 根目錄)` 的**上面**。
+`python scripts/dashboard.py` 的 `sys.path[0]` 是 `scripts/`,不是根目錄。
+
+**為什麼 331 條測試全綠:pytest 會自己把 rootdir 放進 `sys.path`。**
+所以測試裡 `import scripts.dashboard` 一路順暢,而 systemd 用
+`ExecStart=.../python scripts/dashboard.py` 跑的時候必死。
+
+而它壞掉的方式最惡劣 —— **每一層都說一切正常**:
+
+  · systemd 的 `Type=simple` 在行程 fork 出來那一刻就報 `active`
+  · `systemctl restart` 看起來成功,`is-active` 回 `active`
+  · 舊的行程還握著埠,所以瀏覽器照常有畫面 —— 只是永遠是舊的
+  · 唯一知道真相的是 journalctl 裡那個往上跳的 restart counter,
+    而沒有人在看它
+
+我因此連續三輪猜錯:先猜「沒重啟」,再猜「埠被占了」。
+兩次都是**一個聽起來很確定、但其實沒有被完整問過的答案** ——
+第九、第十次。
+
+擋住它的是 `tests/test_scripts_actually_start.py`:
+
+  · AST 掃 `scripts/` 每一支,任何第一方 import 排在
+    `sys.path.insert` 之前就紅。它當場又抓出 `audit_exchange.py`
+    犯了同一個錯。
+  · 而且**真的用 systemd 的方式跑一次面板**(清掉 PYTHONPATH、
+    `python scripts/dashboard.py`),等它綁上埠才算過 ——
+    靜態檢查會漏掉下一種沒想到的死法。
+
+面板現在啟動時把版本印進日誌第一行,綁不上埠時明說
+「已經有另一個行程占著,舊的會繼續服務,所以外面看起來一切正常」。
+
 ## 六、舊系統的教訓(刪掉程式碼,留下教訓)
 
 **為什麼刪:** 帳本 1391 案、十個積木**全部負期望**、六族依規則蓋棺。
