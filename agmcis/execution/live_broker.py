@@ -104,6 +104,8 @@ class LiveBroker(Broker):
         self._adapter = adapter
         self._notional_cap = notional_cap
         self._market_type = market_type or MarketType.PERPETUAL
+        # 帳戶層級的持倉模式,查到才快取(見 _hedge_mode)。
+        self._hedge_mode_cache = None
 
     # ---------------- 最後一道上限 ----------------
 
@@ -242,26 +244,61 @@ class LiveBroker(Broker):
             position_side, PositionSide.BOTH,
         ).value.upper()}
 
+    def _hedge_mode(self):
+        """
+        帳戶是不是雙向持倉。**不知道就回 None。**
+
+        不能讀部位裡的 `hedged` 欄位 —— ccxt 4.5.78 的 bingx
+        `parse_position()` 把它**寫死成 None**,所以那個欄位永遠是假值。
+        第一版就是讀它,結果是雙向持倉永遠不會帶 positionSide,
+        等於那個修正從來沒有生效過。
+
+        正確來源是 `fetch_position_mode`(BingX 的 positionSideDual
+        端點),它直接回答這個問題。這是帳戶層級的設定,不會每張單改,
+        所以查一次就快取 —— 但**查失敗不快取**,免得一次網路抖動
+        讓整個行程都用錯的假設下單。
+        """
+        if self._hedge_mode_cache is not None:
+            return self._hedge_mode_cache
+
+        try:
+            mode = self._adapter.get_position_mode(
+                market_type=self._market_type,
+            )
+        except Exception as exc:
+            logger.error("LIVE | 查不到持倉模式 | %s", exc)
+            return None
+
+        hedged = (mode or {}).get("hedged")
+        if not isinstance(hedged, bool):
+            logger.error("LIVE | 持倉模式回應看不懂:%r", mode)
+            return None
+
+        self._hedge_mode_cache = hedged
+        return hedged
+
     def _exit_params(self, position, extra=None):
         """
         出場單(停損、縮倉、平倉)要帶的參數。
 
-        進場單的 positionSide 來自 order_request,出場單沒有那個東西 ——
-        所以從**交易所回報的部位**推。這一段是後補的:第一版的出場單
-        完全沒帶 positionSide,單向持倉沒事,雙向持倉就是進場帶了、
+        進場單的 positionSide 來自 order_request,出場單沒有那個東西。
+        第一版的出場單完全沒帶 —— 單向持倉沒事,雙向持倉就是進場帶了、
         出場沒帶,而那正是「平倉單變成反手開倉」的那條路。
 
-        只在部位自己說 hedged 的時候才帶。單向持倉的帳戶送
-        positionSide 會被交易所拒絕,而猜錯的方向要往「不送」倒 ——
-        少一個參數是被拒絕,帶錯一個參數是開了一張反向的單。
+        只有在**確定是雙向持倉**而且部位方向明確時才帶。
+        不知道就不帶:少一個參數會被交易所拒絕(而拒絕掉的停損會被
+        第十八節的緊急流程接住),帶錯一個參數是開了一張反向的單。
         """
         params = dict(extra or {})
 
-        if not position.get("hedged"):
+        if self._hedge_mode() is not True:
             return params or None
 
         side = str(position.get("side") or "").lower()
         if side not in ("long", "short"):
+            logger.error(
+                "LIVE | 雙向持倉但部位方向是 %r,不帶 positionSide", side,
+            )
             return params or None
 
         params["positionSide"] = side.upper()

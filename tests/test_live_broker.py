@@ -36,12 +36,15 @@ class FakeAdapter:
     name = "fake"
 
     def __init__(self, positions=None, open_orders=None, order=None, fail=None,
-                 history=None):
+                 history=None, hedged=False):
         self.calls = []
         self.positions = list(positions or [])
         self.open_orders = list(open_orders or [])
         self.order = dict(order or {})
         self.history = list(history or [])
+        # 帳戶層級的持倉模式。ccxt 的 parse_position 把部位裡的 hedged
+        # 寫死成 None,所以真實世界只有這個端點答得出來。
+        self.hedged = hedged
         self.fail = set(fail or ())
 
     def _record(self, what, **kwargs):
@@ -77,6 +80,10 @@ class FakeAdapter:
     def get_positions(self, symbols=None):
         self._record("get_positions", symbols=symbols)
         return list(self.positions)
+
+    def get_position_mode(self, symbol=None, market_type=None):
+        self._record("get_position_mode", symbol=symbol)
+        return {"hedged": self.hedged}
 
     def names(self):
         return [name for name, _ in self.calls]
@@ -374,7 +381,7 @@ class TestProtection(unittest.TestCase):
         「平倉單變成反手開倉」的那條路。
         """
         adapter = FakeAdapter(
-            positions=[dict(LONG, hedged=True)], order=FILLED,
+            positions=[dict(LONG)], order=FILLED, hedged=True,
         )
 
         broker(adapter).ensure_stop_loss("BTC-USDT", 49000.0)
@@ -382,6 +389,80 @@ class TestProtection(unittest.TestCase):
         params = adapter.kwargs_of("create_order")[0]["params"]
         self.assertEqual(params["positionSide"], "LONG")
         self.assertEqual(params["stopPrice"], 49000.0)
+
+    def test_the_hedged_field_on_a_position_is_never_trusted(self):
+        """
+        這是一個真 bug 的回歸測試。
+
+        第一版讀 position["hedged"]。ccxt 4.5.78 的 bingx parse_position
+        把那個欄位**寫死成 None**,所以雙向持倉永遠不會帶 positionSide ——
+        那個修正從來沒有生效過。而測試是綠的,因為假 adapter 自己捏造了
+        一個真實世界不存在的欄位。
+
+        現在就算部位上掛著 hedged=True,只要帳戶端點說是單向持倉,
+        就不帶 positionSide。
+        """
+        adapter = FakeAdapter(
+            positions=[dict(LONG, hedged=True)], order=FILLED, hedged=False,
+        )
+
+        broker(adapter).ensure_stop_loss("BTC-USDT", 49000.0)
+
+        self.assertNotIn(
+            "positionSide", adapter.kwargs_of("create_order")[0]["params"],
+        )
+
+    def test_an_unreadable_position_mode_sends_no_position_side(self):
+        """
+        不知道就不帶。少一個參數會被交易所拒絕,而拒絕掉的停損會被
+        第十八節的緊急流程接住;帶錯一個參數是開了一張反向的單。
+        """
+        adapter = FakeAdapter(
+            positions=[dict(LONG)], order=FILLED, hedged=True,
+            fail={"get_position_mode"},
+        )
+
+        broker(adapter).ensure_stop_loss("BTC-USDT", 49000.0)
+
+        self.assertNotIn(
+            "positionSide", adapter.kwargs_of("create_order")[0]["params"],
+        )
+
+    def test_a_position_mode_answer_it_cannot_read_is_refused(self):
+        """回應看不懂也算不知道,不是預設單向。"""
+        adapter = FakeAdapter(positions=[dict(LONG)], order=FILLED)
+        adapter.get_position_mode = lambda **kw: {"hedged": "yes"}
+
+        live = broker(adapter)
+
+        self.assertIsNone(live._hedge_mode())
+
+    def test_the_position_mode_is_only_queried_once(self):
+        """帳戶層級的設定,不會每張單改。每次下單都問一次是浪費。"""
+        adapter = FakeAdapter(
+            positions=[dict(LONG)], order=FILLED, hedged=True,
+        )
+        live = broker(adapter)
+
+        live.ensure_stop_loss("BTC-USDT", 49000.0)
+        live.ensure_stop_loss("BTC-USDT", 48000.0)
+
+        self.assertEqual(adapter.names().count("get_position_mode"), 1)
+
+    def test_a_failed_query_is_not_cached(self):
+        """
+        一次網路抖動不該讓整個行程都用錯的假設下單。
+        """
+        adapter = FakeAdapter(
+            positions=[dict(LONG)], order=FILLED, hedged=True,
+            fail={"get_position_mode"},
+        )
+        live = broker(adapter)
+
+        self.assertIsNone(live._hedge_mode())
+
+        adapter.fail = set()
+        self.assertIs(live._hedge_mode(), True)
 
     def test_a_one_way_position_gets_no_position_side(self):
         """
@@ -439,7 +520,7 @@ class TestClosing(unittest.TestCase):
 
     def test_a_hedged_close_carries_the_position_side(self):
         adapter = FakeAdapter(
-            positions=[dict(SHORT, hedged=True)], order=FILLED,
+            positions=[dict(SHORT)], order=FILLED, hedged=True,
         )
 
         broker(adapter).close_position("BTC-USDT")
@@ -449,12 +530,12 @@ class TestClosing(unittest.TestCase):
 
     def test_a_hedged_position_with_no_direction_gets_no_position_side(self):
         """
-        hedged=True 但方向欄位是空的 —— 那是「不知道」,不是「LONG」。
+        雙向持倉但方向欄位是空的 —— 那是「不知道」,不是「LONG」。
         不過這條路走不到 create_order:方向不明本來就不平倉。
         """
-        live = broker(FakeAdapter())
+        live = broker(FakeAdapter(hedged=True))
 
-        self.assertIsNone(live._exit_params({"hedged": True, "side": ""}))
+        self.assertIsNone(live._exit_params({"side": ""}))
 
     def test_an_unknown_direction_is_never_guessed(self):
         """猜錯的代價是把倉位開成兩倍,不是平掉。"""

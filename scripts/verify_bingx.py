@@ -211,6 +211,89 @@ def _market_of(adapter, symbol):
         return None
 
 
+def _live_path_endpoints(adapter):
+    """
+    跑 LiveBroker 依賴的三個唯讀端點,並把**原始欄位長相**印出來。
+
+    印原始欄位是重點。有一個問題這台機器答不了:單向持倉的時候
+    BingX 的 `positionSide` 回什麼?如果回 "BOTH",ccxt 會把
+    `side` 設成 "both",而 LiveBroker 的 `_exit_side()` 看到不是
+    long / short 就拒絕平倉 —— 那會讓單向持倉的部位平不掉。
+
+    猜錯的代價太大(第五節:不要靠記憶猜),所以這裡不猜,
+    直接把你帳戶上的實際值印出來。
+    """
+    try:
+        mode = adapter.get_position_mode()
+        hedged = (mode or {}).get("hedged")
+        record(
+            "持倉模式", PASS if isinstance(hedged, bool) else WARN,
+            f"hedged={hedged!r}"
+            + ("(雙向持倉:出場單會帶 positionSide)" if hedged is True else "")
+            + ("(單向持倉:出場單不帶 positionSide)" if hedged is False else "")
+            + ("  ⚠️ 看不懂的回應會讓 LiveBroker 一律不帶 positionSide"
+               if not isinstance(hedged, bool) else ""),
+        )
+    except Exception as exc:
+        record("持倉模式", WARN,
+               f"{type(exc).__name__}: {exc}\n"
+               "LiveBroker 查不到時會一律不帶 positionSide。")
+
+    try:
+        orders = adapter.get_open_orders(SYMBOL)
+        record("未結掛單查詢", PASS, f"{len(orders)} 張")
+    except Exception as exc:
+        record("未結掛單查詢", WARN,
+               f"{type(exc).__name__}: {exc}\n"
+               "LiveBroker 查不到掛單時會把部位視為**沒有停損保護**。")
+
+    try:
+        history = adapter.get_order_history(SYMBOL)
+        record("訂單歷史查詢", PASS, f"{len(history)} 筆")
+        if history:
+            sample = history[0]
+            record(
+                "歷史訂單的 clientOrderId", PASS,
+                f"統一欄位 {sample.get('clientOrderId')!r} / "
+                f"原始欄位 {(sample.get('info') or {}).get('clientOrderID')!r}",
+            )
+    except Exception as exc:
+        record("訂單歷史查詢", WARN,
+               f"{type(exc).__name__}: {exc}\n"
+               "對帳查不到歷史時會拋例外,訂單留在「狀態不明」。")
+
+    # ---- 這台機器答不了的那個問題 ----
+    try:
+        positions = adapter.get_positions()
+    except Exception as exc:
+        record("部位方向欄位", WARN, f"{type(exc).__name__}: {exc}")
+        return
+
+    live = [p for p in positions if p.get("contracts")]
+
+    if not live:
+        record("部位方向欄位", SKIP,
+               "目前沒有部位,所以看不到 side 實際會是什麼值。\n"
+               "**開了第一個部位之後請再跑一次這支腳本。**\n"
+               "要確認的是:單向持倉時 side 是 'long'/'short' 還是 'both'。\n"
+               "如果是 'both',LiveBroker 會拒絕平倉 —— 那要先修。")
+        return
+
+    for position in live:
+        side = position.get("side")
+        info = position.get("info") or {}
+        ok = str(side).lower() in ("long", "short")
+        record(
+            f"部位方向欄位 {position.get('symbol')}",
+            PASS if ok else WARN,
+            f"side={side!r}  原始 positionSide={info.get('positionSide')!r}  "
+            f"positionAmt={info.get('positionAmt')!r}"
+            + ("" if ok else
+               "\n⚠️ side 不是 long / short,LiveBroker 會拒絕平倉這個部位。"
+               "\n   這是已知的未解問題,見 ROADMAP。"),
+        )
+
+
 def main():
     print("=" * 64)
     print("AGMCIS — BingX 唯讀連線驗證")
@@ -380,6 +463,19 @@ def main():
         record("快照", SKIP,
                "未指定 --write-specs。系統目前用的是保守猜測值 ——\n"
                "維持保證金率、費率、資金費率都不是 BingX 的實際規格。")
+
+    # ---------------- 9. 實單路徑用得到的唯讀端點 ----------------
+    #
+    # LiveBroker 靠這三個回答三個問題:這個部位有沒有停損、
+    # 這張狀態不明的單怎麼了、平倉單要不要帶 positionSide。
+    # 三個都是唯讀的,但**三個都沒有在真的 BingX 上跑過**。
+    # 在這裡先跑一次,總比第一次實單的時候才發現好。
+    section("9. 實單路徑會用到的唯讀端點")
+
+    if not settings.has_exchange_credentials():
+        record("實單路徑端點", SKIP, "未設定金鑰")
+    else:
+        _live_path_endpoints(adapter)
 
     # ---------------- 總結 ----------------
     print("\n" + "=" * 64)

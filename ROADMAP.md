@@ -103,7 +103,17 @@ Phase 0–17 之後,把 Master Prompt 全部 106 節重新對照了一次,
    縮倉、平倉在 LiveBroker 裡寫死 MARKET —— 那是刻意的,緊急流程需要
    部位真的消失,而一張限價平倉單可能不會成交。TRAILING_STOP 由
    `position_monitor` 在本地執行,不是交易所的掛單型別。
-7. **TP/SL 的參數還沒經過回測驗證。** 1R/2R/3R 與 30/30/40 是起點,
+7. **單向持倉時 `side` 會是什麼值,還不知道。**
+   ccxt 的 bingx `parse_position()` 把 `side` 設成 BingX 回的
+   `positionSide`。雙向持倉是 LONG / SHORT 沒問題;**單向持倉如果回
+   `BOTH`,`side` 就是 `"both"`,而 `LiveBroker._exit_side()` 看到不是
+   long / short 會拒絕平倉** —— 那會讓單向持倉的部位平不掉。
+
+   第五節說不要靠記憶猜,而這台機器連不到 BingX,所以不猜。
+   `scripts/verify_bingx.py` 第 9 節會把你帳戶上的實際值印出來
+   (有部位的時候才看得到,所以開了第一個部位之後要再跑一次)。
+   如果真的是 `both`,`_exit_side()` 要先修才能接實單。
+8. **TP/SL 的參數還沒經過回測驗證。** 1R/2R/3R 與 30/30/40 是起點,
    不是結論 —— 第五十六與五十七節都要求由回測決定。
 
 ### 已修掉
