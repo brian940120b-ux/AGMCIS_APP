@@ -56,8 +56,25 @@ logger = logging.getLogger("agmcis.execution.live_broker")
 # 交易所回報的訂單狀態 → 我們的說法。
 # 沒有對應的狀態一律翻成 "unknown" —— 猜一個比較樂觀的值,
 # 會讓對帳把一張還活著的單當成結案。
+#
+# 這裡的鍵是 **ccxt 統一之後**的狀態,不是 BingX 的原始字串。
+# ccxt 4.5.78 的 bingx parse_order_status() 產生的是:
+#
+#     NEW / PENDING / PARTIALLY_FILLED / RUNNING -> open
+#     FILLED                                     -> closed
+#     CANCELED / CANCELLED / FAILED              -> canceled
+#     (認不出來的原樣回傳)
+#
+# 注意 **PARTIALLY_FILLED 也是 open** —— 部分成交與完全沒成交在這個
+# 欄位上長得一模一樣,所以 _as_order_state() 還要看成交量。
+#
+# expired 與 rejected 這兩個 bingx 目前不會產生(FAILED 走 canceled),
+# 留著是因為認不出來的狀態會原樣回傳,而別的路徑可能送這兩個字進來。
+# ⚠️ 值必須是 OrderState 認得的字串。"submitted" 不是 —— 狀態機叫
+# ACCEPTED。翻出一個狀態機不認得的字串,OrderState.parse() 會退回
+# UNKNOWN,對帳就永遠解不掉那張單。有測試釘住這件事。
 _ORDER_STATES = {
-    "open": "submitted",
+    "open": "accepted",
     "closed": "filled",
     "filled": "filled",
     "canceled": "cancelled",
@@ -586,13 +603,32 @@ class LiveBroker(Broker):
         return None
 
     def _as_order_state(self, order):
+        """
+        把 ccxt 的訂單翻成狀態機認得的說法。
+
+        **不能只查狀態字串。** ccxt 4.5.78 的 bingx `parse_order_status()`
+        把 `PARTIALLY_FILLED` 映射成 `open` —— 部分成交與完全沒成交在
+        那個欄位上長得一模一樣。照著翻,一張部分成交的單會被對帳標成
+        SUBMITTED,然後**剩餘量沒有人去撤**,而那張還活著的掛單會在
+        稍後成交,那時候沒有人在管它。
+
+        所以 open 還要看成交量:成交量大於 0 就是部分成交。
+        """
+        status = str(order.get("status") or "").lower()
+        state = _ORDER_STATES.get(status, "unknown")
+        filled = _as_float(order.get("filled"))
+
+        if state == "accepted" and filled is not None and filled > 0:
+            state = "partially_filled"
+
         return {
-            "state": _ORDER_STATES.get(
-                str(order.get("status") or "").lower(), "unknown",
-            ),
-            "filled_quantity": _as_float(order.get("filled")),
+            "state": state,
+            "filled_quantity": filled,
             "average_price": _as_float(order.get("average")),
             "exchange_order_id": str(order.get("id") or "") or None,
+            # 原始狀態字串留著。事後要查「為什麼判成這個」,
+            # 需要看到翻譯之前的那個值。
+            "exchange_status": order.get("status"),
             "raw": order,
         }
 
@@ -635,11 +671,44 @@ def _client_id_of(order):
 
 
 def _is_stop_order(order):
+    """
+    這張掛單是不是停損。
+
+    **不能只看 `type`。** ccxt 4.5.78 的 bingx `parse_order_type()` 把
+    `stop_market` 映射成 `market`、`stop_limit` 映射成 `limit` ——
+    停損單回來之後,`type` 裡的 "stop" 字樣已經不見了。
+
+    第一版就是只看 `type` 加上一個讀原始欄位字串的退路。主判斷永遠
+    失敗,整個功能靠那條退路撐著,而退路是在賭 BingX 的拼法。
+    如果兩邊都沒中,`has_protection()` 會永遠回 False ——
+    緊急流程就會在每一次輪詢重新撤掉再掛上停損,沒完沒了。
+
+    可靠的訊號是 ccxt **明文承諾**會設的那兩個價格欄位:
+    `parse_order()` 看到 stopPrice 就會填 `stopLossPrice` 或
+    `triggerPrice`。有觸發價的掛單就是條件單。
+
+    字串比對留著當補充,不當主力。
+    """
+    if order.get("stopLossPrice") is not None:
+        return True
+    if order.get("triggerPrice") is not None:
+        return True
+
     kind = str(order.get("type") or "").lower()
     if "stop" in kind:
         return True
+
     info = order.get("info") or {}
-    return "stop" in str(info.get("type") or "").lower()
+    for key in ("type", "origType", "stopPrice", "StopPrice"):
+        value = info.get(key)
+        if value in (None, "", "0", 0):
+            continue
+        if key in ("stopPrice", "StopPrice"):
+            return True
+        if "stop" in str(value).lower():
+            return True
+
+    return False
 
 
 def _is_reduce_only(order):

@@ -327,6 +327,59 @@ class TestProtection(unittest.TestCase):
 
         self.assertFalse(broker(adapter).has_protection("BTC-USDT"))
 
+    def test_a_stop_order_is_recognised_after_ccxt_renamed_its_type(self):
+        """
+        這是一個真 bug 的回歸測試。
+
+        ccxt 4.5.78 的 bingx parse_order_type() 把 stop_market 映射成
+        market —— 停損單回來之後 type 裡的 "stop" 已經不見了。第一版
+        只看 type,主判斷因此永遠失敗,整個功能靠一條讀原始字串的退路
+        撐著,而那條退路是在賭 BingX 的拼法。
+
+        兩邊都沒中的話 has_protection() 永遠回 False,緊急流程會在每次
+        輪詢重新撤掉再掛上停損,沒完沒了。
+
+        現在認 ccxt 明文承諾會設的觸發價欄位。
+        """
+        ccxt_shaped = {
+            "id": "s", "type": "market", "reduceOnly": True,
+            "stopLossPrice": 49000.0, "triggerPrice": None,
+            "info": {"type": "STOP_MARKET"},
+        }
+
+        self.assertTrue(broker(FakeAdapter(open_orders=[ccxt_shaped]))
+                        .has_protection("BTC-USDT"))
+
+    def test_a_trigger_price_alone_is_enough(self):
+        """連原始欄位都沒帶的時候,觸發價還在。"""
+        order = {
+            "id": "s", "type": "market", "reduceOnly": True,
+            "triggerPrice": 49000.0, "info": {},
+        }
+
+        self.assertTrue(broker(FakeAdapter(open_orders=[order]))
+                        .has_protection("BTC-USDT"))
+
+    def test_the_raw_stop_price_is_also_accepted(self):
+        for key in ("stopPrice", "StopPrice"):
+            with self.subTest(key=key):
+                order = {
+                    "id": "s", "type": "market", "reduceOnly": True,
+                    "info": {key: "49000"},
+                }
+                self.assertTrue(broker(FakeAdapter(open_orders=[order]))
+                                .has_protection("BTC-USDT"))
+
+    def test_a_zero_stop_price_is_not_a_stop(self):
+        """BingX 用 0 表示「沒有觸發價」。0 不是一個觸發價。"""
+        order = {
+            "id": "s", "type": "market", "reduceOnly": True,
+            "info": {"stopPrice": "0"},
+        }
+
+        self.assertFalse(broker(FakeAdapter(open_orders=[order]))
+                         .has_protection("BTC-USDT"))
+
     def test_a_limit_order_is_not_protection(self):
         adapter = FakeAdapter(open_orders=[
             {"id": "l", "type": "limit", "reduceOnly": True},
@@ -641,7 +694,7 @@ class TestTheClientIdLookup(unittest.TestCase):
 
         found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
 
-        self.assertEqual(found["state"], "submitted")
+        self.assertEqual(found["state"], "accepted")
         self.assertEqual(found["exchange_order_id"], "ex-1")
 
     def test_a_finished_order_is_found_in_the_history(self):
@@ -765,6 +818,82 @@ class TestTheClientIdLookup(unittest.TestCase):
 
 class TestQueries(unittest.TestCase):
 
+    def test_a_partially_filled_order_is_not_reported_as_submitted(self):
+        """
+        這是一個真 bug 的回歸測試。
+
+        ccxt 4.5.78 的 bingx parse_order_status() 把 PARTIALLY_FILLED
+        映射成 open —— 部分成交與完全沒成交在那個欄位上長得一樣。
+        照著翻,對帳會把部分成交的單標成 SUBMITTED,然後剩餘量沒有人
+        去撤,而那張還活著的掛單會在稍後成交,那時候沒有人在管它。
+        """
+        adapter = FakeAdapter(open_orders=[{
+            "id": "x", "clientOrderId": "cid-1", "status": "open",
+            "filled": 0.004,
+        }])
+
+        found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertEqual(found["state"], "partially_filled")
+        self.assertEqual(found["filled_quantity"], 0.004)
+
+    def test_an_untouched_open_order_is_accepted_not_partial(self):
+        adapter = FakeAdapter(open_orders=[{
+            "id": "x", "clientOrderId": "cid-1", "status": "open",
+            "filled": 0,
+        }])
+
+        found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertEqual(found["state"], "accepted")
+
+    def test_every_state_it_can_produce_is_a_real_order_state(self):
+        """
+        這是一個真 bug 的回歸測試,而且是這一類 bug 的總防線。
+
+        第一版把 open 翻成 "submitted"。狀態機沒有那個狀態 ——
+        它叫 ACCEPTED。OrderState.parse("submitted") 退回 UNKNOWN,
+        所以一張在交易所上活著的單會被對帳判成「狀態不明」,永遠解不掉。
+
+        這條測試掃過對照表的**每一個值**,加上程式碼會另外產生的
+        partially_filled 與 unknown。以後再多一個狀態也跑不掉。
+        """
+        from agmcis.core.enums import OrderState
+        from agmcis.execution import live_broker as lb
+
+        produced = set(lb._ORDER_STATES.values()) | {
+            "partially_filled", "unknown",
+        }
+
+        for value in sorted(produced):
+            with self.subTest(state=value):
+                parsed = OrderState.parse(value, None)
+                self.assertIsNotNone(
+                    parsed, f"{value!r} 不是 OrderState,對帳會判成 UNKNOWN",
+                )
+                self.assertEqual(parsed.value, value)
+
+    def test_the_partially_filled_state_exists_in_the_state_machine(self):
+        """
+        翻出一個狀態機不認得的字串,等於翻成 unknown。
+        """
+        from agmcis.core.enums import OrderState
+
+        self.assertIs(
+            OrderState.parse("partially_filled"), OrderState.PARTIALLY_FILLED,
+        )
+
+    def test_the_raw_exchange_status_is_kept(self):
+        """事後要查「為什麼判成這個」,需要看到翻譯之前的值。"""
+        adapter = FakeAdapter(open_orders=[{
+            "id": "x", "clientOrderId": "cid-1", "status": "open",
+            "filled": 0.004,
+        }])
+
+        found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertEqual(found["exchange_status"], "open")
+
     def test_an_unknown_status_stays_unknown(self):
         """猜一個比較樂觀的值,會讓對帳把一張還活著的單當成結案。"""
         adapter = FakeAdapter(open_orders=[
@@ -777,7 +906,7 @@ class TestQueries(unittest.TestCase):
 
     def test_known_statuses_are_translated(self):
         for raw, expected in (
-            ("open", "submitted"), ("closed", "filled"),
+            ("open", "accepted"), ("closed", "filled"),
             ("canceled", "cancelled"), ("rejected", "rejected"),
         ):
             with self.subTest(raw=raw):
