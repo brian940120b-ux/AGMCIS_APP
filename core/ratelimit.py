@@ -284,16 +284,32 @@ def requests_get(session, url: str, **kwargs):
 
 
 def state() -> dict:
-    """給 /health 看的。不取令牌,只看一眼。"""
-    try:
-        raw = json.loads(LOCK.read_text(encoding="utf-8") or "{}")
-    except (OSError, json.JSONDecodeError):
-        return {"tokens": None, "blocked": False, "blocked_for_s": None}
-    bucket = Bucket.from_dict(raw) if raw else Bucket.fresh()
+    """
+    給 /health 看的。不取令牌,只看一眼。
+
+    分得清「還沒有人發過請求」與「狀態檔壞了」:
+
+      · 檔案不存在 = 這台機器還沒對交易所發過請求。桶是滿的,正常。
+      · 檔案讀不懂 = 有東西在亂寫它。**這要回報成不正常** ——
+        回一個 tokens=None 然後讓上層當成健康,就是靜默失敗。
+    """
+    if not LOCK.exists():
+        bucket = Bucket.fresh()
+        raw_ok = True
+    else:
+        try:
+            text = LOCK.read_text(encoding="utf-8")
+            raw = json.loads(text) if text.strip() else {}
+            bucket = Bucket.from_dict(raw) if raw else Bucket.fresh()
+            raw_ok = True
+        except (OSError, json.JSONDecodeError):
+            return {"tokens": None, "readable": False, "blocked": False,
+                    "blocked_for_s": None, "rate_per_s": RATE_PER_S,
+                    "burst": BURST}
     now = time.time()
     _refill(bucket, now)
     remaining = max(0.0, bucket.blocked_until - now)
-    return {"tokens": round(bucket.tokens, 2),
+    return {"tokens": round(bucket.tokens, 2), "readable": raw_ok,
             "blocked": remaining > 0,
             "blocked_for_s": round(remaining, 1) if remaining > 0 else None,
             "rate_per_s": RATE_PER_S, "burst": BURST}

@@ -44,6 +44,20 @@ PORT = int(os.environ.get("DASHBOARD_PORT", "8765"))
 # 讀檔:全部容錯,讀不到就說讀不到,絕不編數字
 # ══════════════════════════════════════════════════════════
 def _env(key: str, default: str = "") -> str:
+    """
+    設定值:環境變數優先,再看 .env。
+
+    原本這裡**只讀 .env,完全不看環境變數** —— 意思是 systemd unit 裡
+    寫 `Environment=DASHBOARD_KEY=...` 對面板毫無作用,而寫的人不會
+    收到任何提示。DASHBOARD_KEY 決定面板要不要驗證,一個「設了卻沒
+    生效」的存取控制,比明白地沒有存取控制更糟。
+
+    `core/config.load_env()` 的註解寫的是「已存在的環境變數不覆蓋
+    —— 系統層設定優先」。這裡跟它對齊。
+    """
+    from_env = os.environ.get(key)
+    if from_env:
+        return from_env.strip()
     try:
         for line in (BASE / ".env").read_text(encoding="utf-8").splitlines():
             if line.startswith(f"{key}=") and not line.startswith("#"):
@@ -1280,12 +1294,50 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _send_json(self, status: int, payload) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def do_GET(self):
         from urllib.parse import parse_qs, urlparse
         key = _env("DASHBOARD_KEY")
         u = urlparse(self.path)
         q = parse_qs(u.query)
-        if key and q.get("key", [""])[0] != key:
+        authorised = (not key) or q.get("key", [""])[0] == key
+
+        # ── /health(第六十六條)—— 在金鑰檢查**之前** ────────────
+        # 監控探針帶不了 DASHBOARD_KEY。一個要金鑰才能問的健康檢查,
+        # 在最需要它的時候(沒有人在旁邊)剛好用不了。
+        #
+        # 不帶金鑰只會拿到每條檢查的名字與過不過 —— 那正是探針需要的
+        # 全部。數字與細節要帶金鑰。
+        #
+        # 任何一條不過就回 503。**一個永遠回 200 的 /health 比沒有
+        # /health 危險** —— 它會讓上面每一層監控都變綠燈,
+        # 而綠燈的理由是它什麼都沒在看(教訓第 5 條)。
+        if u.path.rstrip("/") == "/health":
+            from core import health
+            try:
+                status, payload = health.report(detailed=authorised)
+            except Exception as e:
+                # 連 report 本身都爆炸 —— 那也是一種不健康,
+                # 而且要說得出是什麼爆炸,不是丟一個 500 讓人猜。
+                status, payload = 503, {
+                    "status": "unhealthy",
+                    "checks": [{"name": "健康檢查本身", "ok": False,
+                                "detail": f"{type(e).__name__}: {e}"}]}
+            self._send_json(status, payload)
+            return
+
+        if not authorised:
             self.send_response(403)
             self.send_header("Content-Length", "0")
             self.end_headers()
