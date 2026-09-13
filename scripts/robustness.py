@@ -43,6 +43,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import interpreter
+
+# 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
+interpreter.require()
+
 from portfolio.paper import (LEVERAGE_CAP, STRATEGY, SYMBOLS, VOL_LOOKBACK,
                              VOL_TARGET_ANNUAL_PCT)
 from portfolio.rules import hold_all, registry, vol_target

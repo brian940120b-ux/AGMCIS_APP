@@ -34,6 +34,11 @@ from core import ratelimit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import interpreter
+
+# 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
+interpreter.require()
+
 BASE = Path(__file__).resolve().parents[1]
 DATA = BASE / "data"
 HIST = DATA / "history"

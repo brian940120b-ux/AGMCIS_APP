@@ -49,6 +49,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import interpreter
+
+# 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
+interpreter.require()
+
 from portfolio import correlation
 from portfolio.paper import MAIN, _fresh_bars
 from portfolio.rules import registry, vol_target

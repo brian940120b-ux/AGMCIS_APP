@@ -31,6 +31,11 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import interpreter
+
+# 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
+interpreter.require()
+
 from core.logging import get_logger
 from market_data.universe import load as load_pool
 

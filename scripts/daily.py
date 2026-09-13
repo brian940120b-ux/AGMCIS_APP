@@ -23,11 +23,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import interpreter
+
+# 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
+interpreter.require()
+
 from core.config import load_env
 from core.logging import get_logger
 from notify import telegram
 
 log = get_logger("daily")
+
+TRIAL_STATE = Path(__file__).resolve().parents[1] / "data" / "trial_account.json"
 BASE = Path(__file__).resolve().parents[1]
 DATA = BASE / "data"
 
@@ -146,6 +153,62 @@ def _report() -> str:
     return "\n".join(lines)
 
 
+def funding_symbols() -> list[str]:
+    """
+    今天需要哪些幣的資金費歷史。
+
+    ═══ 這個函式為什麼存在(2026-09-13)═══
+    原本這裡寫的是 `refresh_funding(SYMBOLS)` —— 只有主城那 7 個幣。
+
+    但**測試組用的是動態交易池**。它每天重篩,而 2026-09-13 那天
+    挑進來的 18 個幣裡有 1000PEPE-USDT —— 從來沒有人抓過它的
+    資金費歷史。於是:
+
+        SpecMissing: 沒有 1000PEPE-USDT 的資金費率歷史 —— 不猜一個數字
+
+    那個例外是對的(用不完整的資料記帳會靜靜少收資金費、美化績效),
+    錯的是**沒有人去抓那個幣的歷史**。結果是測試組整個 tick 死掉,
+    到 09-13 06:02 巡檢時已經 **73.7 小時沒有記帳**(所以大約從
+    09-10 就開始了),而它帳上有 23 個持倉。
+
+    巡檢每十分鐘報一次,報了三天。偵測不是問題,沒有人動才是。
+
+    ═══ 要抓哪些 ═══
+    三個來源的聯集,少一個都會重演同一件事:
+
+      · 主城的固定 7 幣
+      · 測試組**今天篩出來**的池子 —— 明天要買的東西,今天就要有資料
+      · 兩本帳上**現在還握著**的東西 —— 已經掉出池子的幣還是要收
+        資金費,直到它真的被平掉為止。只抓池子會漏掉正在出場的倉。
+
+    篩選失敗不讓整件事停下來:退回主城 + 持倉,並出聲。
+    """
+    from portfolio.account import Account
+    from portfolio.paper import MAIN, SYMBOLS
+
+    wanted = set(SYMBOLS)
+
+    # 兩本帳上現在握著的
+    for path in (MAIN.state_path, TRIAL_STATE):
+        try:
+            wanted.update(Account.load(path).positions)
+        except Exception as e:
+            log.warning(f"讀不到帳本 {path.name},資金費清單可能不全:{e}")
+
+    # 測試組今天的動態池
+    try:
+        from portfolio import trial
+        picked = trial.screen() or []
+        wanted.update(picked)
+    except Exception as e:
+        # 篩不出來不該讓資金費更新整個停擺 —— 但一定要出聲,
+        # 因為它代表明天測試組可能又會踩到同一顆地雷。
+        log.warning(f"測試組交易池篩選失敗,資金費只涵蓋主城與持倉:{e}")
+        print(f"   ⚠ 測試組交易池篩不出來:{e}")
+
+    return sorted(wanted)
+
+
 def main() -> int:
     print("① 更新日線快取")
     _refresh_universe()
@@ -153,13 +216,14 @@ def main() -> int:
     # 交易所合約規格(數量/價格精度、最小量、費率)。放在記帳之前:
     # 訂單層要靠它把數量調到交易所接受的精度,規格過期會產生會被拒的單。
     try:
-        from portfolio.paper import SYMBOLS
         from portfolio.specs import refresh as refresh_specs
         from portfolio.specs import refresh_funding
         print(f"   交易所規格 {refresh_specs()} 個合約")
         # 資金費率:記帳要收的是交易所**實際結算過**的費率,不是估計值。
         # 抓不到會讓記帳沿用過期資料,所以跟規格一起放在記帳之前。
-        print(f"   資金費結算 {refresh_funding(SYMBOLS)} 筆")
+        wanted = funding_symbols()
+        print(f"   資金費結算 {refresh_funding(wanted)} 筆"
+              f"({len(wanted)} 個標的)")
     except Exception as e:
         # 抓不到就沿用上次的快取(specs 會在超過七天時自己警告),
         # 但這裡必須把錯誤講出來,不能靜靜跳過。

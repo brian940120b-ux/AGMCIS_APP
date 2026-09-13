@@ -22,6 +22,11 @@ import json
 import sys
 from pathlib import Path as _P
 sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+
+from core import interpreter
+
+# 用錯直譯器的時候講人話,而不是丟一個 ModuleNotFoundError 讓人猜。
+interpreter.require()
 from core import ratelimit
 from core.atomic import write_json_atomic
 import subprocess
