@@ -204,13 +204,26 @@ python -c 'from portfolio.specs import refresh_funding; \
 
 ```
 ✅ A 唯讀私有端點      看得到帳戶          exchange/bingx/private.py
-   B 對帳層            兩本帳對得起來      §17
+✅ B 對帳層            兩本帳對得起來      portfolio/reconcile.py
    C 交易所端停損       機器掛了倉還有保護   §18
    D 訂單狀態機 + 冪等  網路抖一下不會重送   §15 §16
+   F 一筆 Demo 實單     驗證持倉欄位形狀
    E Kill Switch       一鍵停止並平倉       §47
-   F Demo 實單          VST 虛擬資金真的下單
    G 實盤最小額         人工簽署,契約八條
 ```
+
+**A 的結果(2026-09-13 實測 Demo)**:簽章通過,VST 100,000,
+餘額 / 持倉 / 掛單 / 標準合約餘額四條唯讀路徑全通。
+
+餘額端點是 **`/openApi/swap/v3/user/balance`** —— **v3 不是 v2**。
+程式沒有寫死,是兩個都問、讓交易所選。照文件記憶寫死的話現在會是 404。
+
+**F 被移到 E 之前,理由是欄位形狀**:Demo 帳戶有 0 個持倉,所以
+`account.py` 宣稱的持倉欄位(`positionAmt` / `avgPrice` /
+`liquidationPrice` / `markPrice`)**一個字都還沒被驗證過**。
+`reconcile.check_fields` 在沒有樣本時回報「未驗證」而不是「通過」
+—— 而那組欄位裡有強平價,算錯的後果不是數字難看,是倉沒了。
+要驗證它,需要一個真的倉,哪怕只是 Demo 裡最小的一筆。
 
 **A 已完成,而且刻意只做唯讀。** `private.py` 裡沒有下單的程式碼 ——
 不是被擋住,是根本沒寫;有一組測試會在有人加進去的時候變紅。
