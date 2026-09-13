@@ -807,6 +807,98 @@ def block_screen() -> str:
               '</div></div>')
 
 
+def block_proposals() -> str:
+    """研究迴路的提案 —— **系統想改什麼,以及它憑什麼。**
+
+    2026-09-13 執政官要系統「不斷經過多次模擬之後發現該怎麼調整」。
+    這一塊是那件事的出口,而它的形狀刻意是「提案」不是「改動」:
+
+    模擬只有一條歷史。系統試 32 種變化,一定會找到在那條歷史上最
+    漂亮的一組 —— 而它漂亮的原因是**記住了過去**,不是理解了市場。
+    所以每個提案都要帶著「試過幾次」與「校正後的 p 值」,
+    而且**執政官點頭才生效**。
+    """
+    def _load():
+        try:
+            from portfolio.research import load
+            return {"items": load()}
+        except Exception as e:                   # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("proposals", 120, _load)
+    head = '<div class="card"><h2>研究提案 —— 系統想改什麼</h2>'
+    if got.get("error"):
+        return (head + '<p class="note">讀不到:'
+                f'{html.escape(str(got["error"]))}</p></div>')
+
+    items = got.get("items") or []
+    waiting = [p for p in items if p.status == "pending"]
+    decided = [p for p in items if p.status != "pending"]
+
+    intro = ('<p class="note">系統會不停地試,但<b>試出來的結果不會自己'
+             '生效</b>。每個提案都帶著<b>試過幾次</b>與<b>多重比較校正後'
+             '的 p 值</b> —— 試 32 次,其中一次看起來贏幾乎是必然的,'
+             '沒有那兩個數字,「找到更好的了」這句話沒有意義。</p>')
+
+    if not items:
+        return (head + intro
+                + '<p class="note">目前沒有提案。在 VPS 上跑 '
+                  '<code>scripts/research.py</code> 產生。</p>'
+                + '<div class="flag">沒有提案<b>是好消息不是壞消息</b> ——'
+                  '它代表現任參數在整個網格裡站得住。</div></div>')
+
+    cards = []
+    for pr in waiting:
+        c = pr.challenger
+        rows = "".join(
+            f'<tr><td class="{"up" if ok else "down"}">'
+            f'{"✓" if ok else "✗"}</td>'
+            f'<td class="sym">{html.escape(name)}</td>'
+            f'<td><div class="why">{html.escape(detail)}</div></td></tr>'
+            for name, ok, detail in pr.checks)
+        cards.append(
+            '<div class="ticket">'
+            f'<div class="t-head"><span class="sym">'
+            f'{html.escape(str(c.get("ma")))} 日均線 · '
+            f'{html.escape(str(c.get("vol_target_pct")))}% · '
+            f'{html.escape(str(c.get("leverage_cap")))}×</span></div>'
+            '<table><tbody>'
+            f'<tr><td>驗證段 Calmar</td><td>{pr.test.get("calmar")}'
+            f'<div class="why">現任 {pr.incumbent_test.get("calmar")}'
+            f'(優勢 {pr.calmar_edge})</div></td></tr>'
+            f'<tr><td>試過</td><td>{pr.trials} 種</td></tr>'
+            f'<tr><td>校正後 p</td><td>{pr.p_corrected}'
+            f'<div class="why">原始 {pr.p_raw} × {pr.trials}</div></td></tr>'
+            f'<tr><td>編號</td><td class="why">'
+            f'{html.escape(pr.proposal_id)}</td></tr>'
+            '</tbody></table>'
+            '<div class="scroll"><table><tbody>' + rows + '</tbody></table>'
+            '</div>'
+            '<div class="why">裁決:<code>scripts/decide.py '
+            f'{html.escape(pr.proposal_id)} --accept</code></div>'
+            '</div>')
+
+    body = (f'<div class="tickets">{"".join(cards)}</div>' if cards else
+            '<p class="note">沒有待裁決的提案。</p>')
+
+    if decided:
+        body += ('<h3 class="sub">裁決過的</h3><div class="scroll">'
+                 '<table><tbody>' + "".join(
+                     f'<tr><td class="{"up" if p.status == "accepted" else "dim"}">'
+                     f'{"核可" if p.status == "accepted" else "駁回"}</td>'
+                     f'<td class="why">{html.escape(p.proposal_id)}</td>'
+                     f'<td class="why">{html.escape(str(p.decided_on or ""))}'
+                     f' {html.escape(str(p.note or ""))}</td></tr>'
+                     for p in decided[:8]) + '</tbody></table></div>')
+
+    return (head + intro + body
+            + '<div class="flag"><b>核可 ≠ 生效。</b> 裁決只記錄'
+              '「執政官說可以」;真的改常數是另一個動作,由人執行 ——'
+              '改風控參數不該是一個腳本的副作用(§102)。<br>'
+              '兩步分開,事後才看得出「誰決定的」而不只是「參數是這個」。'
+              '</div></div>')
+
+
 def block_gaps() -> str:
     """還沒關掉的洞 —— **把它放在面板上,不是放在某份文件裡。**
 
@@ -1001,7 +1093,8 @@ def render() -> str:
     #   → 部位大小的依據(數量從哪來)
     desk = (block_tickets() + block_exchange() + block_screen()
             + block_signals() + block_account())
-    system = block_gaps() + block_contract() + block_system()
+    system = (block_gaps() + block_proposals()
+              + block_contract() + block_system())
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">

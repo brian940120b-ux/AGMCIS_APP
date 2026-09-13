@@ -1,0 +1,190 @@
+"""
+研究迴路 —— 系統可以不停地試,但不能自己生效 · 2026-09-13
+
+這一組守的是**過擬合**,而過擬合不會自己現形:它長得像一個好消息。
+
+一、試 32 次,最好的那次「看起來贏」幾乎是必然的 —— 要校正
+二、只贏訓練段是過擬合的典型形狀 —— 驗證段也要贏
+三、差不多好就不換
+四、提案不會自己生效,而且裁決過的不得被覆蓋
+"""
+from __future__ import annotations
+
+import random
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from portfolio import research as R
+
+INC = R.Variant(ma=50, vol_target_pct=27.0, leverage_cap=3.0)
+CHA = R.Variant(ma=100, vol_target_pct=20.0, leverage_cap=3.0)
+TODAY = "2026-09-13T00:00:00Z"
+
+
+def m(calmar, dd=10.0):
+    return {"calmar": calmar, "max_dd_pct": dd}
+
+
+def judged(**over):
+    kw = dict(incumbent=INC, challenger=CHA, trials=31,
+              train=m(1.80), test=m(1.60),
+              incumbent_train=m(1.40), incumbent_test=m(1.33),
+              p_raw=0.0005, as_of=TODAY)
+    kw.update(over)
+    return R.judge_challenger(**kw)
+
+
+# ══════════════════════════════════════════════════════════
+# 一、網格
+# ══════════════════════════════════════════════════════════
+def test_the_grid_is_small_and_the_incumbent_is_not_a_trial():
+    g = R.grid(INC)
+    assert len(g) == len(R.MA_GRID) * len(R.VOL_GRID) * len(R.LEV_GRID) - 1
+    assert INC not in g, "現任者是被挑戰的對象,不算一次試驗"
+    assert len(g) < 64, "網格一旦變大,這支就是過擬合機器"
+
+
+def test_the_grid_never_tries_more_leverage_than_the_incumbent():
+    """2026-09-10 的 20× 真的爆了。槓桿只往下試。"""
+    assert max(R.LEV_GRID) <= INC.leverage_cap
+
+
+# ══════════════════════════════════════════════════════════
+# 二、多重比較校正 —— 這是整支最重要的一條
+# ══════════════════════════════════════════════════════════
+def test_the_p_value_is_multiplied_by_the_number_of_trials():
+    assert R.bonferroni(0.01, 31) == pytest.approx(0.31)
+    assert R.bonferroni(0.5, 31) == 1.0          # 封頂
+    assert R.bonferroni(None, 31) is None        # 算不出來就不給數字
+
+
+def test_a_result_that_only_looks_good_because_of_many_trials_is_refused():
+    """p=0.01 聽起來很顯著 —— 但試了 31 次之後它是 0.31。"""
+    p = judged(p_raw=0.01)
+    assert p.passed is False
+    assert any("多重比較校正" in n and not ok for n, ok, _ in p.checks)
+
+
+def test_a_genuinely_strong_result_survives_the_correction():
+    assert judged(p_raw=0.0005).passed is True
+
+
+def test_no_p_value_means_no_proposal():
+    """算不出 p 就不是提案。**沒有證據不等於沒有問題。**"""
+    assert judged(p_raw=None).passed is False
+
+
+# ══════════════════════════════════════════════════════════
+# 三、訓練段 / 驗證段
+# ══════════════════════════════════════════════════════════
+def test_winning_only_the_training_segment_is_refused():
+    """**過擬合的典型形狀。**"""
+    p = judged(train=m(2.50), test=m(1.10))
+    assert p.passed is False
+    assert any("驗證段" in n and not ok for n, ok, _ in p.checks)
+
+
+def test_breaching_the_drawdown_contract_is_refused_even_if_it_wins():
+    """贏了現任但超過契約 —— **仍然不可交易**。"""
+    p = judged(test=m(2.0, dd=22.0))
+    assert p.passed is False
+    assert any("回撤" in n and not ok for n, ok, _ in p.checks)
+
+
+def test_a_tiny_edge_is_not_worth_switching():
+    """差不多好就不換 —— 換參數本身有成本。"""
+    p = judged(test=m(1.35))                     # 現任 1.33,只多 0.02
+    assert p.passed is False
+    assert any("優勢" in n and not ok for n, ok, _ in p.checks)
+
+
+def test_every_gate_is_recorded_including_the_ones_that_passed():
+    """「你憑什麼」必須逐條回答得出來。"""
+    names = [n for n, _, _ in judged().checks]
+    assert len(names) == 5
+    assert all(d for _, _, d in judged().checks), "每一關都要有說明"
+
+
+# ══════════════════════════════════════════════════════════
+# 四、block bootstrap
+# ══════════════════════════════════════════════════════════
+def test_a_challenger_that_never_wins_gets_p_one():
+    rng = random.Random(1)
+    inc = [rng.gauss(0.001, 0.02) for _ in range(400)]
+    cha = [x - 0.002 for x in inc]
+    assert R.block_bootstrap_pvalue(cha, inc) == 1.0
+
+
+def test_a_clearly_better_challenger_gets_a_small_p():
+    rng = random.Random(2)
+    inc = [rng.gauss(0.0, 0.01) for _ in range(600)]
+    cha = [x + 0.004 for x in inc]
+    p = R.block_bootstrap_pvalue(cha, inc, paths=400)
+    assert p is not None and p < 0.05
+
+
+def test_too_short_a_sample_gives_no_number_rather_than_a_bad_one():
+    assert R.block_bootstrap_pvalue([0.01] * 10, [0.0] * 10) is None
+
+
+# ══════════════════════════════════════════════════════════
+# 五、提案不會自己生效
+# ══════════════════════════════════════════════════════════
+def test_a_failing_proposal_cannot_be_accepted(tmp_path):
+    store = tmp_path / "p.json"
+    bad = judged(p_raw=0.02)
+    R.save([bad], store)
+    with pytest.raises(ValueError) as e:
+        R.decide(bad.proposal_id, "accepted", path=store)
+    assert "沒有通過全部關卡" in str(e.value)
+
+
+def test_accepting_records_who_and_when_and_does_not_change_settings(tmp_path):
+    store = tmp_path / "p.json"
+    good = judged()
+    R.save([good], store)
+    out = R.decide(good.proposal_id, "accepted", by="執政官", path=store)
+    assert out.status == "accepted"
+    assert out.decided_by == "執政官" and out.decided_on
+    # **這一步不套用任何設定** —— 只記錄決定
+    from exchange.bingx.trade import BACKSTOP_PCT
+    assert BACKSTOP_PCT == 25.0
+
+
+def test_a_decided_proposal_cannot_be_silently_overwritten(tmp_path):
+    store = tmp_path / "p.json"
+    good = judged()
+    R.save([good], store)
+    R.decide(good.proposal_id, "rejected", path=store)
+    with pytest.raises(R.AlreadyDecided):
+        R.decide(good.proposal_id, "accepted", path=store)
+
+
+def test_rerunning_research_does_not_wipe_a_decision(tmp_path):
+    """今天核可、明天重跑,那個決定不能無聲消失。"""
+    store = tmp_path / "p.json"
+    good = judged()
+    R.save([good], store)
+    R.decide(good.proposal_id, "rejected", path=store)
+
+    merged = R.merge(R.load(store), [judged()])   # 同一個 id 重跑
+    assert len(merged) == 1
+    assert merged[0].status == "rejected"
+
+
+def test_the_same_comparison_on_the_same_day_is_the_same_proposal():
+    """否則每天跑一次就堆出一百個一樣的提案,而人會停止讀它們。"""
+    assert judged().proposal_id == judged().proposal_id
+    assert (R.proposal_id(INC, CHA, TODAY)
+            != R.proposal_id(INC, CHA, "2026-09-14T00:00:00Z"))
+
+
+def test_the_trial_count_is_carried_on_the_proposal(tmp_path):
+    """**沒有它,「我們找到更好的了」這句話沒有意義。**"""
+    store = tmp_path / "p.json"
+    R.save([judged(trials=31)], store)
+    assert R.load(store)[0].trials == 31
