@@ -291,6 +291,10 @@ tbody tr:first-child td{border-top:none}
 .flag.ok{border-color:var(--up-bd);background:var(--up-bg)}
 .flag b{font-weight:700;color:var(--ink)}
 
+/* 版本戳。刻意放在標頭,因為它要回答的問題是「我看到的是新的嗎」
+   —— 那個問題發生在看畫面的第一秒,不是捲到頁尾的時候。 */
+.tag.build{font-size:10px;opacity:.72;letter-spacing:0}
+
 /* 指令單。刻意做得像一張紙 —— 它是要照著按的東西,不是一份報表。
    單欄:在 iPhone 上要能一眼看完一張,不用左右捲。 */
 .tickets{display:grid;gap:12px;margin-top:12px}
@@ -457,6 +461,24 @@ def block_orders() -> str:
             '</div>')
 
 
+def _build():
+    """這個行程跑的是哪一版。
+
+    2026-09-13:執政官 pull 完看面板說「完全沒變化」,而面板每次請求
+    都重新 render、`Cache-Control: no-store`,沒有任何快取 ——
+    所以答案幾乎一定是「服務還在跑舊的程式碼」。
+
+    **但「幾乎一定」不是「一定」**,而那張截圖分不出四種情況:
+    沒 pull 到 / pull 了沒重啟 / 重啟失敗 / 真的換了但我改的有 bug。
+
+    分不出來的時候兩邊都會開始用猜的,而那是一個來回好幾輪的死結。
+    所以把版本印在畫面上 —— **commit 加上行程啟動時間**:
+    版本號對了但啟動時間很舊,就是重啟沒生效。
+    """
+    from core.build import current
+    return current(__file__)
+
+
 def block_tickets() -> str:
     """指令單 —— **這一塊是整個面板現在最重要的東西。**
 
@@ -468,7 +490,7 @@ def block_tickets() -> str:
     自己成交的那些;指令單是**要你真的去 App 按**的那些。兩個混在
     一起,遲早會有人以為紙上動了實際就動了。
     """
-    def _build():
+    def _compute():
         try:
             from exchange.bingx.trade import BACKSTOP_PCT
             from portfolio.paper import LEVERAGE_CAP, plan
@@ -483,7 +505,7 @@ def block_tickets() -> str:
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
 
-    got = _cached("tickets", 180, _build)
+    got = _cached("tickets", 180, _compute)
     head = ('<div class="card"><h2>指令單 —— 要你自己按的</h2>'
             '<p class="note">U 本位標準合約<b>沒有下單 API</b>'
             '(2026-09-13 GET+POST 各問一次,對照組證實)。'
@@ -1012,6 +1034,7 @@ def render() -> str:
   <span class="tag paper">PAPER · 模擬金</span>
   <span class="tag">U 本位標準合約 · 手動送單</span>
   <span class="tag">{now:%m-%d %H:%M} UTC</span>
+  <span class="tag build">{html.escape(_build().describe())}</span>
 </header>
 <nav>
   <a href="#" class="on" data-t="desk">交易台</a>
@@ -1021,7 +1044,8 @@ def render() -> str:
 <div class="tabpane on" id="desk">{desk}</div>
 <div class="tabpane" id="signals">{signals}</div>
 <div class="tabpane" id="system">{system}</div>
-<footer>紙上帳本非真錢 · 每日 00:30 UTC 記帳 · U 本位標準合約沒有下單 API,實際送單由人在 App 完成</footer>
+<footer>版本 {html.escape(_build().describe())} —— 這一行在,
+就代表你看到的是這個行程真的跑的那一版<br>紙上帳本非真錢 · 每日 00:30 UTC 記帳 · U 本位標準合約沒有下單 API,實際送單由人在 App 完成</footer>
 </div>
 <script>
 document.querySelectorAll('nav a').forEach(function(a){{
@@ -1407,6 +1431,10 @@ class Handler(BaseHTTPRequestHandler):
                     "status": "unhealthy",
                     "checks": [{"name": "健康檢查本身", "ok": False,
                                 "detail": f"{type(e).__name__}: {e}"}]}
+            # 版本戳一律附上,連不健康的時候也是 —— 排查的第一個問題
+            # 永遠是「這台跑的是哪一版」,而那時候通常沒有金鑰在手上。
+            if isinstance(payload, dict):
+                payload["build"] = _build().to_dict()
             self._send_json(status, payload)
             return
 
