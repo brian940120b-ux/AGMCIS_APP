@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import ratelimit
 from core.atomic import write_json_atomic
 from core.logging import get_logger
 
@@ -49,7 +50,7 @@ class SpecMissing(RuntimeError):
 def refresh() -> int:
     """從交易所抓一次規格並落地。回傳抓到幾個合約。"""
     import urllib.request
-    with urllib.request.urlopen(ENDPOINT, timeout=15) as r:
+    with ratelimit.urlopen(ENDPOINT, timeout=15) as r:
         d = json.loads(r.read().decode("utf-8"))
     if str(d.get("code")) != "0":
         raise RuntimeError(f"BingX contracts code={d.get('code')} {d.get('msg')}")
@@ -187,7 +188,7 @@ def refresh_funding(symbols: list[str], limit: int = 1000) -> int:
     out: dict[str, list] = {}
     for sym in symbols:
         q = urllib.parse.urlencode({"symbol": sym, "limit": int(limit)})
-        with urllib.request.urlopen(f"{FUNDING_EP}?{q}", timeout=20) as r:
+        with ratelimit.urlopen(f"{FUNDING_EP}?{q}", timeout=20) as r:
             d = json.loads(r.read().decode("utf-8"))
         if str(d.get("code")) != "0":
             raise RuntimeError(

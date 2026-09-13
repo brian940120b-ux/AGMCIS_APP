@@ -54,6 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import ratelimit
 from core.logging import get_logger
 
 log = get_logger("portfolio.trial")
@@ -93,7 +94,7 @@ def screen() -> list[str]:
         req = urllib.request.Request(
             "https://open-api.bingx.com/openApi/swap/v2/quote/ticker",
             headers={"User-Agent": "agmcis/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with ratelimit.urlopen(req, timeout=15) as r:
             tick = _json.loads(r.read())["data"]
     except Exception as e:
         log.warning(f"行情取得失敗,交易池沿用既有帳本持倉:{e}")

@@ -18,6 +18,7 @@ from typing import Any
 
 import requests
 
+from core import ratelimit
 from core.logging import get_logger
 from models.market import FundingRate, Kline, Ticker, utcnow
 
@@ -48,13 +49,21 @@ class BingXClient:
         last_err: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                resp = self.session.get(url, params=params, timeout=self.timeout_s)
+                resp = ratelimit.requests_get(self.session, url, params=params,
+                                              timeout=self.timeout_s)
                 resp.raise_for_status()
                 body = resp.json()
                 # BingX 慣例:{"code": 0, "msg": "", "data": ...},code != 0 為業務錯誤
                 if isinstance(body, dict) and body.get("code", 0) != 0:
                     raise BingXError(f"BingX 業務錯誤 code={body.get('code')} msg={body.get('msg')}")
                 return body.get("data", body) if isinstance(body, dict) else body
+            except (ratelimit.RateLimited, ratelimit.Banned):
+                # **不重試。** 429 是交易所說我們太快,418 是已經被封。
+                # 這個迴圈原本會對 429 重試三次、退避 0.5s/1s/2s ——
+                # 被限流的正確反應是慢下來,那個寫法是加速撞牆。
+                # 限流器已經跨行程把桶清空了;這裡要做的是讓呼叫端
+                # 知道「沒有資料」,而不是繼續戳。
+                raise
             except (requests.RequestException, ValueError, BingXError) as e:
                 last_err = e
                 log.warning(

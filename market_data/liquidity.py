@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import ratelimit
 from core.logging import get_logger
 
 log = get_logger("liquidity")
@@ -70,8 +71,9 @@ def measure_impact(symbol: str, notional_usdt: float,
     out = {"symbol": symbol, "notional": notional_usdt,
            "measured_at": datetime.now(timezone.utc).isoformat()}
     try:
-        r = requests.get(f"{api}/openApi/swap/v2/quote/depth",
-                         params={"symbol": symbol, "limit": 50}, timeout=10)
+        r = ratelimit.requests_get(
+            None, f"{api}/openApi/swap/v2/quote/depth",
+            params={"symbol": symbol, "limit": 50}, timeout=10)
         d = r.json().get("data") or {}
         asks = sorted((float(p), float(q)) for p, q in (d.get("asks") or []))
         bids = sorted(((float(p), float(q)) for p, q in (d.get("bids") or [])),

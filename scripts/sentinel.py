@@ -22,6 +22,7 @@ import json
 import sys
 from pathlib import Path as _P
 sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+from core import ratelimit
 from core.atomic import write_json_atomic
 import subprocess
 import time
@@ -532,7 +533,7 @@ def chk_universe_health():
         req = urllib.request.Request(
             "https://open-api.bingx.com/openApi/swap/v2/quote/ticker",
             headers={"User-Agent": "agmcis/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with ratelimit.urlopen(req, timeout=15) as r:
             tick = {t["symbol"]: t for t in json.loads(r.read())["data"]}
     except Exception as e:
         return False, f"交易池健康檢查失敗:{type(e).__name__}: {e}", fix

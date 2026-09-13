@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from core import ratelimit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -91,7 +92,7 @@ def section_2_specs_live():
     from portfolio import specs
     from portfolio.paper import SYMBOLS
     try:
-        with urllib.request.urlopen(specs.ENDPOINT, timeout=15) as r:
+        with ratelimit.urlopen(specs.ENDPOINT, timeout=15) as r:
             live = {c["symbol"]: c
                     for c in json.loads(r.read().decode())["data"]}
     except Exception as e:

@@ -30,6 +30,7 @@ import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from core import ratelimit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -103,7 +104,7 @@ def klines(sym: str, interval: str = "15m", limit: int = 96) -> list[dict]:
         url = ("https://open-api.bingx.com/openApi/swap/v3/quote/klines"
                f"?symbol={sym}&interval={interval}&limit={int(limit)}")
         try:
-            with urllib.request.urlopen(url, timeout=6) as r:
+            with ratelimit.urlopen(url, timeout=6) as r:
                 d = json.loads(r.read().decode("utf-8"))
         except Exception as e:
             return {"error": f"{type(e).__name__}: {e}"}

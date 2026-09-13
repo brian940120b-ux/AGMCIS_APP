@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import ratelimit
 from core.logging import get_logger
 
 log = get_logger("portfolio.live")
@@ -105,7 +106,7 @@ def mark_prices(symbols: list[str] | None = None) -> dict[str, float]:
         try:
             url = ("https://open-api.bingx.com"
                    "/openApi/swap/v2/quote/premiumIndex")
-            with urllib.request.urlopen(url, timeout=8) as r:
+            with ratelimit.urlopen(url, timeout=8) as r:
                 d = _json.loads(r.read().decode("utf-8"))
             if str(d.get("code")) != "0":
                 raise RuntimeError(f"code={d.get('code')} {d.get('msg')}")

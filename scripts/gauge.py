@@ -21,6 +21,7 @@ import json
 import sys
 from pathlib import Path as _P
 sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+from core import ratelimit
 from core.atomic import write_json_atomic
 import sys
 from datetime import datetime, timezone
@@ -44,8 +45,9 @@ TIMEOUT = 10
 
 def _get(path: str, symbol: str) -> dict:
     try:
-        r = requests.get(f"{API}{path}", params={"symbol": symbol},
-                         timeout=TIMEOUT)
+        r = ratelimit.requests_get(None, f"{API}{path}",
+                                   params={"symbol": symbol},
+                                   timeout=TIMEOUT)
         d = r.json()
         return d.get("data") or {}
     except Exception as e:
@@ -66,8 +68,9 @@ def fetch_all_premium() -> dict[str, dict]:
     得回頭翻 K 線快取(慢、且輪替出池的幣會查不到)。
     """
     try:
-        r = requests.get(f"{API}/openApi/swap/v2/quote/premiumIndex",
-                         timeout=TIMEOUT)
+        r = ratelimit.requests_get(
+            None, f"{API}/openApi/swap/v2/quote/premiumIndex",
+            timeout=TIMEOUT)
         rows = r.json().get("data") or []
     except Exception as e:
         log.warning(f"全市場費率抓取失敗,退回逐幣模式:{e}")

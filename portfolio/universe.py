@@ -38,6 +38,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core import ratelimit
 from core.atomic import write_json_atomic
 from core.logging import get_logger
 
@@ -64,7 +65,7 @@ MIN_DAILY_BARS = 1000
 def _get(url: str, timeout: int = 15):
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "agmcis/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with ratelimit.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
