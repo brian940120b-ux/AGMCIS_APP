@@ -325,8 +325,16 @@ class TestTheNumberReachesTheDashboard(unittest.TestCase):
              "concentration": concentration}), encoding="utf-8")
 
     def render(self):
+        """2026-09-13:面板改成只留 U 本位標準合約相關的區塊,
+        相關性從獨立卡片搬進**指令單**裡 —— 它本來就是在解釋
+        今天這些單為什麼是這個大小。
+
+        **搬家不放寬要求**:下面每一條斷言一個字都沒改。
+        「量到卻沒人看得到的數字等於沒量」管的是看不看得到,
+        不是放在哪張卡上。
+        """
         import dashboard
-        return dashboard.block_correlation()
+        return dashboard.gate_correlation()
 
     def test_a_measured_concentration_shows_both_numbers(self):
         self.write({"effective_positions": 1.24,

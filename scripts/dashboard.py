@@ -355,8 +355,9 @@ def block_account() -> str:
     """
     a = _json(DATA / "portfolio_account.json")
     if not a:
-        return ('<div class="card"><h2>帳戶</h2><p class="note">'
-                '尚未記帳 —— 每日 00:30 UTC 自動執行。</p></div>')
+        return ('<div class="card"><h2>部位大小的依據(紙上權益)</h2>'
+                '<p class="note">尚未記帳 —— 每日 00:30 UTC 自動執行。'
+                '<b>沒有它就算不出指令單的數量。</b></p></div>')
     eq = float(a.get("equity", 0) or 0)
     ret = float(a.get("return_pct", 0) or 0)
     # BingX 的「已實現盈虧」是**扣完手續費與資金費的淨額**
@@ -387,7 +388,7 @@ def block_account() -> str:
         kv("累計成本",
            f"{float(a.get('fee_paid', 0)) + float(a.get('funding_paid', 0)):,.2f}"),
     ]
-    return ('<div class="card"><h2>帳戶 '
+    return ('<div class="card"><h2>部位大小的依據(紙上權益) '
             '<span class="live-dot" id="live-dot"></span>'
             '<span class="live-t" id="live-t">即時</span></h2>'
             f'<div class="big {tone(ret)}" id="k-eq">{eq:,.2f}'
@@ -415,50 +416,14 @@ def block_account() -> str:
             f'費率,每 8 小時結算一次(00/08/16 UTC)<br>'
             '<b>即時盈虧每 10 秒更新</b>,只給人看 —— '
             '記帳仍是每日一次(訊號用收盤、成交在隔日開盤),'
-            '即時價格不進任何決策。</p></div>')
-
-
-def block_orders() -> str:
-    def _plan():
-        try:
-            from portfolio.paper import plan
-            return plan()
-        except Exception as e:
-            return {"error": f"{type(e).__name__}: {e}"}
-    p = _cached("plan", 180, _plan)
-    if "error" in p:
-        return ('<div class="card"><h2>今日訂單(紙上帳本)</h2>'
-                f'<p class="note">尚未就緒:{html.escape(p["error"])}</p></div>')
-    rows = []
-    for o in p.get("orders", []):
-        buy = o.side == "BUY"
-        stop = (f'{o.stop:,.6g}<div class="why">距 {o.stop_pct:.1f}%</div>'
-                if o.stop else '<span class="dim">—</span>')
-        rows.append(
-            f'<tr><td class="sym">{html.escape(o.symbol.replace("-USDT", ""))}'
-            f'</td><td><span class="pill {"p-buy" if buy else "p-sell"}">'
-            f'{"買入" if buy else "賣出"}</span></td>'
-            f'<td>{o.qty:.6g}</td><td>{o.price:,.6g}</td>'
-            f'<td>{o.notional:,.0f}</td><td>{stop}</td>'
-            f'<td><div class="why">{html.escape(o.reason)}</div></td></tr>')
-    body = ('<div class="scroll"><table><thead><tr><th>商品</th><th>方向</th>'
-            '<th>數量</th><th>價格</th><th>名目</th><th>出場線</th>'
-            '<th>原因</th></tr></thead><tbody>' + "".join(rows)
-            + '</tbody></table></div>') if rows else (
-        '<p class="note">今日無新單 —— 目標配置與現有持倉一致。'
-        '這條策略本來就不常動(回測 3.3 年約每月換手一次),'
-        '換手少正是它摩擦低的原因。</p>')
-    done = "已執行" if p.get("already_done") else "待執行"
-    return ('<div class="card"><h2>今日訂單(紙上帳本)</h2>'
-            f'<p class="note">訊號日 {p["signal_day"][:10]} 收盤 → 成交日 '
-            f'{p["exec_day"][:10]} 開盤 · <b>{done}</b>。'
-            '出場線 = 該幣的 50 日均線,也就是策略本身的出場規則 —— '
-            '<b>不是另外挑的百分比</b>,它每天跟著均線移動。</p>'
-            + body
-            + '<div class="flag">⚠️ 這一塊是<b>紙上帳本自己成交的</b>。'
-              '要你真的去 App 按的是最上面那塊<b>指令單</b> —— '
-              '兩個混在一起,遲早會有人以為紙上動了實際就動了。</div>'
-            '</div>')
+            '即時價格不進任何決策。</p>'
+            '<div class="flag">⚠️ <b>這是紙上帳本,不是交易所的帳。</b>'
+            '它在這裡的唯一理由是:<b>指令單的數量是照這個權益算出來的</b>。'
+            '真正的帳在上面那塊「交易所帳戶」。<br>'
+            '而它模擬的是<b>永續</b>的成本(資金費、費率),'
+            'U 本位標準合約的成本一個字都還沒驗證過 —— '
+            '所以這裡的損益是一個<b>參考值</b>,不是這個產品的績效。'
+            '</div></div>')
 
 
 def _build():
@@ -565,12 +530,152 @@ def block_tickets() -> str:
     caveat = standard_cost_caveat()
     tail = (f'<div class="flag">⚠️ {html.escape(caveat)}</div>'
             if caveat else '')
+    tail += gate_correlation()
     tail += ('<div class="flag">按完之後在 VPS 上跑 '
              '<code>scripts/ticket.py --verify</code> —— 它會拿交易所實際的'
              '持倉回頭比對數量、方向、槓桿、保證金模式。'
              '<b>手動下單的系統不知道自己送了什麼</b>,那一步是唯一的檢查。'
              '</div>')
     return head + body + tail + '</div>'
+
+
+def gate_correlation() -> str:
+    """相關性集中度(§60)—— **指令單的閘門,所以印在指令單裡。**
+
+    2026-09-13:執政官要求面板只留 U 本位標準合約相關的東西,
+    這一塊本來被我整個刪掉了 —— 而 `tests/test_correlation.py`
+    當場擋下來,它的理由寫得比我的刪除好:
+
+        「量到卻沒人看得到的數字,等於沒量。
+          尤其這一條的門檻**還沒設定** —— 執政官要拿面板上的
+          數字決定門檻。如果它只存在於 log,那個決定永遠不會發生。」
+
+    所以搬,不刪。它不再佔一整張卡,而是變成指令單上的一行 ——
+    位置更對:它本來就是在解釋**今天這些單為什麼是這個大小**。
+
+    這張卡回答一個「總曝險」永遠不會回答的問題:
+    **這幾個倉是幾個賭注,還是同一個賭注的幾個面?**
+    """
+    r = _json(DATA / "portfolio_risk.json")
+    if not r:
+        return ''
+    c = r.get("concentration")
+    if not c:
+        return ''
+
+    total = c.get("total_exposure_pct")
+    equiv = c.get("equivalent_exposure_pct")
+    enp = c.get("effective_positions")
+    n = c.get("positions") or 0
+
+    if equiv is None or enp is None:
+        why = html.escape(str(c.get("reason") or "資料不足"))
+        return ('<div class="flag">風控閘 · 相關性集中度:'
+                f'<b>算不出來</b> —— {why}<br>'
+                '<b>沒有拿一個「假設不相關」的數字頂替。</b> '
+                '在最危險的時候給最樂觀的答案,是這裡最貴的一種錯。'
+                '</div>')
+
+    return ('<div class="flag">風控閘 · 相關性集中度 —— '
+            f'帳面 <b>{n} 檔 / {total:.1f}%</b>,把相關性算進去之後,'
+            f'這個組合等於<b>一個 {equiv:.1f}% 的單一標的</b>'
+            f'(有效 {enp:.1f} 檔,{c.get("observations")} 天共同觀測)。<br>'
+            '總曝險只是加總,它不會告訴你這幾個倉是不是同一個賭注 —— '
+            '加密貨幣的相關性在恐慌時往 1 靠攏,而那正是風控唯一真的'
+            '重要的時候。<br>'
+            '<b>上限尚未設定</b>,需執政官指定(§102)。在那之前這條'
+            '每天照跑、照記錄,但不會擋單。</div>')
+
+
+def block_exchange() -> str:
+    """**交易所那邊真正的帳** —— U 本位標準合約。
+
+    這一塊之前不在面板上,而它是這個產品最該看的東西:
+    紙上帳本是一個模擬,`/openApi/contract/v1` 才是真相。
+
+    ⚠️ 這個產品的回應**結構性地**少三格 —— liquidationPrice、
+    markPrice、equity。強平價由我方算(線性合約,公式與 account.py
+    同一條),而**那個估計偏樂觀**:MMR 取定值、未計維持保證金分層,
+    實際強平會更近。看到數字就要看到它從哪來。
+    """
+    def _fetch():
+        try:
+            from core.config import load_env
+            from exchange.bingx.private import Credentials, host, is_live
+            from exchange.bingx.standard import BingXStandardUSDT
+            load_env()
+            creds = Credentials.from_env()
+            ad = BingXStandardUSDT()
+            return {"balance": ad.balance(), "positions": ad.rich_positions(),
+                    "who": creds.masked(), "host": host(),
+                    "live": is_live()}
+        except Exception as e:                   # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("exchange", 60, _fetch)
+    head = '<div class="card"><h2>交易所帳戶 —— U 本位標準合約</h2>'
+
+    if got.get("error"):
+        return (head + '<p class="note">問不到:'
+                f'{html.escape(str(got["error"]))}</p>'
+                '<div class="flag">問不到**不代表沒有倉** —— '
+                '在弄清楚為什麼之前,不要把它當成「帳上是空的」。</div>'
+                '</div>')
+
+    where = ('<b>實盤</b>' if got.get("live") else 'Demo(VST)')
+    out = (head + f'<p class="note">{where} · {html.escape(got["host"])}'
+           f' · 金鑰 {html.escape(str(got["who"]))}</p>')
+
+    rows = got.get("balance") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    funded = [r for r in rows if isinstance(r, dict)
+              and float(r.get("balance") or 0) > 0]
+    if funded:
+        cells = []
+        for r in funded[:4]:
+            cells.append(kv(str(r.get("asset") or "?"),
+                            f'{float(r.get("balance") or 0):,.2f}'))
+        out += f'<div class="grid">{"".join(cells)}</div>'
+    else:
+        out += '<p class="note">沒有任何幣種有餘額。</p>'
+
+    positions = got.get("positions") or []
+    if not positions:
+        out += ('<p class="note">交易所端 <b>0 筆持倉</b>。</p>'
+                '<div class="flag">所以<b>持倉欄位到今天還是沒有被驗證過</b> '
+                '—— 補強平價那套邏輯還沒跑過真實樣本。'
+                '第一個標準合約倉開出來的那一刻,這一塊會是第一個說話的。'
+                '</div>')
+    else:
+        trs = []
+        for pos in positions:
+            dist = pos.liq_distance_pct()
+            danger = dist is not None and dist < 20.0
+            dist_txt = (f'{dist:.1f}%' if dist is not None
+                        else '<span class="down">算不出來</span>')
+            liq = (f'{pos.liq_price:,.6g}' if pos.liq_price is not None
+                   else '—')
+            src = ('交易所' if pos.liq_source == "exchange"
+                   else '我方算·偏樂觀')
+            trs.append(
+                f'<tr><td class="sym">{html.escape(pos.symbol)}</td>'
+                f'<td class="{"up" if pos.is_long else "down"}">'
+                f'{"多" if pos.is_long else "空"}</td>'
+                f'<td>{pos.qty:.8g}</td><td>{pos.entry:,.6g}</td>'
+                f'<td>{pos.leverage:g}×</td>'
+                f'<td>{liq}<div class="why">{src}</div></td>'
+                f'<td class="{"down" if danger else ""}">{dist_txt}</td>'
+                '</tr>')
+        out += ('<div class="scroll"><table><thead><tr><th>商品</th>'
+                '<th>方向</th><th>持倉量</th><th>開倉均價</th><th>槓桿</th>'
+                '<th>強平價</th><th>距離</th></tr></thead><tbody>'
+                + "".join(trs) + '</tbody></table></div>')
+        if any((p.liq_distance_pct() or 99) < 20.0 for p in positions):
+            out += ('<div class="flag">❗ 有部位離強平不到 20%(§19),'
+                    '<b>而這個距離是偏樂觀的 —— 實際更近</b>。</div>')
+
+    return out + '</div>'
 
 
 def block_gaps() -> str:
@@ -634,133 +739,6 @@ def block_gaps() -> str:
             '不在某份文件裡。</div></div>')
 
 
-def block_positions() -> str:
-    """持倉。欄位對齊 BingX 合約:持倉量(帶正負)、均價、標記價、
-    未實現、**強平價**、保證金率。
-
-    強平價是合約交易員第一個要看的風險數字,而現貨式記法顯示不出來。
-    """
-    a = _json(DATA / "portfolio_account.json")
-    pos = a.get("positions") or {}
-    if not pos:
-        return '<div class="card"><h2>持倉</h2><p class="note">空手。</p></div>'
-    # 2026-09-09 修:這裡曾經自己拿 closes()[-1](當天還沒收盤的那根
-    # K 棒的最新成交價,被 load_or_download 累積式快取進 CSV 最後一列)
-    # 當「標記價」重算未實現,跟帳本 mark_price(tick() 用的是最後一根
-    # 已收盤的日線,見 paper.py 的 dates[len(dates)-2])兩把尺,數字會
-    # 對不上——執政官在面板上看到「起始/未實現」跟別處不一致,就是這裡。
-    # 改成直接讀帳本自己算好的欄位,不再有第二份實作;頁面載入後
-    # /api/live 的即時串流價格還是會覆蓋這裡,不受影響。
-    rows, tot = [], 0.0
-    for sym, p in sorted(pos.items()):
-        amt = float(p.get("position_amt") or p.get("qty") or 0)
-        entry = float(p.get("avg_price") or p.get("entry") or 0)
-        px = float(p.get("mark_price") or entry)
-        u = float(p.get("unrealized_pnl", (px - entry) * amt))
-        tot += u
-        pct = ((px / entry - 1) * 100 * (1 if amt > 0 else -1)) if entry else 0
-        lp = p.get("liq_price")
-        liq = (f'{lp:,.6g}<div class="why">距 '
-               f'{abs(px - lp) / px * 100:.1f}%</div>'
-               if (lp and px) else '<span class="dim">—</span>')
-        mr = float(p.get("margin_ratio") or 0) * 100
-        # ROI 由帳本算好(Position.roi(),跟即時層同一個函式),不在這裡重算
-        roi = float(p.get("roi_pct") or 0)
-        im = float(p.get("initial_margin") or 0)
-        side = "多" if amt > 0 else "空"
-        sid = sym.replace("-USDT", "")
-        rows.append(
-            f'<tr class="prow" data-sym="{html.escape(sym)}" '
-            f'data-sid="{html.escape(sid)}" data-entry="{entry}" '
-            f'data-liq="{lp or 0}">'
-            f'<td class="sym">{html.escape(sid)}'
-            f'<div class="why">{side} · {float(p.get("leverage", 1)):.0f}× '
-            '<span class="chev">▸ K線</span></div>'
-            f'</td><td>{abs(amt):.6g}</td><td>{entry:,.6g}</td>'
-            f'<td id="p-px-{sid}">{px:,.6g}'
-            f'<div class="why" id="p-last-{sid}"></div></td>'
-            f'<td id="p-val-{sid}">{abs(amt) * px:,.0f}</td>'
-            f'<td id="p-im-{sid}">{im:,.2f}</td>'
-            f'<td class="{tone(u)}" id="p-pnl-{sid}">{u:+,.2f}'
-            f'<div class="why {tone(u)}">{pct:+.2f}%</div></td>'
-            f'<td class="{tone(roi)}" id="p-roi-{sid}"><b>{roi:+.2f}%</b></td>'
-            f'<td>{liq}</td>'
-            f'<td class="{"up" if mr < 50 else "down"}">{mr:.2f}%</td></tr>'
-            f'<tr class="krow" id="k-row-{sid}"><td colspan="10">'
-            f'<div class="kwrap"><div class="kbar" data-sid="{sid}">'
-            + "".join(
-                f'<button class="kiv{" on" if iv == "15m" else ""}" '
-                f'data-sid="{sid}" data-iv="{iv}">{iv}</button>'
-                for iv in ("5m", "15m", "1h", "4h", "1d"))
-            + f'<span class="kinfo" id="k-info-{sid}"></span></div>'
-            f'<div id="k-chart-{sid}" class="kchart">'
-            '<span class="dim">載入中…</span></div></div></td></tr>')
-    return ('<div class="card"><h2>持倉 '
-            '<span class="live-dot"></span><span class="live-t">即時</span>'
-            '</h2>'
-            '<div class="scroll"><table><thead><tr><th>商品</th><th>持倉量</th>'
-            '<th>開倉均價</th><th>標記價</th><th>名目</th><th>保證金</th>'
-            '<th>未實現</th><th>ROI</th><th>強平價</th><th>保證金率</th>'
-            '</tr></thead><tbody>' + "".join(rows) + '</tbody></table></div>'
-            f'<p class="note">未實現合計 <b class="{tone(tot)}">{tot:+,.2f} '
-            'USDT</b> · 保證金率 100% 即強平。'
-            '出場線是 50 日均線(策略規則),跌破隔日開盤平倉 —— '
-            '那比強平早得多。</p></div>')
-
-
-def block_curve() -> str:
-    rows = _jsonl(DATA / "portfolio_equity.jsonl")
-    if len(rows) < 2:
-        return ('<div class="card"><h2>權益曲線</h2><p class="note">'
-                f'記帳 {len(rows)} 天 —— 至少兩天才畫得出線。</p></div>')
-    eq = [float(r.get("return_pct") or 0) for r in rows]
-    bm = [float(r.get("benchmark_pct") or 0) for r in rows]
-    lo, hi = min(min(eq), min(bm)), max(max(eq), max(bm))
-    if hi - lo < 1e-9:
-        lo, hi = lo - 1, hi + 1
-    W, H, P = 640, 190, 10
-    line_col = "#33d19d" if eq[-1] >= 0 else "#f0654f"
-
-    def xy(v, i):
-        x = P + (W - 2 * P) * (i / max(len(v) - 1, 1))
-        y = H - P - (H - 2 * P) * ((v[i] - lo) / (hi - lo))
-        return x, y
-
-    def path(v):
-        pts = [f"{x:.1f},{y:.1f}" for i in range(len(v))
-               for x, y in [xy(v, i)]]
-        return "M" + " L".join(pts)
-
-    def area(v):
-        pts = [f"{x:.1f},{y:.1f}" for i in range(len(v))
-               for x, y in [xy(v, i)]]
-        x0, _ = xy(v, 0)
-        xn, _ = xy(v, len(v) - 1)
-        return f"M{x0:.1f},{H - P} L" + " L".join(pts) + f" L{xn:.1f},{H - P} Z"
-
-    zy = H - P - (H - 2 * P) * ((0 - lo) / (hi - lo))
-    gid = "eqfill"
-    return ('<div class="card"><h2>權益曲線</h2>'
-            f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto" '
-            'preserveAspectRatio="none">'
-            f'<defs><linearGradient id="{gid}" x1="0" y1="0" x2="0" y2="1">'
-            f'<stop offset="0%" stop-color="{line_col}" stop-opacity=".22"/>'
-            f'<stop offset="100%" stop-color="{line_col}" stop-opacity="0"/>'
-            '</linearGradient></defs>'
-            f'<line x1="{P}" y1="{zy:.1f}" x2="{W - P}" y2="{zy:.1f}" '
-            'stroke="#232833" stroke-dasharray="3 4"/>'
-            f'<path d="{area(eq)}" fill="url(#{gid})" stroke="none"/>'
-            f'<path d="{path(bm)}" fill="none" stroke="#565f70" '
-            'stroke-width="1.4" stroke-linejoin="round"/>'
-            f'<path d="{path(eq)}" fill="none" stroke="{line_col}" '
-            'stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>'
-            '</svg>'
-            f'<p class="note"><b class="{tone(eq[-1])}">▬</b> 組合 '
-            f'{eq[-1]:+.2f}% ｜ <b class="dim">▬</b> 基準 {bm[-1]:+.2f}%'
-            f'(同日開始、等權買入持有,也是永續、也付資金費)｜ '
-            f'{len(rows)} 天</p></div>')
-
-
 def block_signals() -> str:
     try:
         from portfolio.paper import SYMBOLS, VOL_LOOKBACK
@@ -801,140 +779,6 @@ def block_signals() -> str:
             '<div class="scroll"><table><thead><tr><th>商品</th><th>收盤</th>'
             '<th>50日均線</th><th>距離</th><th>狀態</th></tr></thead><tbody>'
             + "".join(out) + '</tbody></table></div></div>')
-
-
-def block_monitor() -> str:
-    m = _json(DATA / "portfolio_monitor.json")
-    if not m:
-        return ''
-    bt = m.get("backtest") or {}
-    flags = "".join(
-        f'<div class="flag {"warn" if a.get("level") == "HIGH" else ""}">'
-        f'<b>[{html.escape(str(a.get("level")))}] '
-        f'{html.escape(str(a.get("kind")))}</b><br>'
-        f'{html.escape(str(a.get("msg")))}</div>'
-        for a in (m.get("alerts") or []))
-    return ('<div class="card"><h2>策略監控</h2>'
-            '<p class="note">唯一該問自己的問題:'
-            '<b>它還是不是回測時的那條策略?</b><br>'
-            f'回測基準 — 年化 {bt.get("cagr_pct")}% · 回撤 '
-            f'{bt.get("max_dd_pct")}% · Sharpe {bt.get("sharpe")} · 在場 '
-            f'{bt.get("days_in_market_pct")}%<br>'
-            f'<span class="dim">{html.escape(str(bt.get("window", "")))}</span>'
-            f'</p><p class="note">{html.escape(str(m.get("verdict", "")))}</p>'
-            + flags +
-            '<div class="flag">監控層<b>不會自動調參數把績效救回來</b> —— '
-            '那是把過擬合自動化。它只做一件事:量前向行為有沒有跑出歷史範圍,'
-            '跑出去就講。</div></div>')
-
-
-def block_correlation() -> str:
-    """
-    相關性集中度(第六十條)。
-
-    這張卡回答一個「總曝險」永遠不會回答的問題:
-    **這七個倉是七個賭注,還是同一個賭注的七個面?**
-
-    上限還沒設定,而**沒有上限的期間正是最需要天天看到這個數字的
-    時候** —— 執政官要拿它決定門檻。所以這張卡在沒有上限時照樣顯示,
-    而且明說上限還沒設。
-    """
-    r = _json(DATA / "portfolio_risk.json")
-    if not r:
-        return ''
-    c = r.get("concentration")
-    if not c:
-        return ''
-
-    total = c.get("total_exposure_pct")
-    equiv = c.get("equivalent_exposure_pct")
-    enp = c.get("effective_positions")
-    n = c.get("positions") or 0
-
-    if equiv is None or enp is None:
-        why = html.escape(str(c.get("reason") or "資料不足"))
-        return ('<div class="card"><h2>相關性集中度</h2>'
-                f'<div class="big dim">—</div>'
-                f'<p class="note">算不出來:{why}<br>'
-                '<b>沒有拿一個「假設不相關」的數字頂替。</b> '
-                '在最危險的時候給最樂觀的答案,是這裡最貴的一種錯。'
-                '</p></div>')
-
-    # 帳面幾檔、實際上等於幾檔
-    shrink = (1 - enp / n) * 100 if n else 0.0
-    return ('<div class="card"><h2>相關性集中度</h2>'
-            f'<div class="big">{equiv:.1f}<span '
-            'style="font-size:16px;color:var(--dim)">% 等效單一標的</span>'
-            '</div>'
-            '<div class="grid">'
-            + kv("帳面總曝險", f"{total:.1f}%")
-            + kv("帳面檔數", f"{n} 檔")
-            + kv("有效檔數", f"{enp:.1f} 檔")
-            + kv("分散度損失", f"{shrink:.0f}%")
-            + f'</div><p class="note">'
-            f'帳面 <b>{n} 檔 / {total:.1f}%</b>,把相關性算進去之後,'
-            f'這個組合等於<b>一個 {equiv:.1f}% 的單一標的</b>'
-            f'(有效 {enp:.1f} 檔,'
-            f'{c.get("observations")} 天共同觀測)。<br>'
-            '總曝險只是加總,它不會告訴你七個倉是不是同一個賭注。'
-            '加密貨幣的相關性在恐慌時往 1 靠攏 —— 而那正是風控唯一'
-            '真的重要的時候。</p>'
-            '<div class="flag"><b>上限尚未設定</b>,需執政官指定。'
-            '在那之前這條檢查每天照跑、照記錄,但不會擋單 —— '
-            '一條 Risk Limit 不該由程式自己決定(第 102 條)。</div>'
-            '</div>')
-
-
-def block_events() -> str:
-    """
-    事件日曆(第五十一條)。
-
-    這張卡在**沒有日曆的時候照樣顯示** —— 而且顯示的是
-    「沒有在看」,不是「今天沒事」。把卡片藏起來會讓人以為
-    這件事有人在管。
-    """
-    from portfolio import events
-
-    try:
-        st = events.status()
-    except Exception as e:
-        return ('<div class="card"><h2>事件日曆</h2>'
-                f'<p class="note">讀取失敗:{html.escape(str(e))}</p></div>')
-
-    if not st["loaded"] or st["stale"]:
-        why = html.escape(str(st.get("reason") or ""))
-        return ('<div class="card"><h2>事件日曆</h2>'
-                '<div class="big dim">未載入</div>'
-                f'<p class="note">{why}</p>'
-                '<div class="flag"><b>「沒有載入日曆」不等於「今天沒有'
-                '事件」。</b>前者是我不知道,後者是一個確定的判斷 —— '
-                '而這裡不知道。<br>'
-                '日期要從發布單位拿(聯準會 / BLS / BEA),'
-                '格式見 <code>docs/events.example.json</code>。'
-                '憑記憶寫下的日期會讓人以為有在看,而內容是錯的 —— '
-                '一份錯的日曆比沒有日曆危險。</div></div>')
-
-    def row(e):
-        return (f'<tr><td class="sym">{html.escape(e["date"])}</td>'
-                f'<td>{html.escape(e["kind"])}</td>'
-                f'<td><div class="why">{html.escape(e["note"])}</div></td>'
-                '</tr>')
-
-    today = st["today"]
-    head = (f'<div class="big warn">今天:'
-            + "、".join(html.escape(e["kind"]) for e in today) + '</div>'
-            if today else '<div class="big dim">今天無事件</div>')
-
-    rows = "".join(row(e) for e in st["upcoming"])
-    table = ('<div class="scroll"><table><tbody>' + rows + '</tbody></table>'
-             '</div>') if rows else '<p class="note">未來 14 天內沒有事件。</p>'
-
-    return ('<div class="card"><h2>事件日曆</h2>' + head + table +
-            '<div class="flag">這條策略回測 3.3 年約<b>每月換手一次</b>,'
-            '持有的倉會原封不動地穿過事件 —— 躲不掉。<br>'
-            '所以這裡只做<b>看得見</b>,<b>不改變任何交易決策</b>。'
-            '要擋單就會改變進場日期,而那等於換一條策略,'
-            'Calmar 1.33 要重新驗證。</div></div>')
 
 
 def block_contract() -> str:
@@ -1016,13 +860,19 @@ def block_system() -> str:
 # ══════════════════════════════════════════════════════════
 def render() -> str:
     now = datetime.now(timezone.utc)
-    # 指令單排在第一個 —— 它是**現在唯一需要人動手**的東西。
-    # 帳戶餘額很好看,但看它不會讓任何事情發生。
-    desk = (block_tickets() + block_account() + block_orders()
-            + block_positions() + block_curve())
-    signals = block_signals() + block_monitor()
-    system = (block_gaps() + block_events() + block_correlation()
-              + block_contract() + block_system())
+    # 2026-09-13 執政官:「我想專注在 U 本位標準合約,其他不要,
+    # 所以只想要相關的面板就好。」
+    #
+    # 砍掉的:權益曲線、相關性、事件日曆、策略監控、紙上今日訂單、
+    # 紙上持倉。**它們背後的邏輯沒有被關掉** —— 相關性與事件日曆
+    # 仍然是部位大小的閘門,只是不再佔畫面。砍的是顯示,不是風控。
+    #
+    # 順序照「要不要動手」排:
+    #   指令單(要按)→ 交易所實際(真相)→ 訊號(為什麼)
+    #   → 部位大小的依據(數量從哪來)
+    desk = (block_tickets() + block_exchange() + block_signals()
+            + block_account())
+    system = block_gaps() + block_contract() + block_system()
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -1038,11 +888,9 @@ def render() -> str:
 </header>
 <nav>
   <a href="#" class="on" data-t="desk">交易台</a>
-  <a href="#" data-t="signals">訊號</a>
   <a href="#" data-t="system">系統</a>
 </nav>
 <div class="tabpane on" id="desk">{desk}</div>
-<div class="tabpane" id="signals">{signals}</div>
 <div class="tabpane" id="system">{system}</div>
 <footer>版本 {html.escape(_build().describe())} —— 這一行在,
 就代表你看到的是這個行程真的跑的那一版<br>紙上帳本非真錢 · 每日 00:30 UTC 記帳 · U 本位標準合約沒有下單 API,實際送單由人在 App 完成</footer>

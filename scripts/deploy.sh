@@ -49,10 +49,29 @@ git log --oneline -1
 # ── 三、重啟 ────────────────────────────────────────
 say "三、重啟 $UNIT"
 systemctl restart "$UNIT" || die "重啟失敗。看:journalctl -u $UNIT -n 40"
-sleep 3
-STATE="$(systemctl is-active "$UNIT")"
-echo "  狀態  $STATE"
-[ "$STATE" = "active" ] || die "服務沒起來。看:journalctl -u $UNIT -n 40"
+
+# ⚠️ 2026-09-13:第一版 sleep 3 之後看到 activating 就判死。
+#    **activating 不是失敗,是還在起。** 面板啟動要 import pandas /
+#    pydantic 再讀快取,三秒不一定夠。等太短就下結論,
+#    跟這一整輪要修的毛病是同一個。
+STATE=""
+for i in $(seq 1 20); do
+  STATE="$(systemctl is-active "$UNIT")"
+  case "$STATE" in
+    active)  echo "  狀態  active(等了 $((i * 2)) 秒)"; break ;;
+    failed|inactive) break ;;
+    *)       printf '  等 %s… (%ss)\r' "$STATE" "$((i * 2))"; sleep 2 ;;
+  esac
+done
+echo
+if [ "$STATE" != "active" ]; then
+  echo "  狀態  $STATE"
+  echo
+  echo "  ── 最後 30 行日誌 ─────────────────────────────"
+  journalctl -u "$UNIT" -n 30 --no-pager 2>/dev/null | sed 's/^/  /'
+  echo "  ───────────────────────────────────────────────"
+  die "服務起不來。上面的日誌就是原因,整段貼出來。"
+fi
 
 # ── 四、問服務自己(這一步才是重點)──────────────────
 say "四、驗證:服務跑的是哪一版"

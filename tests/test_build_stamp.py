@@ -79,9 +79,33 @@ def test_the_dashboard_puts_the_stamp_where_it_is_seen_first():
 
 @pytest.mark.parametrize("must", [
     "指令單", "U 本位標準合約 · 手動送單", "還沒關掉的洞",
+    "交易所帳戶 —— U 本位標準合約",
 ])
 def test_the_new_system_actually_reaches_the_page(must):
     """這幾塊是 2026-09-13 換上去的。**渲染不出來就等於沒改。**"""
     import scripts.dashboard as dash
 
     assert must in dash.render()
+
+
+@pytest.mark.parametrize("gone", [
+    "權益曲線", "相關性集中度</h2>", "事件日曆", "策略監控", "今日訂單",
+])
+def test_the_things_the_consul_asked_to_remove_are_gone(gone):
+    """2026-09-13 執政官:「我想專注在 U 本位標準合約,其他不要。」
+
+    ⚠️ 砍的是**顯示**,不是風控 —— 相關性與事件日曆仍然是部位大小
+    的閘門,只是不再各佔一張卡。相關性搬進了指令單裡
+    (`gate_correlation`),而 `tests/test_correlation.py` 照原樣
+    釘著它的每一個數字:量到卻沒人看得到的數字等於沒量。
+    """
+    import scripts.dashboard as dash
+
+    assert gone not in dash.render()
+
+
+def test_the_correlation_number_survived_the_cut():
+    """砍面板不能把 §60 的數字一起砍掉 —— 它只是換了位置。"""
+    import scripts.dashboard as dash
+
+    assert hasattr(dash, "gate_correlation")
