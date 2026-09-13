@@ -100,6 +100,21 @@ class RiskLimits:
     # 依據:每日記帳週期 24 小時 + 補跑緩衝。
     max_data_age_hours: float = 30.0
 
+    # 相關性調整後的等效單一標的曝險上限(%)—— 第六十條
+    #
+    # **預設 None,意思是「還沒有上限」,不是「不限制」。**
+    #
+    # 為什麼不給一個數字:給了就是我在替執政官決定一條 Risk Limit,
+    # 而第 102 條說 Risk Limit 必須人工確認。更實際的理由是我算不出
+    # 依據 —— 這批幣真實的相關性要拿實際歷史跑過才知道,
+    # 而其他每一條門檻的預設值都寫得出依據。
+    #
+    # 在它是 None 的期間,檢查**仍然每天執行並把數字記下來**
+    # (面板與 risk.to_dict() 都看得到)。這不是一顆沒有作用的旋鈕:
+    # 它量的是真的東西,只是還沒有人設界線。
+    # 設定值之後它就變成硬閘,和其他門檻一樣。
+    max_equivalent_exposure_pct: float | None = None
+
     @classmethod
     def load(cls) -> "RiskLimits":
         """從設定檔載入。缺檔就用預設值並寫出來,讓它變成可見的設定。"""
@@ -141,6 +156,10 @@ class RiskDecision:
     verdict: str
     checks: list = field(default_factory=list)
     rejected_symbols: set = field(default_factory=set)
+    # 相關性集中度的原始數字(第六十條)。留成結構化欄位而不是只寫在
+    # detail 字串裡 —— 面板、/health 與之後決定門檻的人都要拿它算東西,
+    # 從一句中文裡把數字剖出來是行不通的。
+    concentration: dict | None = None
 
     @property
     def allowed(self) -> bool:
@@ -152,6 +171,7 @@ class RiskDecision:
     def to_dict(self) -> dict:
         return {"verdict": self.verdict,
                 "rejected_symbols": sorted(self.rejected_symbols),
+                "concentration": self.concentration,
                 "checks": [asdict(c) for c in self.checks]}
 
 
@@ -169,9 +189,10 @@ class RiskEngine:
 
     def __init__(self, limits: RiskLimits | None = None):
         self.limits = limits or RiskLimits.load()
+        self._concentration: dict | None = None
 
     # ── 帳戶層檢查:任何一條不過 → 整批 REJECT ──────────────
-    def _account_checks(self, account, marks, curve) -> list:
+    def _account_checks(self, account, marks, curve, returns=None) -> list:
         L = self.limits
         out = []
         eq = account.equity(marks)
@@ -235,7 +256,50 @@ class RiskEngine:
                 "最近的強平距離", ok, ALLOW if ok else REJECT,
                 f"{worst_sym} 距強平 {worst:.2f}%"
                 f"(下限 {L.min_liquidation_distance_pct}%)"))
+
+        # 七、相關性集中度(第六十條)
+        if returns is not None and account.positions:
+            out.append(self._correlation_check(account, marks, returns))
         return out
+
+    # ── 相關性集中度 —— 第六十條 ──────────────────────────
+    def _correlation_check(self, account, marks, returns) -> Check:
+        """
+        「總曝險 49%」沒有告訴你七個倉是不是同一個賭注。
+
+        這條檢查算的是 √(wᵀRw):相關性考慮進去之後,這個組合
+        等於多大的**單一**標的。相關性 1 的時候它就等於總曝險。
+        """
+        from portfolio.correlation import concentration
+
+        L = self.limits
+        c = concentration(account.weights(marks), returns)
+        self._concentration = c.to_dict()
+        limit = L.max_equivalent_exposure_pct
+
+        if not c.measured:
+            detail = f"算不出來:{c.reason}"
+            if limit is None:
+                # 沒有門檻、也沒有數字 —— 這條檢查這一天什麼都沒說。
+                # 說成 ALLOW 會讓它看起來通過了。
+                return Check("相關性集中度", True, ALLOW,
+                             detail + "(尚未設定上限)")
+            # 有門檻卻量不到 -> 拒絕。設計原則五:檢查失敗時不放行。
+            return Check("相關性集中度", False, REJECT,
+                         detail + f"(上限 {limit}%,量不到就不放行)")
+
+        shape = (f"等效單一標的曝險 {c.equivalent_exposure_pct:.1f}%"
+                 f"(帳面 {c.total_exposure_pct:.1f}% / {c.positions} 檔,"
+                 f"有效 {c.effective_positions:.1f} 檔,"
+                 f"{c.observations} 天共同觀測)")
+
+        if limit is None:
+            return Check("相關性集中度", True, ALLOW,
+                         shape + " · 尚未設定上限(需執政官指定)")
+
+        ok = c.equivalent_exposure_pct <= limit
+        return Check("相關性集中度", ok, ALLOW if ok else REJECT,
+                     shape + f" · 上限 {limit}%")
 
     @staticmethod
     def _loss_streak(curve) -> int:
@@ -302,9 +366,16 @@ class RiskEngine:
 
     # ── 主入口 ────────────────────────────────────────
     def evaluate(self, account, orders, marks, curve=None,
-                 data_age_hours: float | None = None) -> RiskDecision:
+                 data_age_hours: float | None = None,
+                 returns: dict | None = None) -> RiskDecision:
+        """
+        returns:{幣: {日期: 日報酬}},只能含決策日**之前**的資料。
+        給 None 代表沒有歷史可用 —— 相關性那條就不會出現在檢查清單裡,
+        而不是用一個假設頂替。
+        """
         L = self.limits
         checks = []
+        self._concentration = None
 
         # 資料新鮮度 —— 讀不到就拒絕,不放行
         if data_age_hours is not None:
@@ -315,7 +386,8 @@ class RiskEngine:
 
         try:
             eq = account.equity(marks)
-            checks += self._account_checks(account, marks, curve or [])
+            checks += self._account_checks(account, marks, curve or [],
+                                           returns)
             oc, rejected = self._order_checks(account, orders, marks, eq)
             checks += oc
         except Exception as e:
@@ -324,19 +396,22 @@ class RiskEngine:
             return RiskDecision(REJECT, [Check(
                 "風控引擎", False, REJECT,
                 f"檢查失敗:{type(e).__name__}: {e}")],
-                {o.symbol for o in orders})
+                {o.symbol for o in orders}, self._concentration)
 
         blocking = [c for c in checks if c.verdict == REJECT
                     and not c.name.startswith(tuple(
                         f"{o.symbol} " for o in orders))]
         if blocking:
             return RiskDecision(REJECT, checks,
-                                {o.symbol for o in orders})
-        return RiskDecision(REDUCE if rejected else ALLOW, checks, rejected)
+                                {o.symbol for o in orders},
+                                self._concentration)
+        return RiskDecision(REDUCE if rejected else ALLOW, checks, rejected,
+                            self._concentration)
 
 
 def evaluate(account, orders, marks, curve=None,
-             data_age_hours: float | None = None) -> RiskDecision:
+             data_age_hours: float | None = None,
+             returns: dict | None = None) -> RiskDecision:
     """便捷入口。"""
     return RiskEngine().evaluate(account, orders, marks, curve,
-                                 data_age_hours)
+                                 data_age_hours, returns)

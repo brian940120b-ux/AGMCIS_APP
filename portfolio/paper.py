@@ -39,6 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.logging import get_logger
+from portfolio import correlation
 from portfolio import specs
 from portfolio.account import Account
 # costs 的估計值已不再用於記帳 —— 資金費改收 specs 提供的交易所實際結算值
@@ -118,6 +119,7 @@ class Config:
     lookback_days: int = LOOKBACK_DAYS
     state_path: Path = BASE / "data" / "portfolio_account.json"
     curve_path: Path = BASE / "data" / "portfolio_equity.jsonl"
+    risk_path: Path = BASE / "data" / "portfolio_risk.json"
     universe_fn: object = None          # () -> list[str] | None
 
 
@@ -198,10 +200,15 @@ def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     # 只給開盤價會漏掉「盤中破線、收盤拉回」的情況,而那在真實交易所
     # 是實實在在被平掉了。
     bars_exec = {s: idx[s][exec_day] for s in idx if exec_day in idx[s]}
+    # 相關性用的報酬歷史(第六十條)。**只到訊號日 i 為止** ——
+    # 和其他所有訊號一樣,不可以看到成交日以後的事(第三十四條)。
+    returns = correlation.daily_returns(idx, syms, dates, i,
+                                        cfg.lookback_days)
     return {"signal_day": day.isoformat(), "exec_day": exec_day.isoformat(),
             "target": target, "held": held_w, "equity": eq,
             "prices": prices, "bars_exec": bars_exec, "mas": mas,
             "orders": orders, "symbols": syms, "cfg": cfg,
+            "returns": returns,
             "already_done": a.last_signal_day == day.isoformat()}
 
 
@@ -260,7 +267,8 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
                     curve_rows.append(json.loads(ln))
     except OSError:
         pass
-    risk = RiskEngine().evaluate(a, p["orders"], prices, curve_rows)
+    risk = RiskEngine().evaluate(a, p["orders"], prices, curve_rows,
+                                 returns=p.get("returns"))
     orders_in = list(p["orders"])
     if not risk.allowed:
         for c in risk.failures():
@@ -373,6 +381,19 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
         "risk_verdict": risk.verdict,
         "risk_rejected": sorted(risk.rejected_symbols) or None,
         "risk_failures": [c.name for c in risk.failures()] or None})
+
+    # 風控的完整判決落地 —— 面板與 /health 要看得到每一條檢查說了什麼。
+    # 特別是相關性集中度(第六十條):它的上限還沒設定,而**沒有上限
+    # 的期間正是最需要天天看到那個數字的時候** —— 執政官要拿它決定門檻。
+    # 只留在 log 裡等於沒人會看到。
+    try:
+        from core.atomic import write_json_atomic
+        write_json_atomic(cfg.risk_path, dict(
+            risk.to_dict(), t=now.isoformat(),
+            signal_day=p["signal_day"]))
+    except OSError as e:
+        # 落地失敗不該讓記帳整個掛掉,但也不可以無聲。
+        log.warning(f"風控判決落地失敗(不影響記帳):{e}")
 
     if cfg.name == "main":
         try:

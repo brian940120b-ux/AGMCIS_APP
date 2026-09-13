@@ -613,6 +613,63 @@ def block_monitor() -> str:
             '跑出去就講。</div></div>')
 
 
+def block_correlation() -> str:
+    """
+    相關性集中度(第六十條)。
+
+    這張卡回答一個「總曝險」永遠不會回答的問題:
+    **這七個倉是七個賭注,還是同一個賭注的七個面?**
+
+    上限還沒設定,而**沒有上限的期間正是最需要天天看到這個數字的
+    時候** —— 執政官要拿它決定門檻。所以這張卡在沒有上限時照樣顯示,
+    而且明說上限還沒設。
+    """
+    r = _json(DATA / "portfolio_risk.json")
+    if not r:
+        return ''
+    c = r.get("concentration")
+    if not c:
+        return ''
+
+    total = c.get("total_exposure_pct")
+    equiv = c.get("equivalent_exposure_pct")
+    enp = c.get("effective_positions")
+    n = c.get("positions") or 0
+
+    if equiv is None or enp is None:
+        why = html.escape(str(c.get("reason") or "資料不足"))
+        return ('<div class="card"><h2>相關性集中度</h2>'
+                f'<div class="big dim">—</div>'
+                f'<p class="note">算不出來:{why}<br>'
+                '<b>沒有拿一個「假設不相關」的數字頂替。</b> '
+                '在最危險的時候給最樂觀的答案,是這裡最貴的一種錯。'
+                '</p></div>')
+
+    # 帳面幾檔、實際上等於幾檔
+    shrink = (1 - enp / n) * 100 if n else 0.0
+    return ('<div class="card"><h2>相關性集中度</h2>'
+            f'<div class="big">{equiv:.1f}<span '
+            'style="font-size:16px;color:var(--dim)">% 等效單一標的</span>'
+            '</div>'
+            '<div class="grid">'
+            + kv("帳面總曝險", f"{total:.1f}%")
+            + kv("帳面檔數", f"{n} 檔")
+            + kv("有效檔數", f"{enp:.1f} 檔")
+            + kv("分散度損失", f"{shrink:.0f}%")
+            + f'</div><p class="note">'
+            f'帳面 <b>{n} 檔 / {total:.1f}%</b>,把相關性算進去之後,'
+            f'這個組合等於<b>一個 {equiv:.1f}% 的單一標的</b>'
+            f'(有效 {enp:.1f} 檔,'
+            f'{c.get("observations")} 天共同觀測)。<br>'
+            '總曝險只是加總,它不會告訴你七個倉是不是同一個賭注。'
+            '加密貨幣的相關性在恐慌時往 1 靠攏 —— 而那正是風控唯一'
+            '真的重要的時候。</p>'
+            '<div class="flag"><b>上限尚未設定</b>,需執政官指定。'
+            '在那之前這條檢查每天照跑、照記錄,但不會擋單 —— '
+            '一條 Risk Limit 不該由程式自己決定(第 102 條)。</div>'
+            '</div>')
+
+
 def block_contract() -> str:
     c = _json(DATA / "portfolio_contract.json")
     if not c:
@@ -855,7 +912,8 @@ def render() -> str:
     now = datetime.now(timezone.utc)
     desk = block_account() + block_orders() + block_positions() + block_curve()
     signals = block_signals() + block_monitor()
-    system = block_contract() + block_system() + block_wild()
+    system = (block_correlation() + block_contract() + block_system()
+              + block_wild())
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
