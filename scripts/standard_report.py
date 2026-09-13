@@ -1,21 +1,17 @@
 """
-標準合約全景報告 —— 兩個產品並排 · 2026-09-13
+U 本位標準合約:現況報告 · 2026-09-13
 
-═══ 這一支取代了什麼 ═══
-probe_standard.py / probe_standard2.py / probe_standard3.py / dump_standard.py
-是四支一次性的探路腳本,它們各問了一部分,而**沒有一支能回答
-「所以要用哪一個」**。四份片段拼出來的印象,正是 2026-09-10
-那個錯誤結論的溫床。
+執政官裁定:**「補充做標準合約U本位」**。這一支回答四個問題:
 
-這一支把答案一次講完,而且**只讀**(ReadOnlyClient 沒有 post/delete)。
+  一、這個產品現在能讀到什麼、讀不到什麼
+  二、交易所不給的強平價,我方算出來是多少
+  三、規格能不能從成交史反推出來(下單前必須知道精度)
+  四、下單端點到底存不存在 —— **這一題要另外跑 probe_ustd_order.py**
 
-═══ 它會回答的四個問題 ═══
-一、兩個標準合約產品各自能做什麼、不能做什麼
-二、策略的七個幣在幣本位上存不存在
-三、一張合約到底等於多少 USD(文件說的 vs 回推的)
-四、下一步卡在誰身上 —— 交易所,還是我們
+**它只讀。** 用的是 ReadOnlyClient,那個類別沒有 post / delete。
 
 用法:  .venv/bin/python scripts/standard_report.py
+       .venv/bin/python scripts/standard_report.py BTCUSDT ETHUSDT
 """
 from __future__ import annotations
 
@@ -31,12 +27,11 @@ interpreter.require()
 from exchange.bingx.private import (Credentials, CredentialsMissing,
                                     PrivateCallFailed, ReadOnlyClient,
                                     host, is_live)
-from exchange.bingx.standard import (BingXStandardCoinM, BingXStandardUSDT,
-                                     USDT_REASON)
+from exchange.bingx.standard import BingXStandardUSDT
 from exchange.types import NotSupported, Unverified
+from portfolio import reconcile
 
-
-LINE = "─" * 62
+LINE = "─" * 64
 
 
 def _head(text: str) -> None:
@@ -44,18 +39,18 @@ def _head(text: str) -> None:
 
 
 def _try(label, fn, *args, **kwargs):
-    """跑一個唯讀查詢。失敗就印出來繼續 —— 一格壞掉不該讓整份報告消失。"""
+    """一格壞掉不該讓整份報告消失。"""
     try:
         return fn(*args, **kwargs), None
-    except (PrivateCallFailed, NotSupported, Unverified) as e:
-        print(f"  {label}: ✗ {e}")
+    except (PrivateCallFailed, NotSupported, Unverified, ValueError) as e:
+        print(f"  {label}:✗ {e}")
         return None, e
     except Exception as e:                       # noqa: BLE001
-        print(f"  {label}: ✗ {type(e).__name__}: {e}")
+        print(f"  {label}:✗ {type(e).__name__}: {e}")
         return None, e
 
 
-def main() -> int:
+def main(argv) -> int:
     try:
         creds = Credentials.from_env()
     except CredentialsMissing as e:
@@ -64,124 +59,117 @@ def main() -> int:
 
     print(f"環境  {'實盤' if is_live() else 'Demo(VST)'}  {host()}")
     print(f"金鑰  {creds.masked}")
+    print("產品  U 本位標準合約  /openApi/contract/v1")
 
     client = ReadOnlyClient(creds)
     usdt = BingXStandardUSDT(client)
-    coinm = BingXStandardCoinM(client)
 
-    # ── 一、U 本位標準合約 ────────────────────────────
-    _head("一、U 本位標準合約  /openApi/contract/v1")
-    print("  下單 API:**沒有**")
-    print("  " + USDT_REASON.replace(" —— ", "\n    —— "))
-
+    # ── 一、餘額 ──────────────────────────────────────
+    _head("一、餘額")
     bal, _ = _try("餘額", usdt.balance)
     if bal is not None:
         rows = bal if isinstance(bal, list) else [bal]
-        print(f"  餘額:{len(rows)} 個幣種")
-        for row in rows[:3]:
-            if isinstance(row, dict):
-                asset = row.get("asset") or row.get("currency") or "?"
-                print(f"    {asset}: 權益 {row.get('equity')}"
-                      f" 餘額 {row.get('balance')}")
+        shown = [r for r in rows
+                 if isinstance(r, dict) and float(r.get("balance") or 0) > 0]
+        print(f"  {len(rows)} 個幣種,其中 {len(shown)} 個有餘額")
+        for row in shown[:6]:
+            print(f"    {row.get('asset'):<6} 餘額 {row.get('balance')}"
+                  f"  可用 {row.get('availableBalance')}"
+                  f"  全倉未實現 {row.get('crossUnPnl')}")
+        if not any("equity" in r for r in rows if isinstance(r, dict)):
+            print("    ⚠️ 這個產品**不回 equity(權益)** ——"
+                  " 對帳層會如實報成「由我方補」")
 
-    pos, _ = _try("持倉", usdt.positions)
-    if pos is not None:
-        print(f"  持倉:{len(pos)} 筆")
-        for row in pos:
-            print(f"    {row.get('symbol')} {row.get('positionSide')}"
-                  f" {row.get('positionAmt')} @ {row.get('entryPrice')}"
-                  f" 槓桿 {row.get('leverage')}")
-            if "liquidationPrice" not in row:
-                print("      ⚠️ 這筆**沒有強平價** —— 風控的強平距離"
-                      "下限對這個產品算不出來,不是 bug,是讀不到")
+    # ── 二、持倉 + 我方算出來的強平價 ────────────────
+    _head("二、持倉 —— 強平價是我方算的,交易所不給")
+    rich, err = _try("持倉", usdt.rich_positions)
+    positions_raw, _ = _try("原始持倉", usdt.positions)
 
-    # ── 二、幣本位標準合約 ────────────────────────────
-    _head("二、幣本位標準合約  /openApi/cswap/v1  (= Coin-M perpetual)")
-    print("  下單 API:**有** POST /openApi/cswap/v1/trade/order")
-    print("  而且支援下單時附帶 stopLoss —— 進場與停損可以是同一個動作")
+    if rich is not None:
+        print(f"  {len(rich)} 筆")
+        for pos in rich:
+            dist = pos.liq_distance_pct()
+            dist_txt = f"{dist:.2f}%" if dist is not None else "算不出來"
+            print(f"\n    {pos.symbol}  {pos.side}  {pos.qty:g}"
+                  f"  @ {pos.entry:g}  {pos.leverage:g}×"
+                  f"  {'逐倉' if pos.isolated else '全倉'}")
+            print(f"      保證金 {pos.initial_margin}"
+                  f"  未實現 {pos.unrealized}"
+                  f"  現價 {pos.current_price}")
+            if pos.liq_price is None:
+                print("      強平價 **算不出來** —— 當成不合格,不是沒問題")
+            else:
+                print(f"      強平價 {pos.liq_price:.6g}"
+                      f"  [{pos.liq_source}]  距離 {dist_txt}")
+            for note in pos.notes:
+                print(f"        · {note}")
 
-    specs, _ = _try("合約清單", coinm.contracts)
-    if specs is None:
-        print("\n  合約清單問不到,後面幾項無法進行。")
-        return 1
+            if dist is not None and dist < 20.0:
+                print(f"      ❗ 距離強平只剩 {dist:.2f}%,"
+                      "低於風控下限 20%(第十九條)")
+                print("         而且這個數字**偏樂觀** —— 實際更近")
 
-    print(f"  可交易標的:{len(specs)} 檔")
-    sample = specs.get("BTC-USD")
-    if sample:
-        print(f"    BTC-USD  價格精度 {sample.price_precision}"
-              f"  最小張數 {sample.min_qty:g}"
-              f"  最小名目 {sample.min_notional:g} USD")
-        print(f"    費率  taker {sample.taker_fee_pct:.4g}%"
-              f"  maker {sample.maker_fee_pct:.4g}%")
-        print(f"    反向 {sample.inverse}  資金費 {sample.has_funding}"
-              f"  到期 {sample.expiry}")
+    # ── 三、對帳:欄位形狀 ────────────────────────────
+    _head("三、對帳 —— 哪幾格是交易所給的,哪幾格是我們補的")
+    if bal is not None and positions_raw is not None:
+        rec = reconcile.reconcile({}, bal, positions_raw,
+                                  product=usdt.name)
+        for report in (rec.balance_fields, rec.position_fields):
+            print(f"\n  {report.what}:"
+                  f"{'通過' if report.ok else '**不通過**'}"
+                  f"  全部來自交易所:"
+                  f"{'是' if report.fully_from_exchange else '**否**'}")
+            if report.present:
+                print(f"    交易所給的  {', '.join(report.present)}")
+            if report.via_alias:
+                print(f"    別名對上的  {report.via_alias}")
+            if report.supplied_by_us:
+                for name, why in report.supplied_by_us.items():
+                    print(f"    由我方補    {name} —— {why}")
+            if report.missing_critical:
+                print(f"    ❗ 缺關鍵欄位 {', '.join(report.missing_critical)}")
+            if report.reason:
+                print(f"    {report.reason}")
 
-    # 策略的七個幣在不在
-    from portfolio.paper import SYMBOLS
-    print("\n  策略的七個幣在幣本位上:")
-    missing = []
-    for sym in SYMBOLS:
-        want = sym.replace("-USDT", "-USD")
-        if want in specs:
-            print(f"    ✓ {sym:12} → {want}")
-        else:
-            print(f"    ✗ {sym:12} → {want}  **沒有這個標的**")
-            missing.append(sym)
-
-    fund, _ = _try("資金費", coinm.current_funding, "BTC-USD")
-    if fund:
-        print(f"\n  BTC-USD 當期資金費 {fund['lastFundingRate']}"
-              f"  標記價 {fund['markPrice']}")
-        print("    ← 「標準合約不收資金費」那句話就是在這裡被推翻的")
-
-    cpos, _ = _try("持倉", coinm.positions)
-    if cpos is not None:
-        print(f"\n  幣本位持倉:{len(cpos)} 筆")
-        for row in cpos:
-            print(f"    {row.get('symbol')} {row.get('positionSide')}"
-                  f" {row.get('positionAmt')} @ {row.get('avgPrice')}"
-                  f" 強平 {row.get('liquidationPrice')}")
-
-    # ── 三、一張是多少 ────────────────────────────────
-    _head("三、一張合約等於多少 USD —— 文件與實測對不對得上")
-    bad = 0
-    for sym in ("BTC-USD", "ETH-USD", "SOL-USD"):
-        if sym not in specs:
+    # ── 四、規格:從成交史反推 ────────────────────────
+    _head("四、規格 —— 這個產品沒有 contracts 端點,只能從成交史反推")
+    wanted = argv or _symbols_from(rich)
+    if not wanted:
+        print("  沒有持倉也沒有指定標的 —— 給我幾個代號:")
+        print("    .venv/bin/python scripts/standard_report.py BTCUSDT ETHUSDT")
+    for sym in wanted:
+        spec, _ = _try(sym, usdt.infer_spec, sym)
+        if spec is None:
             continue
-        got, _ = _try(sym, coinm.measure_contract_size, sym)
-        if not got:
-            continue
-        mark = "✓" if got["agree"] else "✗"
-        print(f"  {mark} {sym:9} 文件 {got['declared_by_doc']:g}"
-              f"  回推 {got['measured_from_ticker']:g}")
-        if not got["agree"]:
-            bad += 1
-            print(f"      {got['verdict']}")
-    if bad:
-        print(f"\n  ⚠️ {bad} 檔對不上。回推本身有假設"
-              "(quoteVolume 以幣計價,文件未載明),")
-        print("     所以這不是定論,是**一個必須在 Demo 上量出來的疑點**。")
-        print("     真正的定案:開一張最小單,讀回 positionAmt 與 initialMargin。")
+        mark = "✓" if spec.usable else "✗"
+        print(f"\n  {mark} {sym}  成交史 {spec.samples} 筆")
+        if spec.usable:
+            print(f"      數量精度 ≥{spec.quantity_precision} 位"
+                  f"  價格精度 ≥{spec.price_precision} 位"
+                  f"  最小成交量 {spec.min_executed_qty:g}")
+            if spec.leverages:
+                print(f"      用過的槓桿 {sorted(set(spec.leverages))}")
+        print(f"      {spec.reason}")
 
-    # ── 四、下一步卡在誰身上 ──────────────────────────
-    _head("四、下一步")
-    print("  U 本位標準合約:**卡在交易所**。沒有下單端點,只能等。")
-    print("    → 它的倉仍然會進對帳(第十七條),看得到但動不了。")
-    print("\n  幣本位標準合約:**卡在我們**。三件事:")
-    print("    1. 反向合約帳本 —— account.py / paper.py 目前只寫了正向")
-    print("    2. 一張多少 USD —— 見上一節,要在 Demo 量")
-    print("    3. 金鑰交易權限 —— 目前 code=100004,而開權限前 IP 白名單要先設")
-    print("\n  三件都是我們自己能做的工作 —— 這跟「等交易所開放」")
-    print("  是完全不同的處境,而 2026-09-10 把後者誤寫成了前者。")
-
-    if missing:
-        print(f"\n  另外:{len(missing)} 個策略幣在幣本位上不存在"
-              f"({', '.join(missing)})。")
-        print("    改用幣本位就等於**換掉交易池** —— 這是策略層的決定,")
-        print("    不是介面層可以自己換掉的(第六條)。")
-
+    # ── 五、下一步 ────────────────────────────────────
+    _head("五、下一步")
+    print("  ✅ 看得到帳戶、持倉、成交史")
+    print("  ✅ 強平價我方算得出來(線性合約,account.py 的公式直接適用)")
+    print("  ✅ 精度從真實成交反推得出來")
+    print()
+    print("  ❓ **下單端點還沒定案。** 官方文件沒有,但我之前全部用 GET 問。")
+    print("     跑這一支才算數:")
+    print("       .venv/bin/python scripts/probe_ustd_order.py")
+    print()
+    print("     POST 也全是 100400 → U 本位標準合約不能自動下單,")
+    print("     系統改成「算給你、你自己按」;其餘照常自動。")
+    print("     POST 問得出東西   → 接下單層,三道閘照走。")
     return 0
 
 
+def _symbols_from(rich) -> list:
+    return sorted({p.symbol for p in (rich or [])})
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

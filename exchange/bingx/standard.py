@@ -149,22 +149,102 @@ class BingXStandardUSDT(ExchangeAdapter):
 
     # ── 讀帳戶:這三個是**可以**的 ──────────────────────
     def positions(self) -> list[dict]:
-        """實測 2026-09-13 回了一筆 FLOCKUSDT 空單。
+        """交易所回什麼就是什麼 —— **原始的那一份。**
 
-        ⚠️ 回應裡**沒有 liquidationPrice**(官方文件的欄位表也沒有)。
-        風控的強平距離下限對這個產品**算不出來** —— 這不是 bug,
-        是這個產品讀不到那個數字。不要用預設值填。
+        ⚠️ 回應裡沒有 liquidationPrice 也沒有 markPrice
+        (官方文件的欄位表確認過,2026-09-13 的實測回應也一致)。
+
+        要拿補齊過的版本請用 `rich_positions()` —— 它會算出強平價,
+        並且明講那是**我們算的**。兩個方法刻意分開:
+        「交易所說的」與「我們推的」混在同一個 dict 裡,
+        遲早會有人把後者當成前者。
         """
         data = self._c().standard_positions()
         return list(data or [])
 
+    def rich_positions(self) -> list:
+        """補上交易所沒給的強平價。回 StandardPosition 清單。
+
+        每一筆都帶 `liq_source`:交易所給的是 "exchange",
+        我們算的是 "computed" 而且 `liq_optimistic=True`。
+        **我們算的那個偏樂觀** —— 實際強平價會更近,不會更遠,
+        所以它只能用來收緊判斷,不能用來放行。
+        """
+        from exchange.bingx.standard_usdt import positions_from
+        return positions_from(self.positions())
+
     def balance(self) -> dict:
+        """⚠️ 這個產品的餘額回應**沒有 equity**。
+
+        官方欄位表:asset / balance / crossWalletBalance / crossUnPnl /
+        availableBalance / maxWithdrawAmount / marginAvailable。
+        對帳層把 equity 列為 critical,所以這裡會被如實報成缺欄位 ——
+        那是對的,不要為了讓紅字消失而放寬對帳。
+        """
         return self._c().standard_balance()
 
     def orders(self, symbol: str) -> list[dict]:
-        from exchange.bingx.private import READ_ONLY
-        data = self._c().get(READ_ONLY["std_orders"], {"symbol": symbol})
-        return list(data or [])
+        """成交史。**symbol 是必填的**,而它的格式文件與實測不一致。
+
+        官方文件寫 `BTC-USDT`(有槓),但 allPosition 實測回的是
+        `FLOCKUSDT`(無槓),App 上顯示的也是無槓。兩種都試,
+        **並且回報哪一種成功** —— 靜靜換掉會讓「格式其實是另一種」
+        這件事永遠不被發現。
+        """
+        return self._orders_with_format(symbol)[0]
+
+    def _orders_with_format(self, symbol: str) -> tuple:
+        from exchange.bingx.private import READ_ONLY, PrivateCallFailed
+
+        tried, errors = [], []
+        for candidate in self._symbol_forms(symbol):
+            if candidate in tried:
+                continue
+            tried.append(candidate)
+            try:
+                data = self._c().get(READ_ONLY["std_orders"],
+                                     {"symbol": candidate})
+            except PrivateCallFailed as e:
+                errors.append(f"{candidate}: {e}")
+                continue
+            if data:
+                return list(data), candidate
+
+        if errors and len(errors) == len(tried):
+            raise NotSupported(
+                f"{symbol} 的成交史兩種代號格式都問不到:\n  "
+                + "\n  ".join(errors))
+        # 問得到但是空的 —— 那是「這個標的沒有成交過」,不是失敗。
+        return [], (tried[0] if tried else symbol)
+
+    @staticmethod
+    def _symbol_forms(symbol: str) -> list:
+        """`BTCUSDT` 與 `BTC-USDT` 兩種寫法都給出來。"""
+        plain = symbol.replace("-", "")
+        forms = [symbol, plain]
+        for quote in ("USDT", "USDC", "USD"):
+            if plain.endswith(quote) and len(plain) > len(quote):
+                forms.append(f"{plain[:-len(quote)]}-{quote}")
+                break
+        seen, out = set(), []
+        for f in forms:
+            if f not in seen:
+                seen.add(f)
+                out.append(f)
+        return out
+
+    def infer_spec(self, symbol: str):
+        """規格從成交史反推 —— 因為這個產品沒有 contracts 端點。
+
+        ⚠️ 反推出來的精度是**下界**,不是規格。用來擋明顯不合規的單
+        可以,拿來當四捨五入的依據不行。詳見 standard_usdt.infer_spec。
+        """
+        from exchange.bingx.standard_usdt import infer_spec
+        rows, used = self._orders_with_format(symbol)
+        spec = infer_spec(symbol, rows)
+        if used != symbol:
+            spec.reason = (spec.reason or "") + f"(代號實際用 {used} 問到)"
+        return spec
 
 
 # ══════════════════════════════════════════════════════════

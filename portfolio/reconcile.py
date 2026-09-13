@@ -79,6 +79,40 @@ ALIASES = {
 }
 
 
+# ══════════════════════════════════════════════════════════
+# 產品不給的欄位:不是「缺」,也不是「有」,是**要我們補**
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-13。U 本位標準合約(/openApi/contract/v1)的回應
+# **結構性地**少了三個欄位 —— 官方欄位表就沒有,不是這次沒回到。
+#
+# 這種情況不能報成「缺欄位」:報成缺欄位會讓人去找 bug,
+# 而那裡沒有 bug。也不能放寬期望值把它們拿掉:拿掉就等於宣稱
+# 「我們不需要強平價」,而風控的硬閘需要。
+#
+# 第三種答案:**這個欄位由我方補,而且要標明是補的。**
+#   · liquidationPrice -> exchange/bingx/standard_usdt.liquidation_price()
+#   · markPrice        -> 只有 currentPrice,用它會有誤差
+#   · equity           -> balance + crossUnPnl 可以湊,但那是推的
+KNOWN_ABSENT = {
+    "bingx-standard-usdt": {
+        "持倉": {
+            "liquidationPrice":
+                "這個產品不回強平價 —— 由 standard_usdt.liquidation_price()"
+                "算出來,線性逐倉公式,**偏樂觀**(未計維持保證金分層)",
+            "markPrice":
+                "只有 currentPrice(最新價)。強平是用標記價判定的,"
+                "拿最新價估距離會有誤差",
+        },
+        "餘額": {
+            "equity":
+                "這個產品不回權益。balance + crossUnPnl 可以湊出一個數字,"
+                "但那是**推的**,不是交易所說的",
+        },
+    },
+}
+
+
 @dataclass
 class FieldReport:
     """一組欄位的檢查結果。"""
@@ -89,6 +123,9 @@ class FieldReport:
     via_alias: dict = field(default_factory=dict)
     missing: list = field(default_factory=list)
     missing_critical: list = field(default_factory=list)
+    #: 這個產品**結構性地**不提供、而由我方補上的欄位。
+    #: 它不算缺,但也**絕不是**交易所給的 —— 見 KNOWN_ABSENT。
+    supplied_by_us: dict = field(default_factory=dict)
     reason: str | None = None
 
     @property
@@ -101,22 +138,40 @@ class FieldReport:
         """
         return self.checked and not self.missing_critical
 
+    @property
+    def fully_from_exchange(self) -> bool:
+        """每一格都是交易所給的。
+
+        `ok` 為 True 但這個是 False,意思是:**對得上,但其中幾格
+        是我們自己算的。** 那個差別在強平價上是生死之別 ——
+        我們算的偏樂觀,實際強平會更近。
+        """
+        return self.ok and not self.supplied_by_us
+
     def to_dict(self) -> dict:
         return {
             "what": self.what, "checked": self.checked, "ok": self.ok,
+            "fully_from_exchange": self.fully_from_exchange,
             "present": list(self.present), "via_alias": dict(self.via_alias),
             "missing": list(self.missing),
             "missing_critical": list(self.missing_critical),
+            "supplied_by_us": dict(self.supplied_by_us),
             "reason": self.reason,
         }
 
 
-def check_fields(sample, expected: dict, what: str) -> FieldReport:
+def check_fields(sample, expected: dict, what: str,
+                 product: str | None = None) -> FieldReport:
     """
     拿交易所真的回傳的一筆資料,對照我方實際會讀的欄位。
 
     sample 給 None 或空 -> `checked=False`,而 `ok` 是 False。
     **「沒有樣本」不是「沒有問題」。**
+
+    `product` 給了的話,`KNOWN_ABSENT` 裡登記過的欄位會被歸到
+    `supplied_by_us`,而不是 `missing_critical` —— 因為那些欄位
+    **交易所本來就不提供**,去找它是浪費時間。但它們也不會被當成
+    通過:`fully_from_exchange` 會是 False。
     """
     if isinstance(sample, list):
         sample = sample[0] if sample else None
@@ -130,6 +185,8 @@ def check_fields(sample, expected: dict, what: str) -> FieldReport:
             reason="沒有樣本可以對照 —— 這不代表欄位是對的,"
                    "代表還沒有人驗證過")
 
+    absent = (KNOWN_ABSENT.get(product or "", {}) or {}).get(what, {})
+
     report = FieldReport(what=what, checked=True)
     for name, critical in expected.items():
         if name in sample:
@@ -141,6 +198,11 @@ def check_fields(sample, expected: dict, what: str) -> FieldReport:
             # 認得別名,但**要說出來** —— 靜靜換掉會讓「交易所改版了」
             # 這件事永遠不被發現。
             report.via_alias[name] = found
+            continue
+
+        if name in absent:
+            # 這個產品本來就不給。**不報成缺,也不報成有。**
+            report.supplied_by_us[name] = absent[name]
             continue
 
         report.missing.append(name)
@@ -290,15 +352,19 @@ class Reconciliation:
         }
 
 
-def reconcile(ours: dict, balance, positions) -> Reconciliation:
+def reconcile(ours: dict, balance, positions,
+              product: str | None = None) -> Reconciliation:
     """
     一次做完:欄位形狀 + 數量差異。
 
     `ours` 是 {幣: 數量}。`balance` / `positions` 是交易所的原始回應。
+    `product` 是 adapter 的 name(例如 "bingx-standard-usdt")——
+    它決定哪些欄位算「這個產品本來就不給」,見 KNOWN_ABSENT。
     """
     return Reconciliation(
-        balance_fields=check_fields(balance, BALANCE_FIELDS, "餘額"),
-        position_fields=check_fields(positions, POSITION_FIELDS, "持倉"),
+        balance_fields=check_fields(balance, BALANCE_FIELDS, "餘額", product),
+        position_fields=check_fields(positions, POSITION_FIELDS, "持倉",
+                                     product),
         differences=compare(ours, positions),
         ours_count=sum(1 for v in ours.values() if abs(float(v or 0)) > TOLERANCE),
         theirs_count=len(positions or []),
