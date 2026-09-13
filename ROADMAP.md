@@ -98,16 +98,23 @@ Phase 0–17 之後,把 Master Prompt 全部 106 節重新對照了一次,
    但模擬盤一律全額成交,所以沒有真的走過一次。
 4. **停損在模擬盤不是交易所掛單。** 實盤要處理「進場成交但停損單被拒」。
 5. **Survivorship bias 還在。** 需要含已下市標的的歷史資料。
-6. **舊的 Dashboard Lite 還是一個巨大的 f-string。**
-   它已經不是首頁了(移到 `/dashboard`),但還沒重寫。
-7. **實單訂單型別只走 MARKET。** LIMIT / STOP / TRAILING_STOP 的型別
-   定義好了,LiveBroker 目前只送 MARKET。要等實單真的跑起來才驗得到。
-8. **加倉與反手沒有實作。** 兩者都會改變一個已存在部位的風險,
-   而目前的風控是為「開新倉」設計的。要做之前風控要先想清楚。
-9. **TP/SL 的參數還沒經過回測驗證。** 1R/2R/3R 與 30/30/40 是起點,
+6. **出場單一律市價。** 進場單走 `order_request.order_type`,所以 LIMIT
+   進場是通的(Execution Engine 會把它掛著等,不當成已成交)。但停損、
+   縮倉、平倉在 LiveBroker 裡寫死 MARKET —— 那是刻意的,緊急流程需要
+   部位真的消失,而一張限價平倉單可能不會成交。TRAILING_STOP 由
+   `position_monitor` 在本地執行,不是交易所的掛單型別。
+7. **TP/SL 的參數還沒經過回測驗證。** 1R/2R/3R 與 30/30/40 是起點,
    不是結論 —— 第五十六與五十七節都要求由回測決定。
 
 ### 已修掉
+
+- ~~舊的 Dashboard Lite 還是一個巨大的 f-string~~ —— 已經拆成
+  `api/dashboard_rows.py`(資料,損益走 Position 的方法)+
+  `templates/dashboard_lite.html`(版面),`main.py` 只負責接起來。
+- ~~加倉與反手沒有實作~~ —— `ExecutionEngine.add_to_position()` 與
+  `reverse_position()` 都在 `engine.py`,而且互相擋:方向相同的
+  「反手」會被要求改用加倉,方向相反的「加倉」會被要求改用反手,
+  現有部位方向不明就兩個都不做。反手是先平再開,平不掉就不開。
 
 - ~~`position_monitor` 用輪詢的單一價格而非 high/low~~ ——
   改成看輪詢間隔內的 1m K 棒 high/low,規則與回測引擎一致
