@@ -63,6 +63,10 @@ def parse_args():
     )
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument(
+        "--allow-uncalibrated", action="store_true",
+        help="合約規格沒校準也照跑。報告會蓋上 trustworthy=false。",
+    )
+    parser.add_argument(
         "--seed", type=int, default=None,
         help="Monte Carlo 的隨機種子。給了才能重現同一份結果。",
     )
@@ -112,6 +116,12 @@ def main():
     print(f"K 棒數   : {args.candles}")
     print(f"隨機種子 : {args.seed if args.seed is not None else '(未固定)'}")
     print()
+    from agmcis.lab import preconditions
+
+    quality = preconditions.require(symbols, args.allow_uncalibrated)
+    if quality is None:
+        return 1
+
     print("這會花一段時間 —— 每個標的都要抓 K 棒(超過 1200 根會分頁),")
     print("每個參數組合都要重跑回測。K 棒會快取到 data/history/,第二次會快很多。")
     print()
@@ -178,6 +188,7 @@ def main():
         "candles": args.candles,
         "seed": args.seed,
         "survivorship_warning": SURVIVORSHIP_WARNING,
+        preconditions.STAMP_KEY: quality.to_dict(),
         "result": result,
     }
 

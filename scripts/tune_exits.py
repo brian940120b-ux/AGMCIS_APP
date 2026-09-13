@@ -64,6 +64,10 @@ def parse_args():
                         help="進場訊號的分數門檻。整輪固定不變 —— "
                              "同時換進場與出場,結果好了也說不出是哪一邊的功勞。")
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--allow-uncalibrated", action="store_true",
+        help="合約規格沒校準也照跑。報告會蓋上 trustworthy=false。",
+    )
     return parser.parse_args()
 
 
@@ -79,6 +83,12 @@ def main():
     print(f"K 棒數   : {args.candles}")
     print(f"進場門檻 : min_score={args.min_score}(整輪固定)")
     print()
+
+    from agmcis.lab import preconditions
+
+    quality = preconditions.require([symbol], args.allow_uncalibrated)
+    if quality is None:
+        return 1
 
     from agmcis.backtest.costs import DEFAULT_COSTS
     from agmcis.backtest.engine import BacktestEngine
@@ -121,6 +131,7 @@ def main():
         "candles": len(candles),
         "min_score": args.min_score,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        preconditions.STAMP_KEY: quality.to_dict(),
     })
 
     output = Path(args.output)
