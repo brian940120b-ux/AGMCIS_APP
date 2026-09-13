@@ -121,6 +121,12 @@ def cmd_show(args) -> int:
         for sym, why in refused:
             print(f"\n  {sym}\n    {why}")
 
+    from portfolio.costs import standard_cost_caveat
+    caveat = standard_cost_caveat()
+    if caveat:
+        print(f"\n{LINE}")
+        print(f"  ⚠️ {caveat}")
+
     print(f"\n{LINE}")
     print("  按完之後跑這個,確認有沒有按對:")
     print("    .venv/bin/python scripts/ticket.py --verify")

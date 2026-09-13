@@ -222,13 +222,25 @@ U 本位(`contract/v1`)沒有下單端點,幣本位(`cswap/v1`)有。
 ✅ J 精度從成交史反推    沒有 contracts 端點     standard_usdt.infer_spec
 ✅ K 下單端點定案       **沒有** —— 對照組證實    probe_ustd_order.py
 ✅ L 指令單 + 執行對帳   最後一吋是人按的        portfolio/ticket.py
-   M 停損百分比         §102 執政官決定         --stop-pct
+   M 停損百分比         證據已備,§102 你決定    stop_evidence.py
+   N 交易池             這個產品有哪些幣?       discover_universe.py
+   O 成本               費率/資金費/滑點未驗證   costs.STANDARD_COSTS_VERIFIED
    E Kill Switch       一鍵停止並平倉(手動)   §47
    G 實盤最小額         人工簽署,契約八條
 ```
 
-**M 是現在唯一擋著的東西**,而它不是程式問題:一張沒有停損的單
-不該存在(§19),而停損擺哪裡是 Risk Limit,不是我能替你挑的。
+**M / N / O 是上線前必須關掉的三個洞**,而它們都不是程式問題:
+
+  · **M** 停損擺哪裡是 Risk Limit(§102)。`scripts/stop_evidence.py`
+    把歷史證據算出來 —— 均線出場觸發前最深的逆向走勢、每個停損位置
+    會掃掉幾段、其中有幾段其實是賺的。**數字有了,決定還是你的。**
+  · **N** 這個產品**沒有 contracts 端點**,程式問不到有哪些幣可以交易。
+    而 App 截圖上看得到的十個裡面**沒有 SOL 與 BNB** —— 那是策略
+    現役七幣裡的兩個。若真的沒有,交易池要改,而交易池一改,
+    回測的 Calmar 1.33 就不是這個池子的數字了,要重跑(§6)。
+  · **O** costs.py 的每一個數字都是量**永續**量出來的。標準合約的
+    手續費、資金費、滑點**一個字都沒驗證過**。不要因為「都是 BingX、
+    都是 U 本位」就沿用 —— 那正是舊系統「兩把尺」的形狀。
 
 ### ⚠ 停損不可以掛在均線上(2026-09-13)
 
@@ -402,6 +414,42 @@ FLOCKUSDT SHORT  3911.11 張  開倉 0.08088  20×  逐倉
 .venv/bin/python scripts/ticket.py --stop-pct 8 --check    # 現在還能不能按
 .venv/bin/python scripts/ticket.py --stop-pct 8 --verify   # 按完對帳
 ```
+
+### ⚠ 這個產品的成本一個字都沒驗證過(2026-09-13)
+
+`portfolio/costs.py` 的 `TAKER_FEE_PCT = 0.05` / `SLIP_FLOOR_PCT = 0.02` /
+資金費年化 7.12%,**全部是量永續量出來的**。
+
+  · **手續費** `contract/v1` 沒有 commissionRate 端點,問不到
+  · **資金費** 標準合約收不收,沒有人查證過。官方文件的
+    ACCOUNT_UPDATE 事件列表裡有 `FUNDING_FEE`,但那一整段是從
+    **現貨**文件複製過來的(dataType 寫的是 `spot.executionReport`),
+    不能當證據
+  · **滑點** 標準合約有自己的簿子,深度未測
+
+`STANDARD_COSTS_VERIFIED = False`,而 `standard_cost_caveat()` 會把
+這句話印在每一份指令單旁邊,直到有人真的量過為止。
+
+問得出答案的地方:`allOrders` 回真實成交的 `cumQuote` 與
+`executedQty`,兩者比對得出實際成交價,再跟當時的標記價比就是滑點。
+
+### ⚠ 交易池:程式問不到,而 App 上看不到 SOL 與 BNB(2026-09-13)
+
+`contract/v1` **沒有 contracts 端點**。「有哪些標的可以交易」這件事,
+程式問不到。
+
+執政官截圖上 U 本位標準合約那一頁看得到的是 BTCUSDT、ETHUSDT、
+XRPUSDT、LINKUSDT、LTCUSDT、BCHUSDT、ETCUSDT、ALGOUSDT、DYDXUSDT、
+TRXUSDT —— 而策略現役七幣是 BTC / ETH / **SOL** / **BNB** / XRP /
+AAVE / UNI。**四個對不上。**
+
+但那是一份捲動中的清單的一部分,不是完整名單。拿它當結論就是這個
+專案已經犯過六次的那個錯。`scripts/discover_universe.py` 用
+`allOrders` 逐個問,而且**先建立對照組**(已知存在的 FLOCKUSDT
+vs 編的 ZZZZZUSDT)—— 兩者回應若一樣,那 allOrders 就分辨不出
+存不存在,腳本會直說,不會硬給答案。
+
+真正確定的方法只有一個:**在 App 上翻完那份清單。**
 
 ### 如果哪天要「自動送單 + U 本位」,只有一個產品做得到
 

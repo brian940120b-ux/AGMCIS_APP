@@ -54,6 +54,42 @@ TAKER_FEE_PCT = 0.05
 SLIP_FLOOR_PCT = 0.02
 # ─────────────────────────────────────────────────────────
 
+# ⚠️ 上面每一個數字都是量**永續合約**量出來的。
+#
+# 2026-09-13 執政官選定 U 本位標準合約,而這個產品的成本
+# **一個字都沒有被驗證過**:
+#
+#   · 手續費   contract/v1 沒有 commissionRate 端點,問不到
+#   · 資金費   標準合約收不收,沒有人查證過。官方文件的
+#              ACCOUNT_UPDATE 事件列表裡有 FUNDING_FEE,但那一整段
+#              是從現貨文件複製過來的(dataType 寫的是
+#              spot.executionReport),不能當證據
+#   · 滑點     標準合約有自己的簿子,深度未測
+#
+# **不要因為「都是 BingX、都是 U 本位」就沿用。** 這正是舊系統
+# 「兩把尺」的形狀:兩個不同的東西共用一組常數,而差異在帳本上
+# 看不出來,只在真錢上看得出來。
+#
+# 這件事有一個可以問出答案的地方:`allOrders` 會回真實成交的
+# cumQuote 與 executedQty,兩者比對得出實際成交價,再跟當時的
+# 標記價比就是滑點;而手續費會反映在保證金變化上。
+# scripts/standard_report.py 已經在讀那份成交史。
+STANDARD_COSTS_VERIFIED = False
+STANDARD_COSTS_NOTE = (
+    "U 本位標準合約的手續費、資金費、滑點**都還沒有被驗證過**。"
+    "目前沿用永續的實測值,那是一個**假設**,不是量出來的。"
+    "拿它算出來的預期報酬會偏樂觀還是偏悲觀,現在不知道 —— "
+    "而『不知道偏哪邊』比『知道偏樂觀』更難處理。"
+)
+
+
+def standard_cost_caveat() -> str | None:
+    """要印在任何 U 本位標準合約的預期報酬旁邊的那句話。
+
+    回 None 表示已經驗證過了。**在那之前,每一份報告都要帶著它。**
+    """
+    return None if STANDARD_COSTS_VERIFIED else STANDARD_COSTS_NOTE
+
 
 def round_trip_pct() -> float:
     """一次進出的手續費 + 滑點。唯一來源,誰都不准自己寫常數。"""
