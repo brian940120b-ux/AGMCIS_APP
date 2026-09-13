@@ -67,9 +67,11 @@ def main() -> int:
         print(f"\n{e}\n")
         return 2
 
+    from portfolio.paper import SYMBOLS
+
     try:
         balance = client.balance()
-        positions = client.positions()
+        positions, how = client.positions_everywhere(SYMBOLS)
     except private.PrivateCallFailed as e:
         print(f"\n讀不到交易所帳戶:{e}\n")
         return 1
@@ -88,7 +90,15 @@ def main() -> int:
     show_fields(report.position_fields)
     line()
     print(f"  帳本持倉  {report.ours_count} 檔")
-    print(f"  交易所    {report.theirs_count} 檔")
+    print(f"  交易所    {report.theirs_count} 檔({how['method']})")
+    if how.get("disagreed"):
+        print()
+        print("  ⚠️  **整批查詢說沒有倉,逐幣查詢說有。**")
+        print("      這代表持倉端點需要帶 symbol,而不帶的時候會回空 ——")
+        print("      一個看起來確定、實際上是錯的答案。風控會以為沒有倉。")
+    if how.get("errors"):
+        for row in how["errors"]:
+            print(f"      逐幣查詢有失敗:{row}")
     line()
 
     if not report.differences:
@@ -103,6 +113,9 @@ def main() -> int:
 
     if not report.position_fields.checked:
         print("  ⚠️  持倉欄位還沒有被驗證過 —— 需要至少一個真的倉。")
+        print(f"      (整批查到 {how['bulk']} 筆、逐幣查到 "
+              f"{how['per_symbol']} 筆 —— 兩種都問過了,"
+              "所以「沒有倉」這件事本身是可信的。)")
         print("      裡面有 liquidationPrice(強平價),算錯的後果不是")
         print("      數字難看,是倉沒了。第一個 Demo 倉開出來的時候,")
         print("      要再跑一次這支。")

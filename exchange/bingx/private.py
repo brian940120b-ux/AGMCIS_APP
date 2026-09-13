@@ -280,6 +280,53 @@ class ReadOnlyClient:
         params = {"symbol": symbol} if symbol else None
         return self.get(READ_ONLY["perp_positions"], params)
 
+    def positions_everywhere(self, symbols) -> tuple:
+        """
+        持倉:先整批問一次,空的話再逐幣問一遍。
+
+        ═══ 為什麼不能只問一次 ═══
+        「不帶 symbol 就回全部」是一個**假設**。有些交易所的持倉查詢
+        必須帶 symbol,不帶就回空清單 —— 而空清單長得跟「真的沒有倉」
+        一模一樣。
+
+        那是最壞的一種失敗:它給出一個確定的答案,而那個答案是錯的。
+        風控會以為沒有倉,對帳會說一切正常。
+
+        回傳 (持倉列表, 診斷)。診斷會說出用哪一種方法問到的,
+        以及兩種方法的結果是否一致 —— **不一致本身就是要報告的事**。
+        """
+        note = {"bulk": None, "per_symbol": None, "method": None,
+                "disagreed": False}
+
+        try:
+            bulk = self.positions() or []
+            note["bulk"] = len(bulk)
+        except PrivateCallFailed as e:
+            bulk = []
+            note["bulk"] = f"失敗:{e}"
+
+        if bulk:
+            note["method"] = "整批"
+            return bulk, note
+
+        # 整批是空的。可能真的沒有倉,也可能這個端點需要 symbol。
+        found = []
+        errors = []
+        for symbol in (symbols or []):
+            try:
+                rows = self.positions(symbol) or []
+            except PrivateCallFailed as e:
+                errors.append(f"{symbol}: {e}")
+                continue
+            found.extend(r for r in rows if isinstance(r, dict))
+
+        note["per_symbol"] = len(found)
+        note["errors"] = errors
+        note["method"] = "逐幣" if found else "兩種都是空的"
+        note["disagreed"] = bool(found)
+
+        return found, note
+
     def open_orders(self, symbol: str | None = None) -> Any:
         params = {"symbol": symbol} if symbol else None
         return self.get(READ_ONLY["perp_open_orders"], params)

@@ -349,3 +349,84 @@ class TestCredentialsComeFromTheEnvironment(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnEmptyPositionListMustBeTrustworthy(unittest.TestCase):
+    """
+    ⚠️ 「不帶 symbol 就回全部」是一個**假設**。
+
+    有些交易所的持倉查詢必須帶 symbol,不帶就回空清單 ——
+    而空清單長得跟「真的沒有倉」一模一樣。
+
+    那是最壞的一種失敗:它給出一個確定的答案,而那個答案是錯的。
+    風控會以為沒有倉,對帳會說一切正常。
+    """
+
+    def rows(self, amount="0.5"):
+        return [{"symbol": "BTC-USDT", "positionAmt": amount}]
+
+    def test_a_bulk_result_is_used_directly(self):
+        session = FakeSession([
+            FakeResponse(body={"code": 0, "data": self.rows()})])
+
+        got, note = client(session=session).positions_everywhere(
+            ["BTC-USDT", "ETH-USDT"])
+
+        self.assertEqual(len(got), 1)
+        self.assertEqual(note["method"], "整批")
+        self.assertEqual(len(session.calls), 1, "整批有結果就不必逐幣再問")
+
+    def test_an_empty_bulk_falls_back_to_per_symbol(self):
+        session = FakeSession([
+            FakeResponse(body={"code": 0, "data": []}),      # 整批:空
+            FakeResponse(body={"code": 0, "data": self.rows()}),
+            FakeResponse(body={"code": 0, "data": []}),
+        ])
+
+        got, note = client(session=session).positions_everywhere(
+            ["BTC-USDT", "ETH-USDT"])
+
+        self.assertEqual(len(got), 1)
+        self.assertEqual(note["method"], "逐幣")
+
+    def test_a_disagreement_is_flagged_loudly(self):
+        """
+        整批說沒有、逐幣說有 —— 那代表端點需要 symbol,
+        而**不帶的時候給的是一個錯的確定答案**。
+        """
+        session = FakeSession([
+            FakeResponse(body={"code": 0, "data": []}),
+            FakeResponse(body={"code": 0, "data": self.rows()}),
+        ])
+
+        _got, note = client(session=session).positions_everywhere(
+            ["BTC-USDT"])
+
+        self.assertTrue(note["disagreed"])
+
+    def test_genuinely_empty_is_reported_as_asked_both_ways(self):
+        """
+        兩種都問過都是空的 —— 那時候「沒有倉」才是可信的。
+        """
+        session = FakeSession([
+            FakeResponse(body={"code": 0, "data": []}),
+            FakeResponse(body={"code": 0, "data": []}),
+        ])
+
+        got, note = client(session=session).positions_everywhere(
+            ["BTC-USDT"])
+
+        self.assertEqual(got, [])
+        self.assertFalse(note["disagreed"])
+        self.assertEqual(note["method"], "兩種都是空的")
+
+    def test_a_per_symbol_failure_is_recorded_not_swallowed(self):
+        session = FakeSession([
+            FakeResponse(body={"code": 0, "data": []}),
+            FakeResponse(status=500),
+        ])
+
+        _got, note = client(session=session).positions_everywhere(
+            ["BTC-USDT"])
+
+        self.assertTrue(note["errors"])
