@@ -260,3 +260,67 @@ def test_the_decided_backstop_survives_the_leverage_cap():
         stop_pct=BACKSTOP_PCT, leverage=LEVERAGE_CAP)
     assert not refused, refused
     assert made[0].stop_price == pytest.approx(76000.0 * 0.75)
+
+
+# ══════════════════════════════════════════════════════════
+# 六、對齊:讓真實帳戶追上模擬帳戶
+# ══════════════════════════════════════════════════════════
+from portfolio.ticket import catch_up  # noqa: E402
+
+PRICES = {"BTC-USDT": 76000.0, "ETH-USDT": 2500.0}
+
+
+def test_an_empty_exchange_gets_a_ticket_for_every_simulated_position():
+    """真實帳戶是空的 —— 模擬有幾個倉就要按幾張。
+
+    這就是「今天沒有要按的」那句話漏掉的東西:模擬確實沒有換手,
+    而真實帳戶差了整整幾個倉。
+    """
+    made, refused, notes = catch_up(
+        {"BTC-USDT": 0.01, "ETH-USDT": 0.4}, [], PRICES,
+        stop_pct=25.0, leverage=3.0)
+    assert not refused and not notes
+    assert {t.symbol for t in made} == {"BTCUSDT", "ETHUSDT"}
+    assert all(t.action == OPEN_LONG for t in made)
+
+
+def test_a_position_already_matching_produces_no_ticket():
+    made, _, notes = catch_up(
+        {"BTC-USDT": 0.01}, [a_position(qty=0.01)], PRICES,
+        stop_pct=25.0, leverage=3.0)
+    assert made == [] and notes == []
+
+
+def test_only_the_shortfall_is_ticketed_not_the_whole_position():
+    """已經有一半就只補一半。整筆重開會變成兩倍的倉。"""
+    made, _, _ = catch_up(
+        {"BTC-USDT": 0.01}, [a_position(qty=0.004)], PRICES,
+        stop_pct=25.0, leverage=3.0)
+    assert len(made) == 1
+    assert made[0].quantity == pytest.approx(0.006)
+
+
+def test_a_position_the_simulation_does_not_have_is_reported_not_closed():
+    """那可能是執政官自己開的倉。**系統不替他決定平掉。**"""
+    made, _, notes = catch_up(
+        {}, [a_position(symbol="AVAUSDT", qty=100.0)], PRICES,
+        stop_pct=25.0, leverage=3.0)
+    assert made == []
+    assert any("AVAUSDT" in n and "不替你決定平掉" in n for n in notes)
+
+
+def test_reducing_or_flipping_is_flagged_not_auto_ticketed():
+    """減倉與反手搞錯方向會開出一個反向的新倉,而那個倉沒有人在管。"""
+    made, _, notes = catch_up(
+        {"BTC-USDT": -0.01}, [a_position(qty=0.01)], PRICES,
+        stop_pct=25.0, leverage=3.0)
+    assert made == []
+    assert any("反手" in n or "減倉" in n for n in notes)
+
+
+def test_no_price_means_no_ticket_not_a_guessed_quantity():
+    """問不到現價就不出單。**不猜** —— 猜錯的是下單量。"""
+    made, refused, _ = catch_up(
+        {"SOL-USDT": 3.0}, [], PRICES, stop_pct=25.0, leverage=3.0)
+    assert made == []
+    assert refused and "不猜" in refused[0][1]

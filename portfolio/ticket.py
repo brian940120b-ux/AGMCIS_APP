@@ -59,6 +59,27 @@ DEFAULT_TTL_MIN = 30
 # 而部位大小整套邏輯是建立在那個價格上的。
 DEFAULT_BAND_PCT = 1.0
 
+# BingX 的 App 連結。**沒有一條是官方文件保證的。**
+#
+# 2026-09-13 查證:BingX 沒有公開任何 deeplink 規格 —— 官方 API 文件、
+# 支援中心、GitHub 都沒有。所以下面這幾條是**候選**,不是事實。
+#
+# 而且要先講清楚一件做不到的事:
+#   **「連結把所有參數填好,你只要按開單」在任何交易所都不存在。**
+#   一條連結能決定一筆交易的方向、數量、槓桿,那是資安漏洞不是功能 ——
+#   任何人傳你一條連結就能讓你開一個倉。沒有交易所會做這個。
+#
+# 做得到的最好是這樣:連結把 App 開到**正確的合約頁**,
+# 每個數值一鍵複製,貼上去。少按幾下,但不會少確認。
+#
+# 哪一條真的會開起 App 只有在手機上點得出來。所以三條都給,
+# 讓執政官點一次告訴我哪條對 —— 這裡不假裝知道。
+BINGX_LINKS = (
+    ("在 App 開啟", "bingx://trade?symbol={symbol}"),
+    ("在網頁開啟", "https://bingx.com/en/standard/{symbol}"),
+    ("網頁(備用)", "https://bingx.com/en/futures/{symbol}"),
+)
+
 OPEN_LONG = "OPEN_LONG"
 OPEN_SHORT = "OPEN_SHORT"
 CLOSE = "CLOSE"
@@ -183,6 +204,25 @@ class Ticket:
         for w in self.warnings:
             lines.append(f"  ⚠️ {w}")
         return "\n".join(lines)
+
+    def links(self) -> list:
+        """開啟 BingX 的候選連結。**哪一條有效還沒被證實**(見 BINGX_LINKS)。"""
+        return [(label, tpl.format(symbol=self.symbol))
+                for label, tpl in BINGX_LINKS]
+
+    def fields(self) -> list:
+        """要一個一個貼進 App 的欄位。(標籤, 值, 說明)
+
+        值是**乾淨的字串** —— 沒有千分位、沒有單位、沒有正負號裝飾,
+        因為它要被原封不動貼進輸入框。多一個逗號就是一張被拒的單。
+        """
+        out = [
+            ("數量", f"{self.quantity:.10g}", ""),
+            ("槓桿", f"{self.leverage:.10g}", "倍"),
+            ("停損", f"{self.stop_price:.10g}",
+             "一定要設 —— 這是機器死掉時唯一的保護"),
+        ]
+        return out
 
     def to_dict(self) -> dict:
         return {
@@ -413,3 +453,93 @@ def make_tickets(plan: dict, stop_pct: float, leverage: float) -> tuple:
         except TicketRefused as e:
             refused.append((order.symbol, str(e)))
     return made, refused
+
+
+# ══════════════════════════════════════════════════════════
+# 對齊:讓真實帳戶追上模擬帳戶
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-13 執政官把系統的樣子講清楚了:
+#
+#   「系統自己會有 $10,000 的模擬金,比照交易所裡面的 USDT 算法
+#     去模擬開單,然後他所推送的訊號單…我點擊…就可以直接開單。」
+#
+# 也就是**鏡像**:模擬帳戶做了什麼,就推一張讓人跟。
+# 而 `make_tickets()` 已經是這件事了 —— 它推的就是模擬今天要做的單。
+#
+# 但那有一個起點問題:模擬帳戶**幾天前就開好了 7 個倉**,而真實帳戶
+# 是空的。鏡像只鏡像「從現在開始的變動」,所以真實帳戶永遠追不上。
+#
+# 「今天沒有要按的」在那個狀態下是真話,也是誤導:模擬確實沒有換手,
+# 但你的真實帳戶跟模擬差了整整 7 個倉。
+#
+# `catch_up()` 補這一段:算出「要讓真實帳戶變成模擬現在的樣子,
+# 得按哪幾張」。**它是一次性的**,按完之後就交給日常的鏡像。
+
+
+def catch_up(sim_positions: dict, exchange_positions, prices: dict,
+             stop_pct: float, leverage: float, *,
+             strategy: str = "", signal_day: str = "",
+             tolerance: float = 1e-8) -> tuple:
+    """讓真實帳戶追上模擬帳戶要按哪幾張。
+
+    sim_positions       {代號: 數量}(帶正負)—— 模擬帳戶現在持有的
+    exchange_positions  StandardPosition 清單 —— 交易所實際的
+    prices              {代號: 現價}
+
+    回 (指令單, 開不出來的, 沒動的原因)。
+
+    ═══ 為什麼不直接說「照模擬的倉開一遍」═══
+    因為真實帳戶不一定是空的。它可能已經有倉、可能數量不一樣、
+    也可能有模擬沒有的倉(手動開的)。三種都要處理,而**最後一種
+    不會自動產生平倉單** —— 那是你自己開的倉,系統不該替你決定平掉。
+    它只會列出來說「這個模擬裡沒有」。
+    """
+    have: dict = {}
+    for pos in (exchange_positions or []):
+        have[pos.symbol] = have.get(pos.symbol, 0.0) + pos.signed_qty
+
+    want = {app_symbol(k): float(v or 0.0) for k, v in sim_positions.items()}
+    px = {app_symbol(k): float(v) for k, v in (prices or {}).items() if v}
+
+    made, refused, notes = [], [], []
+
+    for symbol in sorted(set(want) | set(have)):
+        target = want.get(symbol, 0.0)
+        actual = have.get(symbol, 0.0)
+        delta = target - actual
+
+        if abs(delta) <= tolerance:
+            continue
+
+        if symbol not in want:
+            # 交易所有、模擬沒有。**不自動產生平倉單。**
+            notes.append(
+                f"{symbol}:交易所有 {actual:+.8g},而模擬裡沒有這個倉 —— "
+                "可能是你自己開的。系統不替你決定平掉它。")
+            continue
+
+        price = px.get(symbol)
+        if price is None:
+            refused.append((symbol, "問不到現價,算不出數量 —— 不猜"))
+            continue
+
+        # 減倉 / 反手先不處理:那需要知道現有倉的方向與可平量,
+        # 而搞錯會開出一個反向的新倉。先列出來讓人看。
+        if actual != 0.0 and (target * actual < 0 or abs(target) < abs(actual)):
+            notes.append(
+                f"{symbol}:要從 {actual:+.8g} 調到 {target:+.8g}"
+                "(減倉或反手)—— 這一版不自動出單,手動處理。"
+                "搞錯方向會開出一個反向的新倉,而那個倉沒有人在管。")
+            continue
+
+        action = OPEN_LONG if delta > 0 else OPEN_SHORT
+        try:
+            made.append(build(
+                symbol=symbol, action=action, quantity=abs(delta),
+                price=price, leverage=leverage, stop_pct=stop_pct,
+                strategy=strategy, signal_day=signal_day))
+        except TicketRefused as e:
+            refused.append((symbol, str(e)))
+
+    return made, refused, notes

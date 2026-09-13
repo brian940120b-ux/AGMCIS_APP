@@ -316,6 +316,18 @@ tbody tr:first-child td{border-top:none}
 .ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
 .ticket td:last-child{font-family:var(--mono);text-align:right}
 .ticket .why{text-align:right}
+.ticket button.cp{background:none;border:none;color:inherit;
+ font:inherit;padding:0;cursor:pointer;text-align:right;
+ display:inline-flex;align-items:center;gap:7px}
+.ticket button.cp .cpi{font-size:10px;color:var(--dim);
+ border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.ticket button.cp.done .cpi{color:var(--up);
+ border-color:var(--up-bd)}
+.tlinks{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;
+ padding-top:10px;border-top:1px solid var(--line)}
+.tl{flex:1 1 auto;text-align:center;font-size:12px;
+ padding:9px 10px;border-radius:9px;border:1px solid var(--line);
+ background:var(--el2);color:var(--ink);text-decoration:none}
 
 code{font:11.5px var(--mono);background:var(--el2);padding:2px 6px;
  border-radius:5px;border:1px solid var(--line)}
@@ -483,7 +495,15 @@ def block_tickets() -> str:
             '<p class="note">U 本位標準合約<b>沒有下單 API</b>'
             '(2026-09-13 GET+POST 各問一次,對照組證實)。'
             '訊號、部位大小、風控、強平距離全部自動,'
-            '<b>只有送單這一吋是手動的</b>。</p>')
+            '<b>只有送單這一吋是手動的</b>。</p>'
+            '<div class="flag">點數字就複製,點下面的連結開 BingX。<br>'
+            '⚠️ <b>「連結把參數都填好、你只要按開單」做不到</b> —— '
+            '不是我偷懶,是任何交易所都沒有這種連結。一條連結能決定'
+            '一筆交易的方向、數量、槓桿,那是資安漏洞不是功能。<br>'
+            'BingX 也沒有公開任何 deeplink 規格(2026-09-13 查過官方 API '
+            '文件與支援中心)。所以下面三條連結是**候選**,'
+            '<b>哪一條真的會開起 App 只有你點得出來</b> —— '
+            '點一次告訴我哪條對,我把另外兩條拿掉。</div>')
 
     if got.get("error"):
         return (head + '<p class="note">算不出來:'
@@ -510,12 +530,21 @@ def block_tickets() -> str:
             f'<span class="pill {"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
             f'{html.escape(t.tap)}</span></div>'
             '<table><tbody>'
-            f'<tr><td>數量</td><td><b>{t.quantity:.8g}</b></td></tr>'
-            f'<tr><td>槓桿</td><td><b>{t.leverage:g}×</b></td></tr>'
-            f'<tr><td>保證金</td><td><b>{html.escape(t.margin_mode)}</b></td></tr>'
-            f'<tr><td>停損</td><td class="down"><b>{t.stop_price:,.6g}</b>'
-            '<div class="why">一定要設 —— 這是機器死掉時的唯一保護</div>'
-            '</td></tr>'
+            + "".join(
+                f'<tr><td>{html.escape(label)}</td><td>'
+                f'<button class="cp" data-v="{html.escape(value)}">'
+                f'<b>{html.escape(value)}</b>{html.escape(unit)}'
+                '<span class="cpi">複製</span></button>'
+                + (f'<div class="why">{html.escape(note)}</div>'
+                   if note else '')
+                + '</td></tr>'
+                for label, value, note, unit in (
+                    ("數量", t.fields()[0][1], t.fields()[0][2], ""),
+                    ("槓桿", t.fields()[1][1], t.fields()[1][2], "×"),
+                    ("保證金", t.margin_mode, "", ""),
+                    ("停損", t.fields()[2][1], t.fields()[2][2], ""),
+                ))
+            +
             f'<tr><td>預估佔用</td><td>{margin} USDT</td></tr>'
             f'<tr><td>預估強平</td><td>{liq}'
             '<div class="why">我方算的,交易所這個產品不回</div></td></tr>'
@@ -525,7 +554,13 @@ def block_tickets() -> str:
             f'<tr><td>有效到</td><td>{html.escape(t.valid_until_utc)}</td></tr>'
             f'<tr><td>單號</td><td class="why">{html.escape(t.ticket_id)}</td>'
             '</tr>'
-            '</tbody></table>' + warn + '</div>')
+            '</tbody></table>'
+            + '<div class="tlinks">' + "".join(
+                f'<a class="tl" href="{html.escape(url)}">'
+                f'{html.escape(label)}</a>'
+                for label, url in t.links())
+            + '</div>'
+            + warn + '</div>')
 
     body = '<div class="tickets">' + "".join(cards) + '</div>' if cards else ''
 
@@ -904,6 +939,39 @@ def render() -> str:
 就代表你看到的是這個行程真的跑的那一版<br>紙上帳本非真錢 · 每日 00:30 UTC 記帳 · U 本位標準合約沒有下單 API,實際送單由人在 App 完成</footer>
 </div>
 <script>
+// 點數字就複製。手機上少按幾下,而**不會少一次確認** ——
+// 貼上之後那個數字還是在你眼前。
+document.querySelectorAll('button.cp').forEach(function(b){{
+  b.addEventListener('click', function(){{
+    var v = b.dataset.v || '';
+    function done(){{
+      b.classList.add('done');
+      var i = b.querySelector('.cpi');
+      if(i){{ i.textContent = '已複製'; }}
+      setTimeout(function(){{
+        b.classList.remove('done');
+        if(i){{ i.textContent = '複製'; }}
+      }}, 1600);
+    }}
+    if(navigator.clipboard && navigator.clipboard.writeText){{
+      navigator.clipboard.writeText(v).then(done, fallback);
+    }} else {{ fallback(); }}
+    function fallback(){{
+      // http 或舊瀏覽器沒有 clipboard API —— 退回選取,
+      // 不要靜靜什麼都沒發生
+      var ta = document.createElement('textarea');
+      ta.value = v; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      try {{ document.execCommand('copy'); done(); }}
+      catch(e) {{
+        var i = b.querySelector('.cpi');
+        if(i){{ i.textContent = '複製不了,長按數字'; }}
+      }}
+      document.body.removeChild(ta);
+    }}
+  }});
+}});
+
 document.querySelectorAll('nav a').forEach(function(a){{
   a.addEventListener('click', function(e){{
     e.preventDefault();
