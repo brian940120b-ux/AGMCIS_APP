@@ -192,6 +192,8 @@ class TestNothingBypassesTheLimiter(unittest.TestCase):
         ("urllib", "request", "urlopen"),
         ("requests", "get"),
         ("requests", "post"),
+        ("requests", "request"),
+        ("requests", "delete"),
     }
 
     def raw_http_calls(self):
@@ -220,7 +222,9 @@ class TestNothingBypassesTheLimiter(unittest.TestCase):
                     if tuple(parts) in self.BANNED:
                         found.append(f"{rel}:{node.lineno} {'.'.join(parts)}")
                     # `session.get(...)` / `self.session.get(...)`
-                    elif len(parts) >= 2 and parts[-2:] == ["session", "get"]:
+                    elif (len(parts) >= 2 and parts[-2] == "session"
+                          and parts[-1] in ("get", "post", "request",
+                                            "delete")):
                         found.append(f"{rel}:{node.lineno} {'.'.join(parts)}")
 
         return sorted(found)

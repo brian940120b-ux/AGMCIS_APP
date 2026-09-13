@@ -289,12 +289,23 @@ def urlopen(url, timeout: float = 15.0, weight: float = 1.0):
 
 def requests_get(session, url: str, **kwargs):
     """`requests` 版本。session 給 None 就用 requests 模組本身。"""
+    return requests_request(session, "GET", url, **kwargs)
+
+
+def requests_request(session, method: str, url: str, **kwargs):
+    """
+    任意動詞的限流版。私有端點要用 POST / DELETE,不能只有 GET。
+
+    ⚠️ **url 與 kwargs 可能帶著簽章與 API 金鑰。** 這裡不記錄它們,
+    出錯時傳給 check_response 的也只有去掉 query string 的路徑
+    —— 第十條:金鑰不得出現在 Log、Exception 或任何輸出。
+    """
     import requests as _requests
 
     acquire(float(kwargs.pop("weight", 1.0)))
     caller = session or _requests
-    resp = caller.get(url, **kwargs)
-    check_response(resp.status_code, resp.headers, url)
+    resp = caller.request(method.upper(), url, **kwargs)
+    check_response(resp.status_code, resp.headers, url.split("?")[0])
     return resp
 
 
