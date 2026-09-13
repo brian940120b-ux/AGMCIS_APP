@@ -164,14 +164,14 @@ I UNDERSTAND LIVE TRADING RISK
 ⚠️ 閘門開啟**仍然不代表系統會下實單**:`LiveBroker` 沒有被接進
 Execution Engine。接上是另一個決定,也需要你點頭。
 
-而且接上之前還有一件事要在 VPS 上確認:**用 clientOrderId 查訂單要放進
-哪一個 params 欄位。** 對帳靠它,而猜錯的後果是一張已經成交的單被標成
-REJECTED。`agmcis/execution/live_broker.py` 的 `CLIENT_ID_LOOKUP_PARAM`
-目前是 `None`,`fetch_order()` 在那個狀態下會拋例外而不回答 —— 對帳因此
-記成「狀態不明,不可重送」,那是安全的方向。
+用 clientOrderId 查訂單那件事已經解掉了,做法是**列舉再比對**,不再
+需要你填任何常數(理由見對照表)。剩下一個限制要知道:歷史查詢有
+七天視窗,所以一張卡在 UNKNOWN 超過七天的單,對帳會當成「交易所沒有
+這張單」。那種單請人工看,不要放著讓對帳自動收尾。
 
-對著 BingX 官方 API 確認欄位名稱之後填進那個常數。填上它等於宣告
-「我確認過了」,所以那一行要你來改。
+這一段在 VPS 上還沒對著真的 BingX 跑過。`scripts/verify_bingx.py`
+連得上之後,值得手動確認一次 `fetch_canceled_and_closed_orders`
+在你的帳戶上真的回得出東西。
 
 ### Phase 19:實單監控
 

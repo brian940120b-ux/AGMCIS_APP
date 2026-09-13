@@ -257,24 +257,36 @@
 平倉不受它限制,因為上限的目的是擋住「開太大」,而一個因為超過上限
 而平不掉的部位是這道上限能造成的最壞結果。
 
-### 一個還沒補完的洞:用 clientOrderId 查訂單
+### 用 clientOrderId 查訂單:為什麼不能直接查
 
 對帳是拿 `client_order_id` 去問交易所「這張單怎麼了」,而 ccxt 的
-`fetch_order` 第一個參數是**交易所的訂單編號**。拿 client id 去查那個
-欄位,交易所會回「查無此單」——而對帳把「查無此單」當成確定的答案,
-直接把訂單標成 REJECTED。一張其實已經成交的單被標成沒送出去,是這個
-模組裡最貴的一個錯。
+`fetch_order(id, ...)` 那個 id 是**交易所的訂單編號**。
 
-正確做法是把 client id 放進 `params` 的某個鍵。那個鍵叫什麼,第五節
-說了不要靠記憶猜 —— 所以 `live_broker.CLIENT_ID_LOOKUP_PARAM` 目前是
-`None`,而 `fetch_order` 在它是 `None` 的時候**拋例外,不回答**。
+第五節說 BingX 的 API 要照官方文件不要靠記憶猜。官方文件站被這個容器的
+網路政策擋掉,但**真正決定行為的是本機那份 ccxt**(4.5.78)—— 它才是
+實際發出請求的程式碼,讀它不是猜。讀出來的結果是:
 
-拋例外的結果是對帳記一筆 `ORDER_STILL_UNKNOWN`(狀態不明,這張單不可
-以重送),那是安全的方向;回 `None` 不是。有測試把 LiveBroker 的拒絕
-真的餵進對帳,確認落點是 UNKNOWN 而不是 REJECTED。
+  * `create_order` 與 `cancel_order` 都認得 clientOrderId,送給 BingX
+    永續的欄位是 `clientOrderID`(大寫 ID),現貨是 `newClientOrderId`。
+  * `cancel_order` 有 client-id 分支:帶了 `clientOrderID` 就**不送
+    `orderId`**。
+  * `fetch_order` **沒有那個分支** —— 它一律送 `orderId: id`,再把
+    params merge 進去。
 
-要補它:在 VPS 上對著 BingX 官方 API 確認欄位名稱,然後填進那個常數。
-填上它等於宣告「我確認過了」——那一行改動本身就是一次人工核可。
+所以把 client id 塞進 `fetch_order` 會同時送出一個假的 `orderId`。
+問題從來不是「欄位名不知道」,是那條路徑本身不對。
+
+現在的做法是**列舉再比對**:先查未結掛單(沒有時間窗),沒有再查歷史
+(`fetch_canceled_and_closed_orders`,七天視窗),兩邊都比對 ccxt 統一
+後的 `clientOrderId`。全走有文件的路徑,不送任何假欄位。
+
+「查不到」只有在**兩份清單都成功取得而且都沒有**時才回 None;任何一邊
+查詢失敗都拋例外,對帳因此記成 `ORDER_STILL_UNKNOWN`(狀態不明,不可
+重送)。有測試把查詢失敗真的餵進對帳,確認落點是 UNKNOWN 不是 REJECTED。
+
+⚠️ 剩下的限制:歷史查詢有七天視窗。一張卡在 UNKNOWN 超過七天的單,
+這裡會回 None 而那可能是錯的 —— 不過那種單本身就是更大的問題,
+不該靠對帳自動收尾。這一段在 VPS 上還沒對著真的 BingX 跑過。
 
 ### 順帶補上的一條:緊急保護的縮倉那一步
 

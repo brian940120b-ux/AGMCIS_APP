@@ -16,9 +16,9 @@ LiveBroker(第十八 / 三十二 / 四十六 / 九十四節)。
 
 模擬盤驗不到這些 —— PaperBroker 寫一個資料庫欄位不會失敗。
 """
-import inspect
 import os
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -35,11 +35,13 @@ class FakeAdapter:
 
     name = "fake"
 
-    def __init__(self, positions=None, open_orders=None, order=None, fail=None):
+    def __init__(self, positions=None, open_orders=None, order=None, fail=None,
+                 history=None):
         self.calls = []
         self.positions = list(positions or [])
         self.open_orders = list(open_orders or [])
         self.order = dict(order or {})
+        self.history = list(history or [])
         self.fail = set(fail or ())
 
     def _record(self, what, **kwargs):
@@ -66,6 +68,11 @@ class FakeAdapter:
     def get_open_orders(self, symbol=None, market_type=None):
         self._record("get_open_orders", symbol=symbol)
         return list(self.open_orders)
+
+    def get_order_history(self, symbol=None, since=None, limit=None,
+                          market_type=None):
+        self._record("get_order_history", symbol=symbol, since=since)
+        return list(self.history)
 
     def get_positions(self, symbols=None):
         self._record("get_positions", symbols=symbols)
@@ -523,44 +530,119 @@ class TestReducing(unittest.TestCase):
                 self.assertNotIn("create_order", adapter.names())
 
 
-class TestTheClientIdLookupIsNotGuessed(unittest.TestCase):
+class TestTheClientIdLookup(unittest.TestCase):
     """
     第五節:不要靠模型記憶猜 API。
 
-    介面給的是 client_order_id,而 ccxt 的 fetch_order 第一個參數是
-    交易所的訂單編號。用 client id 去查那個欄位,交易所會回「查無此單」,
-    而對帳把「查無此單」當成確定的答案 —— 一張其實已經成交的單就被
-    標成 REJECTED。
+    對帳給的是 clientOrderId,而 ccxt 的 fetch_order 第一個參數是交易所
+    的訂單編號。看 ccxt 4.5.78 的 bingx 實作:cancel_order 有 client-id
+    分支(帶了就不送 orderId),**fetch_order 沒有** —— 它一律送
+    orderId,再把 params merge 進去。
+
+    所以直接查會多送一個假的 orderId,交易所很可能回「查無此單」,
+    然後對帳把成交的單標成 REJECTED。改成列舉再比對。
     """
 
-    def test_it_refuses_to_answer_until_the_param_is_verified(self):
-        adapter = FakeAdapter(order={"id": "x", "status": "closed"})
+    def test_it_never_calls_fetch_order_with_a_client_id(self):
+        adapter = FakeAdapter(open_orders=[
+            {"id": "ex-1", "clientOrderId": "cid-1", "status": "open"},
+        ])
 
-        with self.assertRaises(LookupError) as caught:
+        broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertNotIn("get_order", adapter.names())
+
+    def test_an_open_order_is_found_by_its_client_id(self):
+        adapter = FakeAdapter(open_orders=[
+            {"id": "ex-9", "clientOrderId": "other", "status": "open"},
+            {"id": "ex-1", "clientOrderId": "cid-1", "status": "open"},
+        ])
+
+        found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertEqual(found["state"], "submitted")
+        self.assertEqual(found["exchange_order_id"], "ex-1")
+
+    def test_a_finished_order_is_found_in_the_history(self):
+        adapter = FakeAdapter(history=[
+            {"id": "ex-2", "clientOrderId": "cid-1", "status": "closed",
+             "filled": 0.01, "average": 50000.0},
+        ])
+
+        found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertEqual(found["state"], "filled")
+        self.assertEqual(found["filled_quantity"], 0.01)
+
+    def test_the_open_list_is_checked_before_the_history(self):
+        """未結清單沒有時間窗,先看它比較不會誤判。"""
+        adapter = FakeAdapter(open_orders=[
+            {"id": "ex-1", "clientOrderId": "cid-1", "status": "open"},
+        ])
+
+        broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        self.assertNotIn("get_order_history", adapter.names())
+
+    def test_the_history_query_carries_a_lookback_window(self):
+        from agmcis.execution import live_broker as lb
+
+        adapter = FakeAdapter()
+        before = int(time.time() * 1000)
+
+        broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+        since = adapter.kwargs_of("get_order_history")[0]["since"]
+        self.assertIsNotNone(since)
+        self.assertLessEqual(since, before - lb.HISTORY_LOOKBACK_MS + 5000)
+
+    def test_the_exchange_field_name_is_read_when_ccxt_did_not_unify_it(self):
+        """
+        BingX 永續回的是 clientOrderID(大寫 ID)。ccxt 的 parse_order
+        會收斂成 clientOrderId,但少讀一個欄位會讓整個比對失效,
+        所以 info 那一層也讀。
+        """
+        for key in ("clientOrderID", "clientOrderId", "origClientOrderId", "c"):
+            with self.subTest(key=key):
+                adapter = FakeAdapter(open_orders=[
+                    {"id": "ex-1", "status": "open", "info": {key: "cid-1"}},
+                ])
+
+                found = broker(adapter).fetch_order("cid-1", "BTC-USDT")
+
+                self.assertIsNotNone(found, key)
+
+    def test_absent_from_both_lists_means_no_such_order(self):
+        adapter = FakeAdapter(
+            open_orders=[{"id": "a", "clientOrderId": "other"}],
+            history=[{"id": "b", "clientOrderId": "another"}],
+        )
+
+        self.assertIsNone(broker(adapter).fetch_order("cid-1", "BTC-USDT"))
+
+    def test_a_failed_open_query_raises_instead_of_answering(self):
+        """
+        查不到與查詢失敗混在一起,正是這個方法要避免的事。
+        """
+        adapter = FakeAdapter(fail={"get_open_orders"})
+
+        with self.assertRaises(RuntimeError):
             broker(adapter).fetch_order("cid-1", "BTC-USDT")
 
-        self.assertIn("verify_bingx", str(caught.exception))
-        self.assertEqual(adapter.calls, [])
+    def test_a_failed_history_query_raises_instead_of_answering(self):
+        adapter = FakeAdapter(fail={"get_order_history"})
 
-    def test_the_param_is_unset_in_the_repository(self):
-        """
-        填上它等於宣告「我對著官方 API 確認過了」。
-        那一行改動本身就是一次人工核可,不該由我做。
-        """
-        from agmcis.execution import live_broker
+        with self.assertRaises(RuntimeError):
+            broker(adapter).fetch_order("cid-1", "BTC-USDT")
 
-        self.assertIsNone(live_broker.CLIENT_ID_LOOKUP_PARAM)
-
-    def test_reconciliation_treats_the_refusal_as_unknown_not_rejected(self):
+    def test_reconciliation_treats_a_failed_lookup_as_unknown_not_rejected(self):
         """
-        拋例外的結果必須是「狀態不明,這張單不可以重送」,
+        查詢失敗的落點必須是「狀態不明,這張單不可以重送」,
         不是「交易所查無此單」。方向反了就是把成交當成沒送出去。
-
-        這一條把 LiveBroker 的拒絕真的餵進對帳,而不是讀原始碼猜。
         """
         from agmcis.core.enums import MarketType, OrderSide, OrderState, OrderType
-        from agmcis.execution import reconciliation as recon
         from agmcis.core.models import Order
+        from agmcis.execution import reconciliation as recon
 
         order = Order(
             client_order_id="cid-1", symbol="BTC-USDT",
@@ -586,7 +668,7 @@ class TestTheClientIdLookupIsNotGuessed(unittest.TestCase):
                 pass
 
         store = Store()
-        live = broker(FakeAdapter())
+        live = broker(FakeAdapter(fail={"get_open_orders"}))
 
         report = recon.Reconciler(
             store=store,
@@ -595,36 +677,20 @@ class TestTheClientIdLookupIsNotGuessed(unittest.TestCase):
             local_positions=lambda: [],
         ).run()
 
-        kinds = [d.kind for d in report.discrepancies]
-        self.assertIn(recon.ORDER_STILL_UNKNOWN, kinds)
+        self.assertIn(recon.ORDER_STILL_UNKNOWN,
+                      [d.kind for d in report.discrepancies])
         self.assertEqual(store.saved, [], "狀態不明的單不該被改狀態")
 
 
 class TestQueries(unittest.TestCase):
 
-    def setUp(self):
-        """把鍵名設成一個已確認過的值,才驗得到翻譯那一段。"""
-        patcher = patch.object(
-            live_broker_module, "CLIENT_ID_LOOKUP_PARAM", "clientOrderID",
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_the_client_id_goes_into_params(self):
-        adapter = FakeAdapter(order={"id": "x", "status": "closed"})
-
-        broker(adapter).fetch_order("cid-1", "BTC-USDT")
-
-        self.assertEqual(
-            adapter.kwargs_of("get_order")[0]["params"],
-            {"clientOrderID": "cid-1"},
-        )
-
     def test_an_unknown_status_stays_unknown(self):
         """猜一個比較樂觀的值,會讓對帳把一張還活著的單當成結案。"""
-        adapter = FakeAdapter(order={"id": "x", "status": "沒看過的狀態"})
+        adapter = FakeAdapter(open_orders=[
+            {"id": "x", "clientOrderId": "cid-1", "status": "沒看過的狀態"},
+        ])
 
-        state = broker(adapter).fetch_order("x", "BTC-USDT")["state"]
+        state = broker(adapter).fetch_order("cid-1", "BTC-USDT")["state"]
 
         self.assertEqual(state, "unknown")
 
@@ -634,26 +700,13 @@ class TestQueries(unittest.TestCase):
             ("canceled", "cancelled"), ("rejected", "rejected"),
         ):
             with self.subTest(raw=raw):
-                adapter = FakeAdapter(order={"id": "x", "status": raw})
+                adapter = FakeAdapter(open_orders=[
+                    {"id": "x", "clientOrderId": "cid-1", "status": raw},
+                ])
                 self.assertEqual(
-                    broker(adapter).fetch_order("x", "BTC-USDT")["state"],
+                    broker(adapter).fetch_order("cid-1", "BTC-USDT")["state"],
                     expected,
                 )
-
-    def test_a_query_failure_raises_instead_of_returning_none(self):
-        """
-        把查詢失敗當成 None,會讓一張其實已經成交的單被標成 REJECTED,
-        然後對帳會看到一個沒有任何本地紀錄的部位。
-        """
-        adapter = FakeAdapter(fail={"get_order"})
-
-        with self.assertRaises(RuntimeError):
-            broker(adapter).fetch_order("x", "BTC-USDT")
-
-    def test_an_empty_response_means_no_such_order(self):
-        adapter = FakeAdapter(order={})
-
-        self.assertIsNone(broker(adapter).fetch_order("x", "BTC-USDT"))
 
     def test_positions_with_no_contracts_are_not_positions(self):
         adapter = FakeAdapter(positions=[

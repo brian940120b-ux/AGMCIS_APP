@@ -40,14 +40,13 @@ LiveBroker:真的會送出真實訂單的那一個。
   * 查詢失敗與「查無此單」是兩件事。前者拋例外,後者回 None。
     把查詢失敗當成 None,會讓一張其實已經成交的單被標成 REJECTED。
 
-## 還沒補完的一個洞
-
-`fetch_order()` 目前**會拋例外,不會回答**。對帳是拿 clientOrderId 去
-問交易所,而那要用哪一個 params 欄位還沒對著官方 API 確認過(第五節)。
-猜錯的後果不是查不到,是查到「查無此單」,然後成交的單被標成 REJECTED。
-細節見 `CLIENT_ID_LOOKUP_PARAM`。
+  * 對帳是拿 **clientOrderId** 去問「這張單怎麼了」,而 ccxt 的
+    `fetch_order(id, ...)` 那個 id 是交易所的訂單編號。所以
+    `fetch_order()` 改成列舉未結與歷史清單再在本地比對 ——
+    細節與證據見那個方法的說明。
 """
 import logging
+import time
 
 from agmcis.core.enums import MarketType, OrderSide, OrderType, PositionSide
 from agmcis.execution.broker import Broker, FillResult
@@ -68,15 +67,15 @@ _ORDER_STATES = {
 }
 
 
-# 用 clientOrderId 查訂單時,要把它放進 params 的哪一個鍵。
+# 查訂單歷史時往回看多久。
 #
-# **None 代表還沒有人對著 BingX 官方 API 確認過。** 第五節:不要靠模型
-# 記憶猜 API。猜錯的後果不是查不到,是查到「查無此單」——而對帳把那個
-# 當成確定的答案,會把一張已經成交的單標成 REJECTED。
+# 對帳問的是「這張剛剛送出去、狀態不明的單怎麼了」,所以它一定是近期的。
+# 七天很寬鬆是刻意的:窗口太窄會讓「不在窗口內」被誤讀成「不存在」。
 #
-# 所以在確認之前,fetch_order 寧可拋例外(對帳記成「狀態不明,不可重送」)
-# 也不回答。確認之後把鍵名填進來,那一行改動本身就是一次人工核可。
-CLIENT_ID_LOOKUP_PARAM = None
+# ⚠️ 這仍然是一個窗口。一張卡在 UNKNOWN 超過七天的單,這裡會回 None
+# (也就是「交易所沒有這張單」),而那個答案可能是錯的。不過一張卡在
+# UNKNOWN 七天的單本身就是更大的問題,不該靠對帳自動收尾。
+HISTORY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000
 
 
 def _as_float(value):
@@ -494,50 +493,70 @@ class LiveBroker(Broker):
         兩者混在一起的後果:一張其實已經成交的單被標成 REJECTED,
         然後對帳會看到一個沒有任何本地紀錄的部位。
 
-        ⚠️ 這一段目前**會拋例外,不會回答**。原因見 CLIENT_ID_LOOKUP_PARAM。
+        ## 為什麼是列舉再比對,不是直接查
+
+        介面給的是 client_order_id,而 ccxt 的 `fetch_order(id, ...)` 那個
+        id 是**交易所的訂單編號**。看 ccxt 4.5.78 的 bingx 實作:
+
+          * `create_order` 與 `cancel_order` 都認得 clientOrderId,
+            送給 BingX 永續的欄位是 `clientOrderID`。
+          * `cancel_order` 有分支:帶了 clientOrderID 就**不送 orderId**。
+          * `fetch_order` **沒有那個分支** —— 它一律送 `orderId: id`,
+            然後把 params merge 進去。
+
+        所以把 client id 塞進 fetch_order,會同時送出一個假的 orderId。
+        交易所很可能因此回錯或回查無此單,而對帳把「查無此單」當成確定
+        的答案,直接標 REJECTED。
+
+        列舉(未結 + 歷史)再比對 ccxt 統一後的 `clientOrderId` 欄位,
+        走的全是有文件的路徑,而且不會送出任何假欄位。
+
+        ## 「查不到」在這裡是什麼意思
+
+        只有在**兩份清單都成功取得**、而且兩邊都沒有這個 client id 時
+        才回 None。任何一邊查詢失敗都拋例外 —— 查不到與查詢失敗混在
+        一起,正是這個方法要避免的事。
+
+        ⚠️ 歷史查詢有時間窗(見 HISTORY_LOOKBACK_MS)。
         """
-        # 介面給的是 client_order_id,而 ccxt 的 fetch_order 第一個參數
-        # 是**交易所的訂單編號**。用 client id 去查交易所的 id 欄位,
-        # 交易所會回「查無此單」——而對帳把「查無此單」當成確定的答案,
-        # 直接把訂單標成 REJECTED。一張其實已經成交的單被標成沒送出去,
-        # 是這整個模組裡最貴的一個錯。
+        wanted = str(client_order_id)
+
+        # 先看未結的。一張還活著的單在這裡,而且這份清單沒有時間窗。
+        for order in self._adapter.get_open_orders(
+            symbol, market_type=self._market_type,
+        ) or []:
+            if _client_id_of(order) == wanted:
+                return self._as_order_state(order)
+
+        # 再看歷史。已成交、已撤銷、被拒絕的都在這裡。
         #
-        # 正確做法是把 client id 放進 params 的某個鍵。那個鍵叫什麼,
-        # 第五節說了不要靠記憶猜 —— 所以在有人用 scripts/verify_bingx.py
-        # 對著官方 API 確認之前,這裡不回答,而是拋例外。
-        #
-        # 拋例外的結果是對帳記一筆 ORDER_STILL_UNKNOWN(狀態不明,
-        # 這張單不可以重送),那是安全的方向;回 None 不是。
-        if CLIENT_ID_LOOKUP_PARAM is None:
-            raise LookupError(
-                "用 clientOrderId 查訂單的參數名稱還沒有對著 BingX 官方 API "
-                "確認過(第五節:不要靠模型記憶猜 API)。\n"
-                "在確認並設定 live_broker.CLIENT_ID_LOOKUP_PARAM 之前,"
-                "這裡不回答 —— 猜錯會讓已成交的單被標成 REJECTED。\n"
-                "確認方式:.venv/bin/python scripts/verify_bingx.py"
-            )
+        # since 用本機時鐘算。系統別的地方會為了簽章去對交易所的時間
+        # (時鐘偏移超過 EXCHANGE_MAX_CLOCK_SKEW_MS 會直接報錯),
+        # 但那是毫秒級的事;這裡的視窗是七天,差幾秒不影響結果。
+        # 為了一個七天的視窗多打一次 API 是浪費。
+        since = int(time.time() * 1000) - HISTORY_LOOKBACK_MS
 
-        try:
-            raw = self._adapter.get_order(
-                client_order_id, symbol, market_type=self._market_type,
-                params={CLIENT_ID_LOOKUP_PARAM: client_order_id},
-            )
-        except Exception as exc:
-            if _is_order_not_found(exc):
-                return None
-            raise
+        for order in self._adapter.get_order_history(
+            symbol, since=since, market_type=self._market_type,
+        ) or []:
+            if _client_id_of(order) == wanted:
+                return self._as_order_state(order)
 
-        if not raw:
-            return None
+        # 兩份清單都拿到了,兩邊都沒有 —— 這才是「交易所沒有這張單」。
+        logger.info(
+            "LIVE | 未結與歷史清單都沒有這張單 | %s | %s", symbol, wanted,
+        )
+        return None
 
+    def _as_order_state(self, order):
         return {
             "state": _ORDER_STATES.get(
-                str(raw.get("status") or "").lower(), "unknown",
+                str(order.get("status") or "").lower(), "unknown",
             ),
-            "filled_quantity": _as_float(raw.get("filled")),
-            "average_price": _as_float(raw.get("average")),
-            "exchange_order_id": str(raw.get("id") or "") or None,
-            "raw": raw,
+            "filled_quantity": _as_float(order.get("filled")),
+            "average_price": _as_float(order.get("average")),
+            "exchange_order_id": str(order.get("id") or "") or None,
+            "raw": order,
         }
 
     def fetch_positions(self):
@@ -554,6 +573,28 @@ class LiveBroker(Broker):
 def safe_live_key():
     from agmcis.safety import safe_live
     return safe_live.LIVE_NOTIONAL_KEY
+
+
+def _client_id_of(order):
+    """
+    ccxt 統一之後的 clientOrderId。
+
+    BingX 永續回的欄位是 `clientOrderID`(大寫 ID),現貨是
+    `origClientOrderId` —— ccxt 的 parse_order 會把它們收斂成
+    `clientOrderId`。這裡讀統一後的那個,並且留 info 當退路,
+    因為退路不花錢而少讀一個欄位會讓比對整個失效。
+    """
+    value = order.get("clientOrderId")
+    if value:
+        return str(value)
+
+    info = order.get("info") or {}
+    for key in ("clientOrderID", "clientOrderId", "origClientOrderId", "c"):
+        value = info.get(key)
+        if value:
+            return str(value)
+
+    return None
 
 
 def _is_stop_order(order):

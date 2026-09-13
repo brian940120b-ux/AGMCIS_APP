@@ -153,6 +153,17 @@ class ExchangeAdapter(ABC):
         """
 
     @abstractmethod
+    def get_order_history(self, symbol: Optional[str] = None,
+                          since: Optional[int] = None,
+                          limit: Optional[int] = None,
+                          market_type=None) -> List[Dict]:
+        """
+        已撤銷與已結束的訂單。查詢失敗拋例外。
+
+        ⚠️ 交易所的歷史查詢有時間窗,「查不到」只代表這段期間內沒有。
+        """
+
+    @abstractmethod
     def get_open_orders(self, symbol: Optional[str] = None,
                         market_type=None) -> List[Dict]:
         """

@@ -69,6 +69,22 @@ class OrdersMixin:
             market_type=market_type,
         )
 
+    def get_order_history(self, symbol=None, since=None, limit=None,
+                          market_type=MarketType.PERPETUAL):
+        """
+        已撤銷與已結束的訂單。
+
+        ⚠️ 交易所的歷史查詢**有時間窗**。查不到只代表「這段期間內沒有」,
+        不代表「從來不存在」—— 呼叫端要自己決定那個區別重要不重要。
+        """
+        market_symbol = (
+            self.to_market_symbol(symbol, market_type) if symbol else None
+        )
+        return self._call(
+            "fetch_canceled_and_closed_orders", market_symbol, since, limit,
+            market_type=market_type,
+        ) or []
+
     def get_open_orders(self, symbol=None, market_type=MarketType.PERPETUAL):
         """
         還活著的掛單。
