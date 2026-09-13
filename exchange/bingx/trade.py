@@ -262,6 +262,34 @@ def plan_backstop(symbol: str, quantity: float, entry: float, strategy: str,
         reason="災難後備 —— 不是策略出場")
 
 
+def _reject_hint(code: str) -> str:
+    """
+    拒單原因的線索。
+
+    2026-09-13 第一次送 Demo 單就是 100004 —— 而那其實是**好消息**:
+    它代表簽章、路徑、參數結構全部過了,只卡在最後一道權限閘。
+    把這件事寫在訊息裡,免得下一個人以為是參數寫錯。
+    """
+    if code == "100004":
+        return ("\n  這是**權限**問題,不是參數問題 —— 簽章、路徑、"
+                "參數結構都過了。"
+                "\n  金鑰缺 Perpetual Futures Trading 權限。"
+                "\n"
+                "\n  加之前先想一件事:**Demo 與實盤共用同一把金鑰**,"
+                "\n  給了交易權限,它在實盤也能下單。擋住的是我方的"
+                "\n  BINGX_ENV 與 LIVE_ENABLED —— 但金鑰外洩時那兩道"
+                "\n  保護不了你,對方不需要用你的程式。"
+                "\n"
+                "\n  所以要一起做:**IP 白名單**綁這台機器,"
+                "\n  **提款權限永遠 OFF**。"
+                "\n"
+                "\n  只是要驗證持倉欄位的話,不需要交易權限 ——"
+                "\n  在 BingX 的 Demo 介面手動開一個最小的倉就好。")
+    if code == "80001":
+        return "\n  參數格式問題。對一下 positionSide 與持倉模式是否相符。"
+    return ""
+
+
 class Trader:
     """
     會下單的那一層。**建立它本身就要過閘門。**
@@ -347,9 +375,11 @@ class Trader:
         except ValueError:
             raise OrderFailed(f"{ORDER_PATH} 回傳的不是 JSON") from None
 
-        if str(body.get("code", "0")) != "0":
+        code = str(body.get("code", "0"))
+        if code != "0":
             raise OrderFailed(
-                f"拒單 code={body.get('code')} msg={body.get('msg')!r}"
+                f"拒單 code={code} msg={body.get('msg')!r}"
+                f"{_reject_hint(code)}"
                 f"\n  送出的參數:{json.dumps(params, ensure_ascii=False)}")
 
         return {"dry_run": False, "client_id": plan.client_id,

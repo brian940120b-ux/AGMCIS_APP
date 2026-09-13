@@ -378,3 +378,52 @@ class TestMinimumSizeIsCheckedNearTheSend(unittest.TestCase):
             with self.assertRaises(trade.NotAllowed) as caught:
                 trade.check_size("BTC-USDT", 0.0001, 80000.0)
         self.assertIn("最小名目", str(caught.exception))
+
+
+class TestARejectionExplainsItself(unittest.TestCase):
+    """
+    2026-09-13 第一次送 Demo 單拿到 code=100004。
+
+    那其實是**好消息** —— 簽章、路徑、參數結構全過了,只卡在最後
+    一道權限閘。但訊息長得像失敗,下一個人會以為是參數寫錯。
+    """
+
+    def reject(self, code, msg="nope"):
+        session = FakeSession([FakeResponse(body={"code": code, "msg": msg})])
+        trader = trade.Trader(CREDS, mode="demo", session=session)
+        plan = trade.plan_entry("BTC-USDT", 0.01, "s", "2026-09-13")
+        with self.assertRaises(trade.OrderFailed) as caught:
+            trader.submit(plan, confirm=True)
+        return str(caught.exception)
+
+    def test_a_permission_error_says_it_is_not_a_parameter_problem(self):
+        text = self.reject(100004)
+
+        self.assertIn("權限", text)
+        self.assertIn("不是參數問題", text)
+
+    def test_it_warns_that_demo_and_live_share_the_key(self):
+        """
+        給交易權限之前必須知道這件事。
+        """
+        text = self.reject(100004)
+
+        self.assertIn("共用同一把金鑰", text)
+        self.assertIn("IP 白名單", text)
+        self.assertIn("提款權限永遠 OFF", text)
+
+    def test_it_offers_the_route_that_needs_no_new_permission(self):
+        text = self.reject(100004)
+
+        self.assertIn("手動開一個最小的倉", text)
+
+    def test_the_exchange_message_is_still_shown(self):
+        text = self.reject(100004, msg="the real reason")
+
+        self.assertIn("the real reason", text)
+
+    def test_an_unknown_code_adds_no_invented_hint(self):
+        text = self.reject(999999)
+
+        self.assertIn("999999", text)
+        self.assertNotIn("權限", text)
