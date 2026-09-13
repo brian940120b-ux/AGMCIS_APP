@@ -103,8 +103,12 @@ def ask(client, path: str) -> str:
         data = body.get("data")
         size = len(data) if isinstance(data, (list, dict)) else "?"
         return f"✓ 存在且可讀(data {size} 項)"
-    if code in ("100400", "104414"):
+    if code == "100400":
         return f"✗ 不存在(code {code})"
+    if code == "104414":
+        # **104414 是「參數不對」,不是「端點不存在」。**
+        # 2026-09-10 就是把它讀成不存在,而擱置了整個標準合約市場。
+        return f"✓ **存在**,但參數不對(104414):{msg[:60]}"
     if code == "100004":
         return f"✓ **存在**,但金鑰缺這個權限(code {code})"
     if code in ("100413", "100001"):
