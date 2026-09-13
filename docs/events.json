@@ -1,0 +1,27 @@
+{
+  "_source": {
+    "查證日期": "2026-09-13",
+    "FOMC": "聯準會公布的 2026 年時間表與 2027 年暫定時間表。日期是兩天會議的第二天(利率決議 14:00 ET 公布)。https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+    "CPI": "BLS 新聞稿時間表,08:30 ET。https://www.bls.gov/schedule/news_release/cpi.htm",
+    "⚠️ 2027 CPI": "BLS 通常在前一年底才公布次年時間表,2026-09-13 查詢時 2027 年份尚未發布,所以這份日曆裡沒有。不要用「第二週的某個週二到週五」去推測後填進來 —— 猜出來的日期會讓人以為有在看。",
+    "⚠️ 2027 FOMC": "聯準會標示為 tentative(暫定),每一場在前一場會議上才最終確認。實務上很少變動,但變動時要更新這裡。",
+    "維護": "/health 會在最後一筆日期過去之後回報「日曆過期」。看到那個訊息就是該更新的時候。"
+  },
+  "events": [
+    {"date": "2026-09-16", "kind": "FOMC", "level": "HIGH", "note": "利率決議 + 經濟預測摘要(點陣圖)"},
+    {"date": "2026-10-14", "kind": "CPI", "level": "HIGH", "note": "9 月 CPI"},
+    {"date": "2026-10-28", "kind": "FOMC", "level": "HIGH", "note": "利率決議"},
+    {"date": "2026-11-10", "kind": "CPI", "level": "HIGH", "note": "10 月 CPI"},
+    {"date": "2026-12-09", "kind": "FOMC", "level": "HIGH", "note": "利率決議 + 經濟預測摘要(點陣圖)"},
+    {"date": "2026-12-10", "kind": "CPI", "level": "HIGH", "note": "11 月 CPI"},
+
+    {"date": "2027-01-27", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議"},
+    {"date": "2027-03-17", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議 + 經濟預測摘要"},
+    {"date": "2027-04-28", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議"},
+    {"date": "2027-06-09", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議 + 經濟預測摘要"},
+    {"date": "2027-07-28", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議"},
+    {"date": "2027-09-15", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議 + 經濟預測摘要"},
+    {"date": "2027-10-27", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議"},
+    {"date": "2027-12-08", "kind": "FOMC", "level": "HIGH", "note": "暫定 · 利率決議 + 經濟預測摘要"}
+  ]
+}

@@ -185,34 +185,76 @@ class TestItDoesNotChangeTrading(unittest.TestCase):
         帳本裡 None 代表「不知道」,[] 代表「確定沒有」。
         把「沒查」寫成「沒有」,是把空白偽裝成結論。
         """
+        from unittest.mock import patch
+
+        from portfolio import events as ev
         from portfolio.paper import _events_on
 
-        # 沒有日曆 -> None
-        self.assertIsNone(_events_on(date(2026, 9, 13)))
+        # 有日曆、當天沒事 -> [](確定沒有)
+        self.assertEqual(_events_on(date(2026, 9, 13)), [])
+
+        # 有日曆、當天有事 -> 那一筆
+        got = _events_on(date(2026, 9, 16))
+        self.assertTrue(got)
+        self.assertEqual(got[0]["kind"], "FOMC")
+
+        # 日曆整個不見 -> None(不知道),**不是** []
+        missing = Path("/nonexistent/events.json")
+        with patch.object(ev, "SHIPPED", missing), \
+                patch.object(ev, "OVERRIDE", missing):
+            self.assertIsNone(_events_on(date(2026, 9, 13)))
 
 
-class TestTheExampleFileIsUsable(unittest.TestCase):
+class TestTheShippedCalendarIsReal(unittest.TestCase):
+    """
+    版控裡那份是真的要拿來用的,不是範例。
+    """
 
-    def test_the_example_parses_with_the_real_loader(self):
-        """
-        一份格式不對的範例檔,會讓照著抄的人得到一個壞掉的日曆。
-        """
-        example = ROOT / "docs" / "events.example.json"
-        self.assertTrue(example.exists())
-
-        got = events.load(example)
+    def test_it_parses_with_the_real_loader(self):
+        got = events.load(events.SHIPPED)
         self.assertTrue(got)
 
-    def test_the_example_dates_are_obviously_placeholders(self):
+    def test_it_records_where_the_dates_came_from(self):
         """
-        範例不可以看起來像真的日期 —— 有人會直接複製過去用。
+        一份沒有註明來源的日曆,下一個人沒有辦法查證,
+        也不知道什麼時候該更新。
         """
-        example = ROOT / "docs" / "events.example.json"
-        for event in events.load(example):
-            self.assertGreater(
-                event.on.year, 2090,
-                f"{event.on} 看起來像真的日期。範例裡的日期必須明顯是"
-                "佔位,否則有人會照抄。")
+        raw = json.loads(events.SHIPPED.read_text(encoding="utf-8"))
+        source = raw.get("_source") or {}
+
+        self.assertIn("查證日期", source)
+        self.assertIn("federalreserve.gov", json.dumps(source))
+        self.assertIn("bls.gov", json.dumps(source))
+
+    def test_it_is_not_already_stale(self):
+        """
+        一份已經過期的日曆會永遠回「沒有事件」。
+        這條紅了就是該更新版控裡那份了。
+        """
+        try:
+            events.check_freshness(path=events.SHIPPED)
+        except events.CalendarStale as e:
+            self.fail(f"{e}\n\n去 federalreserve.gov / bls.gov 抓新的日期,"
+                      "更新 docs/events.json。")
+
+    def test_a_local_override_wins_when_present(self):
+        self.assertEqual(events.source(), events.SHIPPED)
+
+    def test_no_guessed_2027_cpi_dates(self):
+        """
+        2026-09-13 查證時 BLS 還沒發布 2027 的 CPI 時間表。
+
+        「通常是第二週的週二到週五」不是資料,是推測。推測出來的
+        日期會讓人以為有在看,而那正是這一節最該避免的事。
+        這條擋住之後有人「順手補齊」。
+        """
+        guessed = [e for e in events.load(events.SHIPPED)
+                   if e.kind == "CPI" and e.on.year >= 2027]
+
+        self.assertEqual(
+            [e.on.isoformat() for e in guessed], [],
+            "2027 的 CPI 日期只能從 BLS 公布的時間表來 —— "
+            "不可以用發布規律推測。確認是官方來源就把這條測試更新掉。")
 
 
 if __name__ == "__main__":

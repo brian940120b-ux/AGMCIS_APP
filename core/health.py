@@ -201,9 +201,7 @@ def check_events() -> Check:
     """
     def run():
         from portfolio import events
-        # 明確帶路徑,不吃 events 模組自己的常數 —— 這一支的 DATA
-        # 是唯一的來源,測試才有辦法把整組檢查放進沙盒。
-        st = events.status(path=DATA / "events.json")
+        st = events.status()
         if not st["loaded"]:
             return Check("事件日曆", False,
                          "沒有載入 —— 這代表沒有在看,不代表沒有事件")

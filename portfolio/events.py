@@ -22,18 +22,18 @@
 要做的話正確順序是:先在回測裡加上這條規則,看它對 3.3 年的
 Calmar / 回撤做了什麼,再決定要不要上線。
 
-═══ 日期從哪裡來 —— 這裡要非常誠實 ═══
-**這個檔案不內建任何日期。**
+═══ 日期從哪裡來 ═══
+`docs/events.json`,跟著版控走。裡面每一筆都標了來源與查證日期:
+FOMC 來自聯準會公布的時間表,CPI 來自 BLS 新聞稿時間表。
 
-FOMC 的年度時間表是聯準會公布的,CPI 是勞工統計局公布的。
-我沒有辦法在這個環境連到那些來源,而**憑記憶寫下 2026 年的 FOMC
-日期,然後讓一個風險系統相信它**,是這整份規章裡最不該做的事
-(第五條的精神:不要靠模型記憶猜外部事實)。
+**不猜。** 2026-09-13 查證時 BLS 還沒發布 2027 年的 CPI 時間表,
+所以這份日曆裡就沒有 2027 的 CPI —— 沒有用「通常是第二週的週二
+到週五」去推。猜出來的日期會讓人以為有在看,而一份內容是錯的
+日曆比沒有日曆危險得多。
 
-一個內容是錯的日曆,比沒有日曆危險得多:它會讓人以為有在看。
+2027 的 FOMC 聯準會自己標示為 tentative(暫定),note 欄位照實寫。
 
-所以:日期放在 `data/events.json`,由人或由之後寫的抓取器填。
-格式見 `docs/events.example.json`。
+`data/events.json` 是選用的本機覆寫:放了就用它,沒放就用版控那份。
 
 ═══ 沒有日曆時說什麼 ═══
 說「日曆沒有載入」,**不說「今天沒有事件」**。
@@ -49,7 +49,13 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
-CALENDAR = BASE / "data" / "events.json"
+
+# 維護在版控裡的日曆。跟著 repo 走,所以每一台機器 clone 下來就有。
+SHIPPED = BASE / "docs" / "events.json"
+
+# 本機覆寫(選用)。放了就用它,沒放就用上面那份。
+# 為什麼要有覆寫:測試組、或臨時要加一筆代幣解鎖,不必動版控。
+OVERRIDE = BASE / "data" / "events.json"
 
 # 已知的事件類別。用固定清單而不是自由字串 —— 打錯字的類別會安靜地
 # 變成一個沒有人在看的分類。
@@ -112,6 +118,11 @@ def _parse(row, where: str) -> Event:
                  note=str(row.get("note") or ""))
 
 
+def source() -> Path:
+    """實際會讀哪一份。本機覆寫優先。"""
+    return OVERRIDE if OVERRIDE.exists() else SHIPPED
+
+
 def load(path: Path | None = None) -> list:
     """
     讀日曆。讀不到就拋 CalendarMissing —— **不回空清單**。
@@ -119,13 +130,13 @@ def load(path: Path | None = None) -> list:
     回空清單會讓呼叫端寫出 `if not events(): "今天沒事"`,
     而那句話是錯的:我們不知道今天有沒有事。
     """
-    path = path or CALENDAR
+    path = path or source()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as e:
         raise CalendarMissing(
-            f"事件日曆不存在({path.name})。這代表**沒有在看**,"
-            "不代表沒有事件。格式見 docs/events.example.json") from e
+            f"事件日曆不存在({path})。這代表**沒有在看**,"
+            "不代表沒有事件。版控裡那份在 docs/events.json") from e
     except (OSError, json.JSONDecodeError) as e:
         raise CalendarMissing(f"事件日曆讀不懂({path.name}):{e}") from e
 
