@@ -97,6 +97,9 @@ from exchange.types import (Contract, MarketType, NotSupported, OrderRequest,
 #: 覆核日期。任何「不支援」的宣稱都要帶日期,否則無法判斷是否過時。
 USDT_CHECKED_ON = "2026-09-13"
 
+#: 一個一定不存在的代號。拿它釣出「認不得」長什麼樣。
+BAIT_SYMBOL = "ZZZZZUSDT"
+
 USDT_REASON = (
     "BingX **U 本位**標準合約(/openApi/contract/v1)沒有下單 API —— "
     "原因在交易所端,而且這次是**實測定案的**,不是照文件推的。"
@@ -235,6 +238,56 @@ class BingXStandardUSDT(ExchangeAdapter):
             if f not in seen:
                 seen.add(f)
                 out.append(f)
+        return out
+
+    def recognised(self, symbols) -> dict:
+        """哪些代號**這個產品認得**。回 {代號: True/False/None}。
+
+        ═══ 這是必要條件,不是充分條件 ═══
+        `contract/v1` 沒有 contracts 端點,問不到可交易清單。唯一的
+        線索是 `allOrders`:**認不得 symbol 的時候它不套用過濾,
+        直接回整本訂單史**。所以
+
+            回的訂單編號集合 == 整本  →  認不得
+            是整本的子集            →  認得,過濾生效
+
+        ⚠️ 「allOrders 認得」跟「這個產品可以交易它」**不是同一件事** ——
+        它很可能拿全交易所的代號表做驗證。所以 True 的意思是
+        「沒有證據說不行」,不是「可以」。None 是「問不出來」。
+
+        ═══ 判別式要比集合,不能比筆數 ═══
+        2026-09-13 第一版比筆數:FLOCK 回 12、我編的 ZZZZZUSDT 回 49,
+        12 ≠ 49 於是宣告「分辨得出」。那句話是錯的,而它讓 14 個候選
+        全部被標成「存在」。比集合才對。
+        """
+        from exchange.bingx.private import READ_ONLY, PrivateCallFailed
+
+        path = READ_ONLY["std_orders"]
+
+        def ask(sym):
+            try:
+                data = self._c().get(path, {"symbol": sym})
+            except PrivateCallFailed:
+                return None
+            if not isinstance(data, list):
+                return None
+            return frozenset(
+                str(r.get("orderId")) for r in data
+                if isinstance(r, dict) and r.get("orderId") is not None)
+
+        baseline = ask(BAIT_SYMBOL)
+        out = {}
+        for sym in symbols:
+            plain = sym.replace("-", "")
+            got = ask(plain)
+            if got is None or baseline is None:
+                out[sym] = None                  # 問不出來,**不猜**
+            elif baseline and got == baseline:
+                out[sym] = False                 # 回整本 = 認不得
+            elif got <= baseline:
+                out[sym] = True                  # 過濾生效 = 認得
+            else:
+                out[sym] = None                  # 前提不成立,別解讀
         return out
 
     def infer_spec(self, symbol: str):

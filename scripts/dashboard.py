@@ -721,6 +721,92 @@ def block_exchange() -> str:
     return out + '</div>'
 
 
+def block_screen() -> str:
+    """幣種篩選 —— **為什麼這個幣在裡面 / 不在裡面。**
+
+    2026-09-13 執政官:「就像我傳的幣種單一樣能夠篩選幣種,畢竟是做合約。」
+
+    這一塊的重點不是「哪幾個幣」,是**每一關的答案都看得見**。
+    「為什麼這個幣不在裡面」必須是一個回答得出來的問題 ——
+    而在合約上,答錯的代價是一張永遠不會成交的單,
+    或一個流動性薄到強平時沒人接的倉。
+    """
+    def _screen():
+        try:
+            from exchange.bingx.standard import BingXStandardUSDT
+            from portfolio import specs
+            from portfolio.paper import SYMBOLS
+            from portfolio.screen import evaluate
+            from portfolio.universe import (MIN_DAILY_BARS,
+                                            MIN_QUOTE_VOLUME_USDT)
+            from portfolio.sim import load_daily
+
+            volumes, bars, status = {}, {}, {}
+            for sym in SYMBOLS:
+                rows = load_daily(sym)
+                bars[sym] = len(rows) or None
+                if rows:
+                    last = rows[-1]
+                    volumes[sym] = last.v * last.c if last.v else None
+                try:
+                    status[sym] = specs.tradable(sym)
+                except Exception:                # noqa: BLE001
+                    pass                          # 查不到 -> 不知道
+
+            known = BingXStandardUSDT().recognised(SYMBOLS)
+            return {"rows": evaluate(SYMBOLS, volumes, bars, known,
+                                     MIN_QUOTE_VOLUME_USDT, MIN_DAILY_BARS,
+                                     status)}
+        except Exception as e:                   # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("screen", 300, _screen)
+    head = '<div class="card"><h2>幣種篩選 —— 這個合約能不能做</h2>'
+    if got.get("error"):
+        return (head + '<p class="note">算不出來:'
+                f'{html.escape(str(got["error"]))}</p></div>')
+
+    from portfolio.screen import BLOCK, GATES, PASS, summary
+    rows = got["rows"]
+    tally = summary(rows)
+
+    mark = {PASS: '<span class="up">✓</span>',
+            BLOCK: '<span class="down">✗</span>'}
+    trs = []
+    for c in rows:
+        cells = "".join(f'<td>{mark.get(c.gates.get(g), "<span class=dim>?</span>")}</td>'
+                        for g in GATES)
+        vol = (f'{c.quote_volume / 1e6:,.0f}M'
+               if c.quote_volume else '<span class="dim">?</span>')
+        trs.append(
+            f'<tr><td class="sym">{html.escape(c.app_symbol)}</td>'
+            f'<td>{vol}</td>{cells}'
+            f'<td class="{"up" if c.tradable else "down"}">'
+            f'{html.escape(c.verdict)}</td></tr>')
+
+    heads = "".join(f'<th>{html.escape(g)}</th>' for g in GATES)
+    return (head
+            + '<div class="grid">'
+            + kv("可以做", f'{tally["tradable"]}')
+            + kv("擋下", f'{tally["blocked"]}')
+            + kv("**不知道**", f'{tally["unknown"]}')
+            + '</div>'
+            + '<div class="scroll"><table><thead><tr><th>商品</th>'
+            f'<th>24h額</th>{heads}<th>結論</th></tr></thead><tbody>'
+            + "".join(trs) + '</tbody></table></div>'
+            + '<div class="flag"><b>「不知道」不算通過。</b> '
+              '一個因為沒問到而沒發現問題的檢查,如果回報通過,'
+              '就是在說謊 —— 而在合約上那句謊話的代價是一張不會成交的單,'
+              '或一個強平時沒人接的倉。<br>'
+              '篩選**只用結構性條件**(流動性、歷史長度、交易所狀態),'
+              '不用「漲最多的前 N 個」那種預測性條件 —— '
+              '2026-09-08 實測過一次「按離均線距離取前一半」,'
+              '<b>輸給等權持有全部</b>。<br>'
+              '⚠️ 「標準合約認得」是 allOrders 問出來的,那是'
+              '<b>必要條件不是充分條件</b>。完整名單只能在 App 上翻。'
+              '</div></div>')
+
+
 def block_gaps() -> str:
     """還沒關掉的洞 —— **把它放在面板上,不是放在某份文件裡。**
 
@@ -913,8 +999,8 @@ def render() -> str:
     # 順序照「要不要動手」排:
     #   指令單(要按)→ 交易所實際(真相)→ 訊號(為什麼)
     #   → 部位大小的依據(數量從哪來)
-    desk = (block_tickets() + block_exchange() + block_signals()
-            + block_account())
+    desk = (block_tickets() + block_exchange() + block_screen()
+            + block_signals() + block_account())
     system = block_gaps() + block_contract() + block_system()
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
