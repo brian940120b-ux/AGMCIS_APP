@@ -304,3 +304,90 @@ def test_no_module_grew_back_into_a_god_file():
     for path in BINGX.glob("*.py"):
         lines = len(path.read_text(encoding="utf-8").splitlines())
         assert lines < 400, f"{path.name} 有 {lines} 行,又長回去了"
+
+
+# ---------------- ccxt 真正給的形狀 ----------------
+#
+# 這一組驗的是同一類 bug:**我讀的欄位,ccxt 不是那樣給的。**
+#
+# 這一類最危險的地方是測試會是綠的 —— 假 exchange 是我們寫的,
+# 照著我們的假設寫。所以這裡的輸入刻意用 ccxt 4.5.78 的 bingx
+# **真正會產生**的形狀,不是我們想像中的形狀。
+
+def _adapter(exchange):
+    built = BingXAdapter(exchange_factory=lambda *a, **kw: exchange)
+    built._markets_loaded = True
+    return built
+
+
+def test_next_funding_time_reads_the_next_one():
+    """
+    ccxt 的 fundingTimestamp 是**這一次**結算的時間,不是下一次。
+    bingx 目前一律設成 None,但欄位叫 next 就該先讀 next ——
+    哪天 ccxt 開始填它,舊寫法會在 next 裡放上一次的時間。
+    """
+    from unittest.mock import MagicMock
+
+    exchange = MagicMock()
+    exchange.fetch_funding_rate.return_value = {
+        "fundingRate": 0.0001,
+        "fundingTimestamp": 1_600_000_000_000,
+        "nextFundingTimestamp": 1_700_000_000_000,
+        "markPrice": 50000.0,
+        "indexPrice": 49999.0,
+    }
+
+    result = _adapter(exchange).get_funding_rate("BTC/USDT")
+
+    assert result["next_funding_time"] == 1_700_000_000_000
+
+
+def test_a_linear_open_interest_lands_in_value_not_amount():
+    """
+    ccxt 對 linear 永續把 openInterestAmount 設成 None,數字放在
+    openInterestValue,單位是 USDT。舊寫法 `amount or value` 把張數
+    與 USDT 塞進同一個欄位,而欄位名叫 open_interest 讓人以為是張數。
+    """
+    from unittest.mock import MagicMock
+
+    exchange = MagicMock()
+    exchange.fetch_open_interest.return_value = {
+        "openInterestAmount": None,
+        "openInterestValue": 3_289_641_547.10,
+        "timestamp": 1_700_000_000_000,
+    }
+
+    result = _adapter(exchange).get_open_interest("BTC/USDT")
+
+    assert result["open_interest_amount"] is None
+    assert result["open_interest_value"] == 3_289_641_547.10
+
+
+def test_an_inverse_open_interest_lands_in_amount_not_value():
+    from unittest.mock import MagicMock
+
+    exchange = MagicMock()
+    exchange.fetch_open_interest.return_value = {
+        "openInterestAmount": 749.116,
+        "openInterestValue": None,
+        "timestamp": 1_700_000_000_000,
+    }
+
+    result = _adapter(exchange).get_open_interest("BTC/USDT")
+
+    assert result["open_interest_amount"] == 749.116
+    assert result["open_interest_value"] is None
+
+
+def test_the_two_open_interest_units_stay_separate_fields():
+    """
+    張數與名目價值是兩個量。它們共用一個欄位的那一刻,
+    就沒有人知道拿到的是哪一個了。
+    """
+    from agmcis.exchange.bingx import market
+
+    source = inspect.getsource(market.MarketMixin.get_open_interest)
+
+    assert '.get("openInterestAmount") or ' not in source
+    assert "open_interest_amount" in source
+    assert "open_interest_value" in source

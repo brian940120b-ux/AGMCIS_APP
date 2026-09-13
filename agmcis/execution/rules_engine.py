@@ -200,7 +200,9 @@ class TradingRulesEngine:
         if quantity is None:
             violations.extend(problems)
         else:
-            raw = notional / (reference_price * (rules.contract_size or 1))
+            # 同一條換算式子只寫在 trading_rules 裡。這裡重算過一次,
+            # 而公式改了那邊、沒改這邊的話,這句話會報一個沒發生過的調整。
+            raw = tr.raw_quantity_for_notional(notional, reference_price, rules)
             if abs(raw - quantity) > 1e-12:
                 adjustments.append(
                     f"數量 {raw:.10g} 無條件捨去到 step_size -> {quantity}"

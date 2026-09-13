@@ -252,8 +252,14 @@ class MarketMixin:
         return {
             "symbol": symbol,
             "funding_rate": raw.get("fundingRate"),
+            # 這個欄位叫 next,所以先讀 next。
+            #
+            # 第一版先讀 fundingTimestamp —— 那在 ccxt 的語意裡是**這一次**
+            # (上一次)結算的時間,不是下一次。bingx 目前一律把它設成
+            # None,所以退路救了它;但只要哪天 ccxt 開始填那個欄位,
+            # 這裡就會在一個叫 next 的欄位裡放上一次的時間。
             "next_funding_time": (
-                raw.get("fundingTimestamp") or raw.get("nextFundingTimestamp")
+                raw.get("nextFundingTimestamp") or raw.get("fundingTimestamp")
             ),
             "mark_price": raw.get("markPrice"),
             "index_price": raw.get("indexPrice"),
@@ -265,11 +271,30 @@ class MarketMixin:
         if not raw:
             return None
 
+        # ⚠️ 這兩個欄位**單位不同**,而且不會同時有值。
+        #
+        # ccxt 4.5.78 的 bingx parse_open_interest():
+        #     openInterestAmount = openInterest if isInverse else None
+        #     openInterestValue  = None if isInverse else openInterest
+        #
+        # 我們交易的是 USDT 本位(linear)永續,所以 **amount 永遠是 None**,
+        # 數字在 value 裡,單位是 USDT。
+        #
+        # 第一版寫 `amount or value`,把兩個不同單位的量塞進同一個欄位:
+        # 反向合約給的是張數,正向合約給的是 USDT,而欄位名叫
+        # open_interest 讓人以為是張數。目前沒有 Agent 拿它去算東西,
+        # 所以還沒出事 —— 這是給下一個寫 Agent 的人挖的坑,先填掉。
+        amount = raw.get("openInterestAmount")
+        value = raw.get("openInterestValue")
+
         return {
             "symbol": symbol,
-            "open_interest": (
-                raw.get("openInterestAmount") or raw.get("openInterestValue")
-            ),
-            "open_interest_value": raw.get("openInterestValue"),
+            # 張數。linear 永續拿不到,所以正常情況下就是 None。
+            "open_interest_amount": amount,
+            # 名目價值(USDT)。linear 永續的數字在這裡。
+            "open_interest_value": value,
+            # 相容舊呼叫端。單位跟著來源走 —— 要拿去算的人請改用
+            # 上面兩個之一,不要用這個。
+            "open_interest": value if value is not None else amount,
             "timestamp": raw.get("timestamp"),
         }

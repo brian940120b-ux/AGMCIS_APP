@@ -186,3 +186,54 @@ class TestNotionalConversion(unittest.TestCase):
         qty, problems = tr.quantity_for_notional(1000, 0, rules())
         self.assertIsNone(qty)
         self.assertTrue(problems)
+
+
+class TestTheQuantityFormulaLivesInOnePlace(unittest.TestCase):
+    """
+    名目 -> 數量的換算只能有一份。
+
+    它原本同時存在 trading_rules.quantity_for_notional() 與 Execution
+    Engine 的 rules_engine 裡 —— 後者重算一次只為了印出「從 X 調整到
+    Y」。兩份的話,公式改了而那句話沒改,系統就會回報一個沒有發生過的
+    調整,或漏掉一個真的發生了的。
+    """
+
+    def test_rounding_is_the_only_difference_between_the_two(self):
+        from agmcis.exchange import trading_rules as tr
+
+        spec = rules(contract_size=10, step_size=0.1)
+        raw = tr.raw_quantity_for_notional(1000, 100, spec)
+        rounded, _ = tr.quantity_for_notional(1000, 100, spec)
+
+        self.assertEqual(rounded, tr.round_quantity(raw, spec))
+
+    def test_the_execution_engine_does_not_recompute_it(self):
+        import ast
+        import inspect
+
+        from agmcis.execution import rules_engine
+
+        tree = ast.parse(inspect.getsource(rules_engine))
+        divisions = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
+            and "contract_size" in ast.dump(node)
+        ]
+
+        self.assertEqual(
+            divisions, [],
+            "rules_engine 又自己算了一次名目換算 —— 請改呼叫 "
+            "trading_rules.raw_quantity_for_notional()",
+        )
+
+    def test_a_missing_contract_size_counts_as_one(self):
+        """
+        BingX 的 USDT 本位永續數量以幣為單位,contract size 就是 1。
+        缺值時當成 1 是對的,但那個預設只對 linear 成立。
+        """
+        from agmcis.exchange import trading_rules as tr
+
+        without = tr.raw_quantity_for_notional(1000, 100, rules(contract_size=None))
+        explicit = tr.raw_quantity_for_notional(1000, 100, rules(contract_size=1))
+
+        self.assertEqual(without, explicit)

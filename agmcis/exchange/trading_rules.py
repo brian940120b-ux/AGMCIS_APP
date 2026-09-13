@@ -221,6 +221,23 @@ def assert_valid_order(quantity, price, rules, leverage=None):
     return True
 
 
+def raw_quantity_for_notional(notional_usdt, price, rules):
+    """
+    名目價值換算成合約數量,**還沒有進位到 step size**。
+
+    這條式子只寫在這裡。它原本同時存在 `quantity_for_notional()` 與
+    Execution Engine 的 rules_engine 裡 —— 後者重算一次只為了印出
+    「從 X 調整到 Y」。兩份的話,公式改了而那句話沒改,系統就會
+    回報一個沒有發生過的調整,或漏掉一個真的發生了的。
+
+    contract_size 缺值時當成 1:BingX 的 USDT 本位永續數量以幣為單位,
+    contract size 就是 1。這個預設值只對 linear 成立,而 Standard
+    合約在這個系統裡是明確拒絕的(第六節)。
+    """
+    contract_size = rules.contract_size or 1
+    return float(notional_usdt) / (float(price) * float(contract_size))
+
+
 def quantity_for_notional(notional_usdt, price, rules):
     """
     把「我想開多少 USDT 的名目價值」換算成合約數量,並調整到合約允許的單位。
@@ -231,8 +248,7 @@ def quantity_for_notional(notional_usdt, price, rules):
     if not price or price <= 0:
         return None, [f"價格無效: {price}"]
 
-    contract_size = rules.contract_size or 1
-    raw_quantity = float(notional_usdt) / (float(price) * float(contract_size))
+    raw_quantity = raw_quantity_for_notional(notional_usdt, price, rules)
     quantity = round_quantity(raw_quantity, rules)
 
     if not quantity or quantity <= 0:
