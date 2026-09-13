@@ -4,3 +4,8 @@
 # starlette.testclient 需要 httpx,沒有它 tests/test_api_surface.py
 # 會直接以 RuntimeError 失敗(而不是測試不通過),很容易被誤判成程式壞掉。
 httpx
+
+# tests/test_deployment.py 用它解析 docker-compose 與部署設定。
+# 它原本沒有被宣告在任何地方 —— 開發機剛好系統裝了,所以看不出來,
+# 而乾淨的環境會在測試收集階段就整包失敗(ModuleNotFoundError)。
+pyyaml

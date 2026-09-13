@@ -173,5 +173,128 @@ class TestTheRuntimeDependenciesAreActuallyUsed(unittest.TestCase):
                     self.skipTest(f"{name} 沒有裝在這個環境")
 
 
+class TestNothingImportsAnUndeclaredPackage(unittest.TestCase):
+    """
+    這一組擋的是**在 VPS 上出現過兩次**的同一種失敗:
+    程式碼 import 了一個沒有被任何 requirements 檔宣告的套件。
+
+    開發機剛好裝了它,所以本機全綠;乾淨的環境一裝就炸。第一次是
+    `yaml`(測試收集階段整包 ModuleNotFoundError),而在那之前
+    requirements.txt 本身還壞著。
+
+    共同點是:沒有任何東西在檢查「宣告的」與「用到的」是否一致。
+    """
+
+    def declared(self):
+        names = set()
+        for filename in REQUIREMENT_FILES:
+            for _number, raw in requirement_lines(filename):
+                line = raw.split("#", 1)[0].strip()
+                name = ""
+                for char in line:
+                    if char in SPEC_STARTS:
+                        break
+                    name += char
+                if name:
+                    names.add(name.lower().replace("_", "-"))
+        return names
+
+    def local_modules(self, folder=None):
+        """
+        repo 自己的東西,不需要宣告。
+
+        包含三種:頂層的 .py 檔、**任何裝著 .py 的頂層目錄**
+        (不是只有帶 __init__.py 的套件 —— tests/ 與 strategies/
+        都沒有 __init__.py 但確實是本地模組),以及被掃描的那個
+        資料夾裡的檔案(例如 tests/conftest.py 旁邊的 fake_ccxt.py)。
+        """
+        names = set()
+
+        for entry in os.listdir(ROOT):
+            path = os.path.join(ROOT, entry)
+            if entry.endswith(".py"):
+                names.add(entry[:-3])
+            elif os.path.isdir(path) and not entry.startswith("."):
+                try:
+                    if any(f.endswith(".py") for f in os.listdir(path)):
+                        names.add(entry)
+                except OSError:
+                    continue
+
+        if folder:
+            base = os.path.join(ROOT, folder)
+            names.update(
+                f[:-3] for f in os.listdir(base) if f.endswith(".py")
+            )
+
+        return names
+
+    def imported_by(self, folder):
+        import ast
+
+        found = {}
+        base = os.path.join(ROOT, folder)
+
+        for entry in sorted(os.listdir(base)):
+            if not entry.endswith(".py"):
+                continue
+            path = os.path.join(base, entry)
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read(), filename=path)
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        found.setdefault(alias.name.split(".")[0], entry)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.level == 0 and node.module:
+                        found.setdefault(node.module.split(".")[0], entry)
+
+        return found
+
+    # import 名與套件名不一樣的那幾個。
+    ALIASES = {
+        "yaml": "pyyaml",
+        "dotenv": "python-dotenv",
+        "multipart": "python-multipart",
+        "psycopg2": "psycopg2-binary",
+        "dateutil": "python-dateutil",
+        "PIL": "pillow",
+    }
+
+    # 測試工具本身。它們由 CI / 開發者自行安裝,不是這個專案的相依。
+    # 測試工具與 Python 自帶的東西。
+    TOOLING = {"pytest", "_pytest", "pluggy", "pip", "setuptools"}
+
+    def check_folder(self, folder):
+        declared = self.declared()
+        local = self.local_modules(folder)
+        stdlib = set(sys.stdlib_module_names)
+
+        for module, where in sorted(self.imported_by(folder).items()):
+            if module in stdlib or module in local or module in self.TOOLING:
+                continue
+
+            package = self.ALIASES.get(module, module).lower().replace("_", "-")
+
+            with self.subTest(module=module, file=f"{folder}/{where}"):
+                self.assertIn(
+                    package, declared,
+                    f"{folder}/{where} import 了 {module},但 {package} 沒有"
+                    f"被任何 requirements 檔宣告。本機裝了就看不出來,"
+                    f"乾淨的環境會直接失敗。",
+                )
+
+    def test_the_test_suite_declares_what_it_imports(self):
+        self.check_folder("tests")
+
+    def test_the_scripts_declare_what_they_import(self):
+        """
+        腳本是在 VPS 上跑的。它們少一個相依,發現的時候通常是
+        你正在處理別的問題。
+        """
+        self.check_folder("scripts")
+
+
 if __name__ == "__main__":
     unittest.main()
