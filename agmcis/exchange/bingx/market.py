@@ -234,6 +234,93 @@ class MarketMixin:
             "events": events[-10:],
         }
 
+    def get_trade_flow(self, symbol, limit=500, market_type=MarketType.PERPETUAL):
+        """
+        逐筆成交算出來的 **volume delta**(第三十八節)。
+
+        ## 這才是訂單流
+
+        訂單簿失衡看的是**掛著的單**,而掛單可以撤 —— 厚的買盤在價格
+        接近時消失是一種常見的操縱手法。逐筆成交看的是**已經發生的事**:
+        誰主動吃掉了誰的掛單。那個撤不掉。
+
+        ccxt 對 BingX 的公開成交會從 `isBuyerMaker` 推出 `side`,而且
+        明確標成 taker:
+
+            isBuyerMaker=True  -> 買方是掛單方 -> 主動方是賣方 -> side="sell"
+            isBuyerMaker=False -> 主動方是買方                 -> side="buy"
+
+        所以 `side` 就是**主動方**,delta = 主動買量 - 主動賣量。
+
+        ## 回傳
+
+        取不到回 None —— 不要用訂單簿或 K 棒湊一個近似值。
+        一個用別的東西湊出來的訂單流不是訂單流。
+
+        `delta_ratio` 是 delta 除以總成交量,範圍 -1 ~ 1:
+        +1 代表這段期間全部是主動買。它比絕對值好用,因為
+        絕對量在不同標的、不同時段之間沒有可比性。
+        """
+        raw = self._optional(
+            "fetch_trades",
+            self.to_market_symbol(symbol, market_type),
+            None, limit,
+            market_type=market_type,
+        )
+
+        if not raw:
+            return None
+
+        buy_volume = 0.0
+        sell_volume = 0.0
+        counted = 0
+        unknown_side = 0
+
+        for trade in raw:
+            if not isinstance(trade, dict):
+                continue
+
+            amount = as_float(trade.get("amount"))
+            side = str(trade.get("side") or "").lower()
+
+            if amount is None:
+                # 沒有成交量的一筆不能當成 0 —— 那會讓 delta 看起來
+                # 比實際上平衡(第九十四節)。
+                unknown_side += 1
+                continue
+
+            if side == "buy":
+                buy_volume += amount
+            elif side == "sell":
+                sell_volume += amount
+            else:
+                # 方向不明的成交不進 delta。猜一邊會直接造出一個
+                # 不存在的失衡。
+                unknown_side += 1
+                continue
+
+            counted += 1
+
+        if not counted:
+            return None
+
+        total = buy_volume + sell_volume
+        delta = buy_volume - sell_volume
+
+        return {
+            "symbol": symbol,
+            "trades": counted,
+            # 讀不到方向或數量的筆數。呼叫端要知道這個 delta 是用
+            # 多少比例的資料算出來的。
+            "unusable_trades": unknown_side,
+            "buy_volume": buy_volume,
+            "sell_volume": sell_volume,
+            "delta": delta,
+            "delta_ratio": (delta / total) if total > 0 else None,
+            "first_timestamp": raw[0].get("timestamp") if raw else None,
+            "last_timestamp": raw[-1].get("timestamp") if raw else None,
+        }
+
     def get_funding_rate(self, symbol, market_type=MarketType.PERPETUAL):
         market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
 

@@ -136,12 +136,21 @@ class StrategyRegistry:
         return self
 
     def evaluate_all(self, indicators, regime, strategies=None, candles=None,
-                     order_book=None):
+                     order_book=None, trade_flow=None):
         verdicts = []
         for strategy in (self._strategies if strategies is None else strategies):
             try:
+                # 只有宣告 needs_trade_flow 的策略會收到它。
+                # 照 needs_candles / needs_order_book 的既有慣例,
+                # 這樣另外十個策略的簽名不必為了一個資料源全部改一輪。
+                extra = (
+                    {"trade_flow": trade_flow}
+                    if getattr(strategy, "needs_trade_flow", False) else {}
+                )
                 verdicts.append(
-                    strategy.evaluate(indicators, regime, candles, order_book)
+                    strategy.evaluate(
+                        indicators, regime, candles, order_book, **extra,
+                    )
                 )
             except Exception as exc:
                 # 單一策略出錯不該讓整輪掛掉,但一定要記錄
@@ -151,7 +160,8 @@ class StrategyRegistry:
                 verdicts.append(strategy.wait(f"策略錯誤: {exc}"))
         return verdicts
 
-    def consensus(self, indicators, regime, candles=None, order_book=None):
+    def consensus(self, indicators, regime, candles=None, order_book=None,
+                  trade_flow=None):
         """
         集成所有策略的看法。
 
@@ -184,7 +194,7 @@ class StrategyRegistry:
 
         verdicts = self.evaluate_all(
             indicators, regime, strategies=enabled,
-            candles=candles, order_book=order_book,
+            candles=candles, order_book=order_book, trade_flow=trade_flow,
         )
         serialised = [v.to_dict() for v in verdicts]
 

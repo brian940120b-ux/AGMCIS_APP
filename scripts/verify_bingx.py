@@ -336,6 +336,33 @@ def main():
     oi = adapter.get_open_interest(SYMBOL)
     record("持倉量", PASS if oi else WARN, oi.get("open_interest") if oi else "取不到")
 
+    # 逐筆成交(第三十八節)。這是**真的**訂單流的資料來源 ——
+    # 訂單簿失衡只是代理。這個端點通不通,決定 OrderFlow 策略
+    # 走的是信心上限 80 的那條路還是 65 的那條。
+    try:
+        flow = adapter.get_trade_flow(SYMBOL, limit=200)
+    except Exception as exc:
+        record("逐筆成交", WARN, f"{type(exc).__name__}: {exc}")
+        flow = None
+
+    if not flow:
+        record("逐筆成交", WARN,
+               "取不到。OrderFlow 會退回訂單簿代理(信心上限 65),\n"
+               "那不是錯誤,但它是一個掛單可以被撤掉的訊號。")
+    else:
+        unusable = flow.get("unusable_trades") or 0
+        record(
+            "逐筆成交", PASS,
+            f"{flow['trades']} 筆可用"
+            + (f"(另有 {unusable} 筆方向或數量不明)" if unusable else "")
+            + f"  主動買 {flow['buy_volume']:.4f} / 主動賣 "
+              f"{flow['sell_volume']:.4f}  delta {flow['delta_ratio']:+.3f}",
+        )
+        if unusable and unusable >= flow["trades"]:
+            record("逐筆成交的方向欄位", WARN,
+                   "讀不到方向的筆數比讀得到的還多 —— ccxt 對這個帳戶\n"
+                   "或這個標的可能沒有推出 side。delta 會失真。")
+
     # ---------------- 2. 伺服器時間 ----------------
     section("2. 伺服器時間同步")
 

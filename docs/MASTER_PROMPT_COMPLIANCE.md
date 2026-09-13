@@ -71,7 +71,7 @@
 | 三十五 | Backtest Metrics | ✅ | 17 項全部都有,含 MFE / MAE / Calmar / Recovery Factor |
 | 三十六 | Walk Forward | ✅ | `agmcis/lab/splits.py` Train/Validation/Test/OOS |
 | 三十七 | Monte Carlo | ✅ | 重抽樣 + `agmcis/lab/cost_sensitivity.py`。成本變動**重跑回測**而不是在結果上加減 —— 成本會改變哪些交易還有得賺、強平價在哪、以及成交價本身 |
-| 三十八 | Strategy Lab | ⚠️ | 十個策略,含 OrderFlow。**但 OrderFlow 是代理指標** —— 真正的 order flow 需要逐筆成交,這裡用訂單簿失衡 + 量能確認近似,所以門檻高、信心上限 65 |
+| 三十八 | Order Flow | ⚠️ | 逐筆成交的 volume delta 已實作(`get_trade_flow`),OrderFlow 優先用它、信心上限 80;拿不到才退回訂單簿代理、上限 65,而且 reasons 會標明用的是哪一種。**留在 ⚠️ 是因為那條路在真的 BingX 上還沒跑過** —— `scripts/verify_bingx.py` 會告訴你端點通不通 |
 | 三十九 | 避免 Overfitting | ✅ | `agmcis/lab/scoring.py` 有 OVERFITTED 標記與 Strategy Health Score |
 | 四十 | Strategy Ensemble | ✅ | `agmcis/lab/ensemble.py`,含權重上限 |
 
@@ -209,7 +209,7 @@
 
 | 節 | 還缺什麼 |
 |---|---|
-| 三十八 | OrderFlow 是**代理指標**。真正的 order flow 需要逐筆成交,這裡用訂單簿失衡 + 量能確認近似,所以門檻高、信心上限 65。要升級需要 BingX 的逐筆資料 |
+| 三十八 | **這一列先前的說法是錯的。** 它寫「要升級需要 BingX 的逐筆資料」,暗示拿不到 —— 但 BingX 有公開的 Recent Trades 端點,ccxt 也支援(`fetchTrades`),而它從 `isBuyerMaker` 推出的 `side` 就是主動方。真正的 volume delta 已經實作了(`get_trade_flow`),OrderFlow 優先用它(信心上限 80),拿不到才退回訂單簿代理(上限 65)。留在 ⚠️ 的理由換成:**那條路在真的 BingX 上還沒跑過** |
 | 五十六 | 1R / 2R / 3R 與 30/30/40 是**起點不是結論**。調校工具寫好了(`scripts/tune_exits.py`),但它要真實 K 棒才有意義,而這個容器連不到 BingX。跑完之後結果也不會自動套用 —— 走提案流程,由人批准(第七十八節)|
 | 八十三 | compose 與 runbook 都寫好了(`docker-compose.staging.yml` + `docs/DEPLOYMENT.md`),**但沒有第二台機器**。起一個 staging 是一行指令,不是一個設計問題了 |
 | 一百零三 | 前六項達成。**Operationally Safe 要跑過真錢才算數** |

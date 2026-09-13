@@ -104,6 +104,7 @@ def analyse_symbol(symbol, timeframe=DEFAULT_TIMEFRAME, limit=DEFAULT_LIMIT,
     consensus = registry.consensus(
         indicators, regime, candles=_candles(df),
         order_book=_order_book(symbol),
+        trade_flow=_trade_flow(symbol),
     )
 
     if not consensus.is_actionable:
@@ -266,6 +267,28 @@ def _candles(frame):
         ]
     except Exception:
         logger.warning("K 棒轉換失敗,需要 K 棒的策略這一輪會棄權")
+        return None
+
+
+def _trade_flow(symbol):
+    """
+    逐筆成交的 volume delta(第三十八節)。取不到回 None ——
+    需要它的策略會 WAIT,而那是正確的。
+
+    與 _order_book 分開是刻意的:訂單簿是掛著的單,逐筆成交是已經
+    發生的事。把兩者混成一個「市場情緒」欄位,就再也分不出訊號
+    是來自可以被撤掉的掛單,還是來自撤不掉的成交。
+    """
+    from agmcis.config import settings
+
+    if not getattr(settings, "AGENT_ENRICHMENT_ENABLED", True):
+        return None
+
+    try:
+        from agmcis.data.market_data import get_trade_flow
+        return get_trade_flow(symbol)
+    except Exception as exc:
+        logger.warning("訊號管線 | %s 取不到逐筆成交 | %s", symbol, exc)
         return None
 
 

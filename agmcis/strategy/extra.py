@@ -400,30 +400,47 @@ class OrderFlow(Strategy):
     """
     訂單流(第三十八節)。
 
-    ## 先講清楚它不是什麼
+    ## 兩種資料,兩種可信度
 
-    真正的 order flow 需要**逐筆成交**:誰主動吃了誰的掛單、
-    買方主動成交量減賣方主動成交量(volume delta)。那個資料
-    K 棒與訂單簿快照都推不出來,而 BingX 的公開 API 也不提供。
+    真正的 order flow 是**逐筆成交**算出來的 volume delta:主動買量
+    減主動賣量。誰主動吃掉了誰的掛單 —— 那是已經發生的事,撤不掉。
 
-    這裡做的是**訂單簿失衡 + 量能確認**的組合,它是 order flow 的
-    一個粗糙代理。兩個已知的問題:
+    這個策略優先用它。拿不到的時候才退回**訂單簿失衡 + 量能確認**,
+    而那是一個粗糙代理,有兩個已知的問題:
 
       1. **掛單可以撤。** 厚的買盤可能在價格接近時消失 ——
          而且那正是一種常見的操縱手法。
       2. **快照是一瞬間。** 兩次輪詢之間發生的事完全看不到。
 
-    所以它的信心上限壓在 65,而且要求量能同時確認 ——
-    一個沒有成交量支撐的訂單簿失衡,更可能是掛單牆而不是真的買盤。
+    所以兩條路的信心上限不一樣:
 
-    ## 為什麼還是做
+        逐筆成交 delta   上限 80
+        訂單簿代理       上限 65,而且要求量能同時確認
 
-    因為「拿不到最好的資料」不等於「什麼都不看」。訂單簿失衡在
-    極端值時確實有資訊,而把它明確標成代理指標、壓低權重、
-    要求另一個獨立訊號確認,比假裝沒有這個維度好。
+    代理那條路要求量能確認,是因為一個沒有成交量支撐的訂單簿失衡,
+    更可能是掛單牆而不是真的買盤。
+
+    ## 一段更正
+
+    這個類別原本寫著「BingX 的公開 API 也不提供」逐筆成交。
+    **那句話是錯的** —— BingX 有公開的 Recent Trades 端點,ccxt 也支援
+    (`fetchTrades`),而且它從 `isBuyerMaker` 推出的 `side` 就是主動方。
+    所以這一節卡住的理由其實不成立,現在補上了。
+
+    ## 為什麼保留代理
+
+    因為「拿不到最好的資料」不等於「什麼都不看」。但兩者絕不混用:
+    verdict 的 reasons 會說清楚這一次用的是哪一種。
     """
     name = "order_flow"
     needs_order_book = True
+    needs_trade_flow = True
+
+    # 逐筆成交的 delta 要多明顯才算數。0.25 = 大約 62/38 的主動買賣比。
+    STRONG_DELTA = 0.25
+
+    # delta 至少要用這麼多筆成交算出來。十筆成交的 delta 是噪音。
+    MIN_TRADES = 30
 
     # 失衡要非常明顯才出手。0.4 = 買賣盤大約 70/30。
     STRONG_IMBALANCE = 0.40
@@ -431,9 +448,71 @@ class OrderFlow(Strategy):
     # 價差寬到這個程度,進出成本會吃掉這種短線交易的全部優勢。
     MAX_SPREAD_PCT = 0.15
 
-    def evaluate(self, indicators, regime, candles=None, order_book=None):
+    def _from_trade_flow(self, indicators, trade_flow):
+        """
+        逐筆成交那條路。回傳 verdict,或 None 代表「這條路走不通,
+        換代理」。
+
+        **注意回 None 的意思**:是「沒有這個資料」,不是「這個資料
+        說不要交易」。如果 delta 明確但不夠強,這裡要回 WAIT 而不是
+        None —— 回 None 會讓策略退回訂單簿代理,然後用一個信心上限
+        更高的訊號去覆蓋一個更可靠的資料源說出來的「不夠強」。
+        """
+        if not trade_flow:
+            return None
+
+        ratio = trade_flow.get("delta_ratio")
+        trades = trade_flow.get("trades") or 0
+
+        if ratio is None:
+            return None
+
+        if trades < self.MIN_TRADES:
+            # 樣本太少的 delta 是噪音。這裡回 None 而不是 WAIT ——
+            # 資料量不足是「這條路走不通」,訂單簿代理仍然可以試。
+            return None
+
+        if abs(ratio) < self.STRONG_DELTA:
+            return self.wait(
+                f"主動買賣 delta {ratio:+.2f} 不夠明顯"
+                f"({trades} 筆成交)"
+            )
+
+        direction = Direction.LONG if ratio > 0 else Direction.SHORT
+        buy_pct = (1 + ratio) / 2 * 100
+
+        reasons = [
+            f"逐筆成交:{buy_pct:.0f}% 是主動買(delta {ratio:+.2f}"
+            f",{trades} 筆)",
+        ]
+
+        unusable = trade_flow.get("unusable_trades") or 0
+        if unusable:
+            reasons.append(f"另有 {unusable} 筆方向或數量不明,未計入")
+
+        # 上限 80。比訂單簿代理高,因為成交撤不掉;但不到 100,
+        # 因為這仍然是一段很短的歷史,而且不含隱藏單。
+        confidence = min(80.0, 45 + abs(ratio) * 45)
+
+        stop_loss, take_profit = self.atr_levels(
+            indicators, direction, stop_mult=1.0, target_mult=1.5,
+        )
+
+        return StrategyVerdict(
+            strategy=self.name, direction=direction,
+            confidence=confidence, reasons=reasons,
+            stop_loss=stop_loss, take_profit=take_profit,
+        )
+
+    def evaluate(self, indicators, regime, candles=None, order_book=None,
+                 trade_flow=None, **context):
+        # 有真的逐筆成交就用它。訂單簿代理是退路,不是等價選項。
+        real = self._from_trade_flow(indicators, trade_flow)
+        if real is not None:
+            return real
+
         if not order_book:
-            return self.wait("沒有訂單簿,算不出訂單流")
+            return self.wait("沒有逐筆成交也沒有訂單簿,算不出訂單流")
 
         imbalance = order_book.get("imbalance")
         spread_pct = order_book.get("spread_pct")
@@ -472,7 +551,9 @@ class OrderFlow(Strategy):
             reasons.append(f"價差 {spread_pct:.3f}%")
 
         # 上限 65:掛單可以撤,而且快照看不到兩次輪詢之間發生的事。
+        # 逐筆成交那條路上限是 80 —— 兩者不等價,信心也不該一樣。
         confidence = min(65.0, 40 + abs(imbalance) * 40)
+        reasons.insert(0, "(代理指標:沒有逐筆成交,用訂單簿失衡推估)")
 
         # 訂單簿訊號的時效很短,所以停損跟停利都放得比較近。
         stop_loss, take_profit = self.atr_levels(

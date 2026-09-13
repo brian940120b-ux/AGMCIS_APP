@@ -65,15 +65,28 @@ class Strategy(ABC):
     # 拿不到就 WAIT,不用別的東西湊一個近似值。
     needs_order_book = False
 
+    # 這個策略需不需要逐筆成交的 volume delta(第三十八節)。
+    #
+    # 宣告了才會拿到 —— 註冊表只把 trade_flow 傳給要它的策略,
+    # 所以另外十個策略的簽名不必改。同樣的規則:拿不到就 WAIT。
+    #
+    # 訂單簿與逐筆成交是**兩種不同的資料**:前者是掛著的單(可以撤),
+    # 後者是已經發生的成交(撤不掉)。用前者湊後者會產生一個名字
+    # 叫訂單流但其實不是訂單流的訊號。
+    needs_trade_flow = False
+
     @abstractmethod
     def evaluate(self, indicators, regime, candles=None,
-                 order_book=None) -> StrategyVerdict:
+                 order_book=None, **context) -> StrategyVerdict:
         """
         看一眼市場,回傳看法。不得有副作用,不得碰交易所。
 
         candles 是原始 K 棒(可能是 None)。只有 needs_candles=True 的
         策略會用到它 —— 其他策略的簽名收下它但忽略,這樣註冊表可以
         用同一種方式呼叫所有策略。
+
+        `context` 收額外的資料源(目前只有 trade_flow)。註冊表只把它
+        傳給宣告需要的策略,所以不需要它的策略連簽名都不用改。
         """
 
     def wait(self, *reasons):

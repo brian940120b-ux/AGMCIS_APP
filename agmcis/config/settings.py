@@ -237,6 +237,9 @@ CACHE_TTL = {
     "ohlcv": env_float("CACHE_TTL_OHLCV", 15),
     "funding_rate": env_float("CACHE_TTL_FUNDING", 60),
     "open_interest": env_float("CACHE_TTL_OPEN_INTEREST", 30),
+    # 訂單流的訊息在幾十秒內就過期,一份三分鐘前的 delta
+    # 描述的是另一個市場(第三十八節)。
+    "trade_flow": env_float("CACHE_TTL_TRADE_FLOW", 15),
 }
 
 

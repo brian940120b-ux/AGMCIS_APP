@@ -225,6 +225,21 @@ def get_funding_rate(symbol, market_type=MarketType.PERPETUAL) -> Optional[Dict]
     )
 
 
+def get_trade_flow(symbol, limit=500,
+                   market_type=MarketType.PERPETUAL) -> Optional[Dict]:
+    """
+    逐筆成交的 volume delta(第三十八節)。取不到回 None。
+
+    快取時間刻意很短:訂單流的訊息在幾十秒內就過期了,
+    一份三分鐘前的 delta 描述的是另一個市場。
+    """
+    return _cached(
+        "trade_flow", symbol, market_type,
+        settings.CACHE_TTL.get("trade_flow", 15),
+        lambda: get_adapter().get_trade_flow(symbol, limit, market_type),
+    )
+
+
 def get_open_interest(symbol, market_type=MarketType.PERPETUAL) -> Optional[Dict]:
     market_type = MarketType.parse(market_type, MarketType.PERPETUAL)
     return cache.get_or_fetch(

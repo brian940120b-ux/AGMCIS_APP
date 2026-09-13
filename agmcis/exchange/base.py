@@ -88,7 +88,19 @@ class ExchangeAdapter(ABC):
         而不是用殘缺清單去挑交易標的。
         """
 
-    @abstractmethod
+    def get_trade_flow(self, symbol: str, limit: int = 500,
+                       market_type=None) -> Optional[Dict]:
+        """
+        逐筆成交算出來的 volume delta(第三十八節)。
+
+        **選配能力**,不是 abstractmethod:不是每一家交易所都給公開
+        逐筆成交。不支援就回 None,而需要它的策略會 WAIT ——
+        那是對的,一個用訂單簿湊出來的訂單流不是訂單流。
+
+        訂單簿看的是掛著的單(可以撤),逐筆成交看的是已經發生的事。
+        """
+        return None
+
     def get_order_book(self, symbol: str, limit: int,
                        market_type: MarketType) -> Optional[Dict]:
         """失敗回傳 None。"""
