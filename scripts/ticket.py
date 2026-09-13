@@ -13,23 +13,30 @@ GET 與 POST 問 order / trade/order 都回 100400,而**對照組**
      自動    自動        自動      自動         自動       手動   自動
 
 ═══ 三個用法 ═══
-    .venv/bin/python scripts/ticket.py --stop-pct 8
+    .venv/bin/python scripts/ticket.py
         算今天的單,印成可以照著按的指令單
 
-    .venv/bin/python scripts/ticket.py --stop-pct 8 --check
+    .venv/bin/python scripts/ticket.py --check
         再問一次現價,說每張單「現在還能不能按」
 
     .venv/bin/python scripts/ticket.py --verify
         按完之後跑這個 —— 拿交易所實際的持倉回頭比對,
         數量、方向、槓桿、保證金模式差一格就報出來
 
-═══ --stop-pct 沒有預設值 ═══
-第 102 條:Risk Limit 由執政官決定。一張沒有停損的單不該存在(§19),
-所以這裡不會替你挑一個「看起來合理」的數字。
+═══ 停損 25%:2026-09-13 執政官裁定 ═══
+`--stop-pct` 現在有預設值了,而那個值有出處(§102):
 
-決定它需要證據:回測裡**均線出場真的觸發之前,單一部位最深的逆向
-走勢是多少**?擺得比那個淺,就會在歷史上真的發生過的正常波動裡
-被掃出去 —— 而那是另一條策略,Calmar 1.33 不是它的數字。
+  · 20% 是分水嶺 —— 從那裡開始,被掃出去的部位沒有一段最後是賺的
+  · 選 25% 不選 20%,因為這是**災難後備**不是策略出場:
+    20% 會在 5.0% 的持倉上觸發,25% 只在 1.9% 上
+  · 上限那側:3× 的強平約 32.8%,而**那是偏樂觀的估計** ——
+    25% 留 7.8pp 給誤差,30% 只留 2.8pp
+
+依據見 `scripts/stop_evidence.py`,決定的全文見
+`exchange/bingx/trade.BACKSTOP_DECISION`(含它的已知限制)。
+
+`BACKSTOP_PCT` 若被改回 None,這一支會拒絕執行 ——
+「沒有人決定停損擺哪裡」不該被一個看起來合理的預設值蓋掉。
 """
 from __future__ import annotations
 
@@ -194,16 +201,31 @@ def cmd_verify(args) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="U 本位標準合約下單指令單")
-    ap.add_argument("--stop-pct", type=float, required=True,
-                    help="後備停損百分比。第 102 條:由執政官決定,"
-                         "這裡沒有預設值")
-    ap.add_argument("--leverage", type=float, default=3.0,
-                    help="槓桿。預設 3× —— 2026-09-10 的 20× 真的爆了")
+    from exchange.bingx.trade import BACKSTOP_DECISION, BACKSTOP_PCT
+    from portfolio.paper import LEVERAGE_CAP
+
+    # ⚠️ help 字串會被 argparse 拿去做 `%` 格式化 —— 裡面的 `%`
+    #    必須寫成 `%%`,否則 `--help` 會當場拋 ValueError。
+    #    (2026-09-13 真的踩到:`25.0% ——` 的 `% —` 被當成格式符。)
+    ap.add_argument("--stop-pct", type=float, default=BACKSTOP_PCT,
+                    help=f"後備停損百分比。預設 {BACKSTOP_PCT}%% —— "
+                         f"{BACKSTOP_DECISION['decided_by']} "
+                         f"{BACKSTOP_DECISION['decided_on']} 裁定"
+                         "(§102),證據見 scripts/stop_evidence.py")
+    ap.add_argument("--leverage", type=float, default=LEVERAGE_CAP,
+                    help=f"槓桿。預設 {LEVERAGE_CAP:g}× —— "
+                         "2026-09-10 的 20× 真的爆了")
     ap.add_argument("--check", action="store_true",
                     help="再問一次現價,說每張單現在還能不能按")
     ap.add_argument("--verify", action="store_true",
                     help="按完之後比對交易所實際的持倉")
     args = ap.parse_args(argv)
+
+    if args.stop_pct is None:
+        ap.error("BACKSTOP_PCT 是 None(沒有人決定停損擺哪裡),"
+                 "而這裡不會替你挑一個。\n"
+                 "  先跑 scripts/stop_evidence.py 拿證據,"
+                 "或明確傳 --stop-pct。")
 
     return cmd_verify(args) if args.verify else cmd_show(args)
 

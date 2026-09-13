@@ -117,23 +117,82 @@ class TestDryRunIsTheDefault(unittest.TestCase):
 class TestTheBackstopLevelIsNotChosenByCode(unittest.TestCase):
     """
     ⚠️ 這一組守的是那個設計陷阱。
+
+    2026-09-13 執政官裁定 25%,所以「預設必須是 None」那條退場了 ——
+    但它守的東西沒有退場:**程式不准自己挑一條 Risk Limit**。
+    改成守「有人決定過,而且說得出誰、何時、根據什麼」。
+
+    一個沒有出處的數字,跟一個程式自己挑的數字,在事後是分不出來的。
     """
 
-    def test_the_default_is_none_not_a_number(self):
-        self.assertIsNone(
-            trade.BACKSTOP_PCT,
-            "程式不該替執政官挑一條 Risk Limit(第 102 條)")
+    def test_the_number_has_a_recorded_decision_behind_it(self):
+        decision = trade.BACKSTOP_DECISION
+        self.assertEqual(decision["value_pct"], trade.BACKSTOP_PCT,
+                         "記錄裡的數字要跟實際生效的一致 —— "
+                         "兩把尺是這個專案犯過十二次的錯")
+        for field in ("decided_by", "decided_on", "evidence", "why"):
+            self.assertTrue(str(decision.get(field) or "").strip(),
+                            f"缺 {field} —— 沒有出處的數字不算決定")
 
-    def test_asking_for_a_price_without_a_setting_raises(self):
+    def test_the_decision_admits_what_it_does_not_cover(self):
         """
-        「沒有人決定停損擺哪裡」不該被一個看起來合理的預設值蓋掉。
+        **一條只寫好處的 Risk Limit 是危險的。**
+
+        它會讓下一個看到的人以為這個數字沒有代價,而每一條
+        Risk Limit 都有。
         """
-        with self.assertRaises(trade.NotAllowed) as caught:
-            trade.backstop_price(100.0)
+        limits = trade.BACKSTOP_DECISION.get("known_limits") or ""
+        self.assertTrue(limits.strip(), "缺 known_limits")
+        self.assertIn("歷史沒有上限保證", limits,
+                      "歷史最深值不是未來的上限,這句話要在")
+
+    def test_the_decision_says_when_to_look_at_it_again(self):
+        """槓桿或交易池一改,這個數字的依據就變了。"""
+        self.assertTrue(
+            str(trade.BACKSTOP_DECISION.get("revisit_when") or "").strip(),
+            "缺 revisit_when —— 一條永遠不重新檢視的 Risk Limit "
+            "會在依據早就變了之後繼續生效")
+
+    def test_the_backstop_stays_clear_of_liquidation_at_the_leverage_cap(self):
+        """
+        **停損擺在強平之後等於沒有停損** —— 倉會先被強平。
+
+        而強平距離是我方算的、偏樂觀的(未計維持保證金分層),
+        所以不只要「比較近」,還要留餘裕。
+        """
+        from portfolio.account import MAINT_MARGIN_RATE
+        from portfolio.paper import LEVERAGE_CAP
+
+        liq_pct = (1.0 / LEVERAGE_CAP - MAINT_MARGIN_RATE) * 100.0
+        self.assertLess(
+            trade.BACKSTOP_PCT, liq_pct,
+            f"{trade.BACKSTOP_PCT}% 的停損擺在 {LEVERAGE_CAP}× 的強平 "
+            f"{liq_pct:.1f}% 之後 —— 停損永遠不會觸發")
+        self.assertGreater(
+            liq_pct - trade.BACKSTOP_PCT, 5.0,
+            f"只剩 {liq_pct - trade.BACKSTOP_PCT:.1f} 個百分點的餘裕。"
+            "強平距離是偏樂觀的估計,實際更近 —— 餘裕不夠")
+
+    def test_asking_for_a_price_without_a_setting_still_raises(self):
+        """
+        哪天有人把 BACKSTOP_PCT 改回 None,行為要跟以前一樣:
+        **「沒有人決定停損擺哪裡」不該被一個看起來合理的預設值蓋掉。**
+        """
+        original = trade.BACKSTOP_PCT
+        trade.BACKSTOP_PCT = None
+        try:
+            with self.assertRaises(trade.NotAllowed) as caught:
+                trade.backstop_price(100.0)
+        finally:
+            trade.BACKSTOP_PCT = original
 
         text = str(caught.exception)
         self.assertIn("還沒有設定", text)
         self.assertIn("最深的逆向走勢", text, "要說出需要什麼證據")
+
+    def test_the_default_now_produces_the_decided_price(self):
+        """不傳 pct 就該拿到執政官裁定的那個數字,不是別的。"""
+        self.assertAlmostEqual(trade.backstop_price(100.0), 75.0)
 
     def test_an_explicit_pct_works(self):
         self.assertAlmostEqual(trade.backstop_price(100.0, pct=25.0), 75.0)
