@@ -34,7 +34,6 @@ from notify import telegram
 
 log = get_logger("daily")
 
-TRIAL_STATE = Path(__file__).resolve().parents[1] / "data" / "trial_account.json"
 BASE = Path(__file__).resolve().parents[1]
 DATA = BASE / "data"
 
@@ -158,53 +157,35 @@ def funding_symbols() -> list[str]:
     今天需要哪些幣的資金費歷史。
 
     ═══ 這個函式為什麼存在(2026-09-13)═══
-    原本這裡寫的是 `refresh_funding(SYMBOLS)` —— 只有主城那 7 個幣。
-
-    但**測試組用的是動態交易池**。它每天重篩,而 2026-09-13 那天
-    挑進來的 18 個幣裡有 1000PEPE-USDT —— 從來沒有人抓過它的
-    資金費歷史。於是:
+    原本這裡寫的是 `refresh_funding(SYMBOLS)` —— 只有固定那 7 個幣。
+    當時還有一個跑動態交易池的測試組,它挑進 1000PEPE-USDT,
+    而沒有人抓過那個幣的資金費歷史:
 
         SpecMissing: 沒有 1000PEPE-USDT 的資金費率歷史 —— 不猜一個數字
 
     那個例外是對的(用不完整的資料記帳會靜靜少收資金費、美化績效),
-    錯的是**沒有人去抓那個幣的歷史**。結果是測試組整個 tick 死掉,
-    到 09-13 06:02 巡檢時已經 **73.7 小時沒有記帳**(所以大約從
-    09-10 就開始了),而它帳上有 23 個持倉。
+    錯的是沒有人去抓那個幣的歷史。測試組整個 tick 死掉,73.7 小時
+    沒有記帳,而巡檢報了三天。
 
-    巡檢每十分鐘報一次,報了三天。偵測不是問題,沒有人動才是。
+    測試組已於 2026-09-13 退役,但**這個函式要留著**:
 
-    ═══ 要抓哪些 ═══
-    三個來源的聯集,少一個都會重演同一件事:
+    ═══ 為什麼交易池固定成 7 幣之後還需要它 ═══
+    「帳上握著的」不一定等於「交易池裡的」。一個幣被交易所下架、
+    或被移出交易池之後,倉不會瞬間消失 —— 它還要收資金費,
+    直到真的被平掉為止。
 
-      · 主城的固定 7 幣
-      · 測試組**今天篩出來**的池子 —— 明天要買的東西,今天就要有資料
-      · 兩本帳上**現在還握著**的東西 —— 已經掉出池子的幣還是要收
-        資金費,直到它真的被平掉為止。只抓池子會漏掉正在出場的倉。
-
-    篩選失敗不讓整件事停下來:退回主城 + 持倉,並出聲。
+    只抓交易池會漏掉每一個**正在出場**的倉,而那正是最不該漏的時候:
+    出場那筆的成本算錯,直接錯在已實現損益上。
     """
     from portfolio.account import Account
     from portfolio.paper import MAIN, SYMBOLS
 
     wanted = set(SYMBOLS)
 
-    # 兩本帳上現在握著的
-    for path in (MAIN.state_path, TRIAL_STATE):
-        try:
-            wanted.update(Account.load(path).positions)
-        except Exception as e:
-            log.warning(f"讀不到帳本 {path.name},資金費清單可能不全:{e}")
-
-    # 測試組今天的動態池
     try:
-        from portfolio import trial
-        picked = trial.screen() or []
-        wanted.update(picked)
+        wanted.update(Account.load(MAIN.state_path).positions)
     except Exception as e:
-        # 篩不出來不該讓資金費更新整個停擺 —— 但一定要出聲,
-        # 因為它代表明天測試組可能又會踩到同一顆地雷。
-        log.warning(f"測試組交易池篩選失敗,資金費只涵蓋主城與持倉:{e}")
-        print(f"   ⚠ 測試組交易池篩不出來:{e}")
+        log.warning(f"讀不到帳本,資金費清單可能不全:{e}")
 
     return sorted(wanted)
 

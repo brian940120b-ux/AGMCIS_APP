@@ -816,167 +816,6 @@ def block_system() -> str:
             '③ 人工簽署,永不自動化。</div></div>')
 
 
-def block_wild() -> str:
-    """測試組對照 —— 2026-09-10 取代已退役的放養組。
-
-    原本這一格讀 benchmark.json 的 wild 欄位,但寫它的那支在 09-08 重建
-    時就被刪了 —— 資料從此凍在那一天,而畫面上完全看不出它是死的。
-    憲法第九條:「面板說了 52 天假話。」現在改讀測試組自己的權益曲線,
-    每天都會動;讀不到就明說讀不到,不顯示過期數字。
-    """
-    from portfolio.trial import compare
-    try:
-        c = _cached("trial", 120, compare)
-    except Exception as e:
-        return ('<div class="card"><h2>測試組</h2><p class="note">'
-                f'讀取失敗:{html.escape(str(e))}</p></div>')
-    m, t = c.get("main"), c.get("trial")
-    if not t:
-        # 還畫不出「比較」,但帳戶本身是有東西的 —— 顯示它,
-        # 而不是只寫一句「樣本不足」讓人以為系統沒在跑。
-        a = _json(DATA / "trial_account.json")
-        if not a:
-            return ('<div class="card"><h2>測試組</h2><p class="note">'
-                    '測試組尚未開始記帳。</p></div>')
-        pos = a.get("positions") or {}
-        names = ", ".join(sorted(x.replace("-USDT", "") for x in pos))
-        return ('<div class="card"><h2>測試組 · 動態交易池</h2><div class="grid">'
-                + kv("權益", f"{float(a.get('equity', 0)):,.2f}")
-                + kv("報酬", f"{float(a.get('return_pct', 0)):+.2f}%",
-                     tone(float(a.get("return_pct", 0))))
-                + kv("持倉", f"{len(pos)} 檔")
-                + kv("記帳", f"{a.get('days', 0)} 天")
-                + '</div>'
-                f'<p class="note">交易池:{html.escape(names)}</p>'
-                '<div class="flag">與主城的對照要<b>至少兩天</b>才畫得出來'
-                '(需要算報酬與回撤)。測試組每日 00:35 記帳,'
-                '主城 00:30 —— 明天就會出現對照數字。</div></div>')
-    rows = "".join(
-        f'<tr><td class="{"up" if x["passed"] else "down"}">'
-        f'{"✓" if x["passed"] else "✗"}</td>'
-        f'<td class="sym">{html.escape(x["name"])}</td>'
-        f'<td><div class="why">{html.escape(x["detail"])}</div></td></tr>'
-        for x in (c.get("criteria") or []))
-    grid = (kv("測試組報酬", f"{t['total_pct']:+.2f}%", tone(t["total_pct"]))
-            + kv("主城報酬", f"{m['total_pct']:+.2f}%", tone(m["total_pct"]))
-            if m else kv("測試組報酬", f"{t['total_pct']:+.2f}%",
-                         tone(t["total_pct"])))
-    grid += (kv("測試組回撤", f"{t['max_dd_pct']:.2f}%")
-             + kv("測試組 Calmar", f"{t['calmar']:.2f}")
-             + kv("前向天數", f"{t['days']}"))
-    return ('<div class="card"><h2>測試組 · 動態交易池</h2>'
-            f'<div class="grid">{grid}</div>'
-            '<div class="scroll"><table><tbody>' + rows + '</tbody></table></div>'
-            f'<p class="note">{html.escape(str(c.get("verdict", "")))}</p>'
-            '<div class="flag">測試組是<b>平行的紙上帳戶</b>,跑動態交易池,'
-            '用同一段真實價格與主城對照。它存在的理由:回測分不出'
-            '「動態池比較差」與「固定 7 幣被後見之明美化」——'
-            '<b>只有前向能回答</b>。<br>它<b>只累積證據,永不自動切換設定</b>;'
-            '三條判準全過也只是「有資格談」,換不換由執政官裁決。</div></div>')
-
-
-# ══════════════════════════════════════════════════════════
-# 測試組獨立頁(/trial,舊捷徑 /wild 也導到這裡)
-#
-# 2026-09-10:舊面板有 /wild 路由(wild_page()),執政官的桌面捷徑
-# 「AGMCIS·WILD」指向它。09-08 重建面板時那條路由沒有被重建 ——
-# 於是 /wild 落到主頁,兩個捷徑開起來一模一樣,而畫面上完全看不出
-# 「這個入口已經不存在了」。憲法第九條的同一類錯:
-# **在職就是在職,沒有退路可言。**
-# 放養組已退役,那個入口正好交給測試組。
-# ══════════════════════════════════════════════════════════
-def trial_account_block() -> str:
-    a = _json(DATA / "trial_account.json")
-    if not a:
-        return ('<div class="card"><h2>測試組帳戶</h2><p class="note">'
-                '尚未記帳 —— 每日 00:35 UTC 自動執行。</p></div>')
-    eq = float(a.get("equity", 0) or 0)
-    ret = float(a.get("return_pct", 0) or 0)
-    rp = float(a.get("realized_pnl_net", a.get("realized_pnl", 0)) or 0)
-    up = float(a.get("unrealized_pnl", 0) or 0)
-    dd = float(a.get("drawdown_pct", 0) or 0)
-    lev = float(a.get("leverage", 1) or 1)
-    mmr = float(a.get("maint_margin_rate", 0.005) or 0.005)
-    cells = [
-        kv("可用保證金", f"{float(a.get('available_margin', 0)):,.0f}"),
-        kv("已用保證金", f"{float(a.get('used_margin', 0)):,.0f}"),
-        kv("已實現", f"{rp:+,.2f}", tone(rp)),
-        kv("未實現", f"{up:+,.2f}", tone(up)),
-        kv("曝險", f"{float(a.get('exposure', 0)):.0%}"),
-        kv("回撤", f"{dd:.2f}%", "up" if dd <= 15 else "down"),
-        kv("成交", f"{a.get('orders_filled', 0)} 單"),
-        kv("記帳", f"{a.get('days', 0)} 天"),
-        kv("持倉", f"{len(a.get('positions') or {})} 檔"),
-    ]
-    return ('<div class="card"><h2>測試組帳戶</h2>'
-            f'<div class="big {tone(ret)}">{eq:,.2f}'
-            '<span style="font-size:14px;color:var(--dim)"> USDT</span></div>'
-            f'<div class="sub {tone(ret)}">{ret:+.2f}% · 起始 '
-            f'{float(a.get("start_equity", 10000)):,.0f}</div>'
-            f'<div class="grid">{"".join(cells)}</div>'
-            f'<p class="note">策略與主城<b>完全相同</b>'
-            f'(<b>{html.escape(str(a.get("strategy", "—")))}</b>)· '
-            f'逐倉槓桿 {lev:.0f}×(強平距離 {(1 / max(lev, 1e-9) - mmr) * 100:.1f}%)'
-            f' · 唯一的變因是<b>交易池</b> —— 一次只改一個東西,'
-            '否則贏了也不知道是誰帶來的。</p></div>')
-
-
-def trial_positions_block() -> str:
-    a = _json(DATA / "trial_account.json")
-    pos = a.get("positions") or {}
-    if not pos:
-        return '<div class="card"><h2>測試組持倉</h2><p class="note">空手。</p></div>'
-    rows, tot = [], 0.0
-    for sym, p in sorted(pos.items()):
-        amt = float(p.get("position_amt") or 0)
-        entry = float(p.get("avg_price") or 0)
-        mk = float(p.get("mark_price") or entry)
-        u = float(p.get("unrealized_pnl", (mk - entry) * amt))
-        roi = float(p.get("roi_pct") or 0)
-        lp = p.get("liq_price")
-        tot += u
-        liq = (f'{lp:,.6g}<div class="why">距 {abs(mk - lp) / mk * 100:.1f}%</div>'
-               if (lp and mk) else '<span class="dim">—</span>')
-        rows.append(
-            f'<tr><td class="sym">{html.escape(sym.replace("-USDT", ""))}'
-            f'<div class="why">{"多" if amt > 0 else "空"} · '
-            f'{float(p.get("leverage", 1)):.0f}×</div></td>'
-            f'<td>{abs(amt):.6g}</td><td>{entry:,.6g}</td><td>{mk:,.6g}</td>'
-            f'<td class="{tone(u)}">{u:+,.2f}</td>'
-            f'<td class="{tone(roi)}"><b>{roi:+.2f}%</b></td>'
-            f'<td>{liq}</td></tr>')
-    return ('<div class="card"><h2>測試組持倉</h2>'
-            '<div class="scroll"><table><thead><tr><th>商品</th><th>持倉量</th>'
-            '<th>開倉均價</th><th>標記價</th><th>未實現</th><th>ROI</th>'
-            '<th>強平價</th></tr></thead><tbody>' + "".join(rows)
-            + '</tbody></table></div>'
-            f'<p class="note">未實現合計 <b class="{tone(tot)}">{tot:+,.2f} '
-            'USDT</b></p></div>')
-
-
-def trial_page() -> str:
-    now = datetime.now(timezone.utc)
-    body = (trial_account_block() + block_wild() + trial_positions_block())
-    return f"""<!doctype html><html lang="zh-Hant"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="AGMCIS 測試組">
-<meta name="theme-color" content="#08090d">
-<title>AGMCIS 測試組</title><style>{CSS}</style></head><body>
-<div class="wrap">
-<header><h1>AGMCIS</h1>
-  <span class="tag paper">測試組 · 模擬金</span>
-  <span class="tag">{now:%m-%d %H:%M} UTC</span>
-</header>
-<nav><a href="/?key={html.escape(_env('DASHBOARD_KEY'))}">← 回主城</a></nav>
-{body}
-<p class="note" style="text-align:center;margin-top:18px">
-測試組每日 00:35 UTC 記帳(主城 00:30)。它<b>只累積證據,永不自動切換設定</b>。
-</p>
-</div></body></html>"""
-
-
 # ══════════════════════════════════════════════════════════
 # 頁面
 # ══════════════════════════════════════════════════════════
@@ -985,7 +824,7 @@ def render() -> str:
     desk = block_account() + block_orders() + block_positions() + block_curve()
     signals = block_signals() + block_monitor()
     system = (block_events() + block_correlation() + block_contract()
-              + block_system() + block_wild())
+              + block_system())
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -1428,16 +1267,6 @@ class Handler(BaseHTTPRequestHandler):
                     _t.sleep(1.0)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass          # 瀏覽器關掉分頁,正常
-            return
-
-        # ── 測試組獨立頁(/trial;/wild 是執政官既有的桌面捷徑)──
-        if u.path.startswith("/trial") or u.path.startswith("/wild"):
-            try:
-                body = trial_page().encode("utf-8")
-            except Exception as e:
-                body = (f"<pre>測試組頁渲染失敗:{html.escape(type(e).__name__)}"
-                        f": {html.escape(str(e))}</pre>").encode("utf-8")
-            self._send(body, "text/html; charset=utf-8")
             return
 
         # ── K 線(只餵眼睛,不進決策)────────────────────────

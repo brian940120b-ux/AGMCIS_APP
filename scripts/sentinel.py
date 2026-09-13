@@ -66,9 +66,7 @@ MAX_REPAIRS_PER_DAY = 4
 TIMERS = ["agmcis-sentinel.timer", "agmcis-gauge.timer",
           "agmcis-archivist.timer",
           # 新系統唯一在跑的策略。停擺等於前向證據斷掉,而斷掉是靜悄悄的。
-          "agmcis-portfolio.timer",
-          # 測試組:平行前向對照,斷掉也是靜悄悄的
-          "agmcis-trial.timer"]
+          "agmcis-portfolio.timer"]
 DATA_FILES = [BASE / "data" / "portfolio_account.json",
               BASE / "data" / "portfolio_equity.jsonl",
               BASE / "data" / "gauge_board.json",
@@ -566,32 +564,6 @@ def chk_universe_health():
                   f"{lo / 1e6:.0f}M USDT(門檻 10M)"), fix
 
 
-def chk_trial():
-    """測試組有沒有按時記帳、有沒有誤寫主城帳本。
-
-    測試組(portfolio/trial.py)是平行的紙上帳戶,跑動態交易池,
-    用同一段真實價格跟主城對照 —— 它存在的理由是:回測分不出
-    「動態池比較差」與「固定 7 幣被後見之明美化」,只有前向能回答。
-    它斷掉是靜悄悄的(主城照跑、面板照顯示),所以要有人盯著。
-    """
-    trial_state = BASE / "data" / "trial_account.json"
-    fix = ".venv/bin/python3 portfolio/trial.py"
-    if not trial_state.exists():
-        return False, "測試組帳本不存在", fix
-    age = _age_min(trial_state)
-    if age is None:
-        return False, "測試組帳本讀不到時間", fix
-    d = _jload(trial_state, {})
-    # 結構性隔離:測試組的帳本不得是主城那一個
-    if trial_state.resolve() == PORTFOLIO.resolve():
-        return False, "測試組與主城共用帳本 —— 結構性隔離已破", fix
-    ok = age < PORTFOLIO_STALL_MIN
-    return ok, (f"測試組距上次記帳 {age / 60:.1f} 小時"
-                f"(上限 {PORTFOLIO_STALL_MIN / 60:.0f});"
-                f"權益 {float(d.get('equity', 0)):,.2f}、"
-                f"持倉 {len(d.get('positions') or {})} 檔"), fix
-
-
 def chk_exchange_audit():
     """交易所一致性徹查(scripts/audit_exchange.py)必須全過。
 
@@ -633,11 +605,10 @@ CHECKS = [
     ("BingX 連通", chk_bingx),
     ("磁碟空間", chk_disk),
     ("面板 log 異常", chk_dash_traceback),
-    # 2026-09-10:放養組五項移除。執政官裁定退役(它的問題已有答案:
-    # Sharpe −1.59,拿掉規則沒有產生優勢),服務已停用、資料已封存於
-    # data/wild_archive/。憲法第八條:「停用的東西不該再被當成停擺;
-    # 盯著不存在的東西的檢查,會讓人習慣忽略紅燈。」
-    ("測試組記帳", chk_trial),
+    # 2026-09-10:放養組五項移除(執政官裁定退役,Sharpe −1.59)。
+    # 2026-09-13:測試組一項移除(執政官裁定收斂為單一系統)。
+    # 憲法第八條:「停用的東西不該再被當成停擺;盯著不存在的東西的
+    # 檢查,會讓人習慣忽略紅燈。」
 ]
 _CHK = dict(CHECKS)
 
