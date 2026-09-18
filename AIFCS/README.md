@@ -4,13 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 6 complete.** Agents see an **estimate**, not the
-> world, and teammates now share what they see over a simulated datalink with
-> latency, jitter, loss, bandwidth limits and blackouts. The two are coupled: the
-> default sensor is deliberately narrower than all-round, which on its own breaks
-> formation flying, and the datalink is what makes it work. WebSocket, replay,
-> scoring and training are **not implemented yet**; the dashboard reports each as
-> `NOT_IMPLEMENTED` rather than faking it.
+> **Current status: PHASE 7 complete.** The dashboard is now **pushed** live
+> state over `/ws/simulation` instead of polling for it — physics at 60 Hz,
+> telemetry at 20 Hz, render at whatever the browser does, three independent
+> clocks. Agents see an estimate rather than the world, and teammates share what
+> they see over a simulated datalink. Replay, scoring and training are **not
+> implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED` rather than
+> faking it.
 
 ---
 
@@ -253,6 +253,8 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/controller` | Safety layer: commands applied, rejected, corrected |
 | `GET` | `/api/sensors` | Sensor limits and tracks held per unit |
 | `GET` | `/api/communications` | Datalink config, traffic stats, blackout state |
+| `GET` | `/api/telemetry` | Broadcaster rate, connected clients, frames sent |
+| `WS` | `/ws/simulation` | Live telemetry stream (see below) |
 
 Replay, training and the `/ws/simulation` WebSocket arrive in their respective
 phases and are documented as they land.
@@ -337,6 +339,29 @@ compare against.
 
 The seam is one function. Agents were written against `Observation` in PHASE 3
 and did not change at all when perception was degraded in PHASE 5.
+
+### Live telemetry
+
+The dashboard subscribes to `/ws/simulation` and the server pushes frames at
+`telemetry.broadcast_rate_hz`. Three clocks run independently, on purpose:
+
+| Clock | Rate | Determines |
+|---|---|---|
+| Physics | fixed 60 Hz | the result — and nothing else does |
+| Telemetry | 20 Hz, configurable | how smooth the display looks |
+| Render | the browser's business | nothing about the simulation |
+
+Each connection carries its own cursor over the event and decision streams, so a
+client that connects mid-run receives what happens from then on rather than a
+replay of the backlog, and two dashboards never interfere with each other. Only
+new events and decisions go in each frame; entities and clock go in full because
+they are small.
+
+A slow or dead client is dropped rather than allowed to hold up the run.
+
+The header badge shows which transport is live: **LIVE · N FRAMES** when the
+socket is up, **POLLING** when it has fallen back. The dashboard never quietly
+shows stale data.
 
 ### Datalink
 
@@ -457,7 +482,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `287 passed`.
+**Success looks like:** `306 passed`.
 
 ### End-to-end dashboard test
 
@@ -535,8 +560,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 4 | Flight controller, action validation, safety layer | **Complete** |
 | 5 | Sensor model: partial observation, noise, delay, dropout | **Complete** |
 | 6 | Communication model: datalink, latency, loss, blackout | **Complete** |
-| 7 | WebSocket telemetry | Next |
-| 8 | 3D Command Center (Three.js) | Planned |
+| 7 | WebSocket telemetry | **Complete** |
+| 8 | 3D Command Center (Three.js) | Next |
 | 9 | Replay, scoring, database | Planned |
 | 10 | Scenario editor | Planned |
 | 11–13 | Gymnasium environment, PPO, SAC | Planned |

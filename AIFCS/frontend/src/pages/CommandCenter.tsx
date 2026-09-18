@@ -12,6 +12,7 @@ import { StateBadge } from '@/components/StateBadge'
 import { SystemStatusPanel } from '@/components/SystemStatusPanel'
 import { TacticalPlot } from '@/components/TacticalPlot'
 import { useSimulationPolling } from '@/hooks/useSimulationPolling'
+import { useTelemetrySocket } from '@/hooks/useTelemetrySocket'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useSystemStore } from '@/stores/systemStore'
 
@@ -32,12 +33,15 @@ const TABS: { id: MobileTab; label: string; icon: typeof Activity }[] = [
  */
 export function CommandCenter() {
   const [tab, setTab] = useState<MobileTab>('view')
+  useTelemetrySocket()
   useSimulationPolling()
 
   const health = useSystemStore((s) => s.health)
   const systemStatus = useSystemStore((s) => s.status)
   const connection = useSystemStore((s) => s.connection)
   const simStatus = useSimulationStore((s) => s.status)
+  const transport = useSimulationStore((s) => s.transport)
+  const framesReceived = useSimulationStore((s) => s.framesReceived)
 
   return (
     <div className="flex h-dvh flex-col bg-void">
@@ -55,14 +59,26 @@ export function CommandCenter() {
               seed {simStatus.seed}
             </span>
           )}
+          {/* Transport: telemetry is pushed when the socket is up, polled when
+              it is not. Showing which makes a degraded dashboard obvious. */}
           <StateBadge
-            state={connection === 'online' ? 'ONLINE' : connection === 'error' ? 'ERROR' : 'OFFLINE'}
+            state={
+              connection === 'error'
+                ? 'ERROR'
+                : transport === 'live'
+                  ? 'ONLINE'
+                  : transport === 'polling'
+                    ? 'WARNING'
+                    : 'OFFLINE'
+            }
             label={
-              connection === 'online'
-                ? 'BACKEND ONLINE'
-                : connection === 'error'
-                  ? 'BACKEND OFFLINE'
-                  : 'CONNECTING'
+              connection === 'error'
+                ? 'BACKEND OFFLINE'
+                : transport === 'live'
+                  ? `LIVE · ${framesReceived} FRAMES`
+                  : transport === 'polling'
+                    ? 'POLLING'
+                    : 'CONNECTING'
             }
             pulse
           />

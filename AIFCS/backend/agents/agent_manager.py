@@ -14,6 +14,7 @@ command.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -101,6 +102,7 @@ class AgentManager:
         # this every physics tick; the agent refreshes it far more slowly.
         self._demands: dict[str, ControlInputs] = {}
         self._decisions: list[Decision] = []
+        self._decision_sequence = 0
         self._decision_log_size = decision_log_size
         self._last_decision_tick: dict[str, int] = {}
 
@@ -123,6 +125,12 @@ class AgentManager:
         self._decisions.clear()
         self._demands.clear()
         self._last_decision_tick.clear()
+        self._decision_sequence = 0
+
+    @property
+    def decision_sequence(self) -> int:
+        """Highest decision sequence assigned so far."""
+        return self._decision_sequence
 
     @property
     def demands(self) -> dict[str, ControlInputs]:
@@ -207,6 +215,8 @@ class AgentManager:
         self._demands[entity.id] = action.controls
 
     def _record(self, decision: Decision, action: Action, tick: int) -> None:
+        self._decision_sequence += 1
+        decision = replace(decision, sequence=self._decision_sequence)
         self._decisions.append(decision)
         if len(self._decisions) > self._decision_log_size:
             del self._decisions[: len(self._decisions) - self._decision_log_size]
@@ -234,6 +244,14 @@ class AgentManager:
         if agent_id is not None:
             decisions = [d for d in decisions if d.agent_id == agent_id]
         return decisions[-limit:]
+
+    def decisions_after(self, sequence: int, limit: int = 200) -> list[Decision]:
+        """Decisions newer than a sequence the caller has already seen.
+
+        Bounded by the decision log, so a client that falls far behind receives
+        the most recent window rather than everything it missed.
+        """
+        return [d for d in self._decisions if d.sequence > sequence][-limit:]
 
     @property
     def decision_count(self) -> int:

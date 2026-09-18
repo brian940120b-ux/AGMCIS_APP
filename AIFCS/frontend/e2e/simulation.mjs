@@ -147,6 +147,19 @@ try {
     await page.getByText('Datalink').first().isVisible(),
     'the datalink panel should be visible',
   )
+
+  // PHASE 7: telemetry must be pushed over the socket, not polled.
+  const telemetry = await (await fetch(`${API_URL}/api/telemetry`)).json()
+  assert(telemetry.running, 'the broadcaster should be running')
+  assert(telemetry.subscribers >= 1, 'the dashboard should be connected')
+  await page.getByText(/LIVE · \d+ FRAMES/).first().waitFor({ timeout: 10000 })
+  const badge = await page.getByText(/LIVE · \d+ FRAMES/).first().innerText()
+  const frames = Number(badge.match(/(\d+)/)?.[1] ?? 0)
+  assert(frames > 5, `expected pushed frames, badge showed "${badge}"`)
+  console.log(
+    `TELEMETRY -> ${telemetry.broadcast_rate_hz} Hz, ` +
+      `${telemetry.subscribers} client(s), ${frames} frames received by the UI`,
+  )
   await shot(page, '10-running')
 
   // --- PAUSE: the world must genuinely freeze ---

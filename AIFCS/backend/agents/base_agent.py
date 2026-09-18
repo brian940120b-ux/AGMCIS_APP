@@ -185,9 +185,13 @@ class Decision:
     reason_codes: list[ReasonCode]
     observation_summary: dict[str, Any]
     metrics: dict[str, Any] = field(default_factory=dict)
+    # Assigned by the agent manager, monotonic for the run, so a telemetry
+    # client can request everything after a sequence it has already seen.
+    sequence: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "sequence": self.sequence,
             "agent_id": self.agent_id,
             "entity_id": self.entity_id,
             "simulation_time": round(self.simulation_time, 3),

@@ -208,12 +208,31 @@ loss could apply. The datalink test left jitter at its default, so delivery
 landed just after t=0 and `update(0.0)` legitimately delivered nothing. Both
 times the model was right and the fixture was wrong.
 
-## PHASE 7 — WebSocket telemetry — **Next**
+## PHASE 7 — WebSocket telemetry — **Complete**
 
-`/ws/simulation` broadcasting world state, entity state, agent state, events and
-score at a configurable rate, decoupled from the physics tick.
+`TelemetryBroadcaster` pushes frames on `/ws/simulation` at
+`telemetry.broadcast_rate_hz`, on its own asyncio task — independent of the
+60 Hz physics tick and of the browser's frame rate.
 
-## PHASE 8 — 3D Command Center
+Events and decisions gained monotonic sequence numbers, and each connection
+carries its own cursor over both streams. That is what lets a client connecting
+mid-run receive what happens from then on instead of a backlog replay, and keeps
+two dashboards from interfering with each other. Entities and clock are sent in
+full each frame because they are small; events and decisions are incremental.
+
+The frontend switched from polling to the socket, with a reconnect loop and an
+explicit polling fallback. The header badge names the transport — **LIVE · N
+FRAMES** or **POLLING** — so a degraded dashboard is visible rather than quietly
+stale.
+
+**Verified:** a new client gets an immediate snapshot; a frame carries the whole
+picture; history is not replayed on connect; an event is never sent twice; two
+clients keep independent cursors; a failing client is dropped without affecting
+the others; disconnecting stops delivery and doing it twice is harmless; the
+broadcaster holds its configured rate; and end to end through the real ASGI
+stack, the clock advances across frames. 19 new tests, 306 total.
+
+## PHASE 8 — 3D Command Center — **Next**
 
 Three.js / React Three Fiber tactical view: abstract terrain, BLUE/RED entities
 with ID, altitude, speed, heading, status, health and AI state. Orbit / follow /

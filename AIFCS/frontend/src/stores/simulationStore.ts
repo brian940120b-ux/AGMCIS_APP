@@ -13,6 +13,8 @@ import { api, ApiError } from '@/api/client'
 import type {
   AgentDecision,
   AgentsResponse,
+  TelemetryFrame,
+  TransportState,
   CommunicationsStatus,
   ControllerStatus,
   SensorStatus,
@@ -34,7 +36,13 @@ interface SimulationState {
   selectedScenario: string | null
   busy: boolean
   error: string | null
+  /** How state is arriving: pushed over WebSocket, or polled as a fallback. */
+  transport: TransportState
+  /** Telemetry frames received on the current connection. */
+  framesReceived: number
 
+  applyFrame: (frame: TelemetryFrame) => void
+  setTransport: (transport: TransportState) => void
   refresh: () => Promise<void>
   loadScenarios: () => Promise<void>
   selectScenario: (name: string) => void
@@ -77,6 +85,60 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     selectedScenario: null,
     busy: false,
     error: null,
+    transport: 'connecting',
+    framesReceived: 0,
+
+    /**
+     * Fold one pushed telemetry frame into the store.
+     *
+     * Events and decisions arrive incrementally — only what this client has not
+     * seen — so they are appended to a bounded buffer rather than replacing it.
+     */
+    applyFrame: (frame) =>
+      set((state) => {
+        const FEED_LIMIT = 60
+        const events = frame.events.length
+          ? [...state.events, ...frame.events].slice(-FEED_LIMIT)
+          : state.events
+        const decisions = frame.decisions.length
+          ? [...state.decisions, ...frame.decisions].slice(-FEED_LIMIT)
+          : state.decisions
+
+        return {
+          status: {
+            scenario: frame.scenario,
+            scenario_loaded: frame.scenario !== null,
+            clock: frame.clock,
+            seed: state.status?.seed ?? 0,
+            deterministic: state.status?.deterministic ?? true,
+            integrator: state.status?.integrator ?? '',
+            config_hash: state.status?.config_hash ?? '',
+            entity_count: frame.entities.length,
+            active_entities: frame.entities.filter((e) => e.status === 'ACTIVE').length,
+            duration_s: state.status?.duration_s ?? null,
+            end_reason: state.status?.end_reason ?? null,
+            state_hash: frame.state_hash,
+            events_published: state.status?.events_published ?? 0,
+          },
+          entities: frame.entities,
+          events,
+          decisions,
+          controller: frame.controller,
+          sensors: frame.sensors,
+          communications: frame.communications,
+          agents: {
+            agent_count: frame.agents.agent_count,
+            decision_rate_hz: frame.agents.decision_rate_hz,
+            decision_interval_ticks: state.agents?.decision_interval_ticks ?? 0,
+            total_decisions: frame.agents.total_decisions,
+            agents: state.agents?.agents ?? [],
+          },
+          framesReceived: state.framesReceived + 1,
+          error: null,
+        }
+      }),
+
+    setTransport: (transport) => set({ transport }),
 
     refresh: async () => {
       try {

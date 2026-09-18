@@ -175,8 +175,8 @@ def test_simulation_subsystem_reports_online(client):
     assert states["controllers"] == "ONLINE"
     assert states["sensors"] == "ONLINE"
     assert states["communications"] == "ONLINE"
+    assert states["websocket"] == "ONLINE"
     # Still unbuilt — these must keep reporting honestly.
-    assert states["websocket"] == "NOT_IMPLEMENTED"
 
 
 def test_openapi_documents_the_simulation_endpoints(client):

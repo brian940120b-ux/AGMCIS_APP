@@ -17,9 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.agents import router as agents_router
 from api.health import router as health_router
 from api.simulation import router as simulation_router
+from api.telemetry import router as telemetry_router
 from core.config import APP_TITLE, Settings, get_settings
 from core.logging_config import configure_logging, get_logger
-from core.runtime import get_engine, get_status_registry
+from core.runtime import get_broadcaster, get_engine, get_status_registry
 from core.system_status import SubsystemState
 
 
@@ -53,6 +54,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         SubsystemState.ONLINE,
         "Datalink with latency, jitter, loss, bandwidth and blackouts",
     )
+    registry.set_state(
+        "websocket",
+        SubsystemState.ONLINE,
+        "Pushing telemetry on /ws/simulation",
+    )
+
+    # Telemetry pushes at its own rate, independent of the physics tick.
+    get_broadcaster().start()
 
     log = get_logger("startup")
     log.info(
@@ -66,7 +75,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         },
     )
     yield
-    # Stop the simulation loop cleanly so no task outlives the process.
+    # Stop the telemetry and simulation loops cleanly so no task outlives us.
+    await get_broadcaster().stop()
     await get_engine().stop()
     get_logger("shutdown").info("AIFCS backend offline", extra={"event": "APP_STOPPED"})
 
@@ -98,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(simulation_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
+    app.include_router(telemetry_router)
 
     @app.get("/", tags=["meta"])
     def root() -> dict[str, str]:

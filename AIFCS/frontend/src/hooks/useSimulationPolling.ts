@@ -4,23 +4,25 @@ import { useSimulationStore } from '@/stores/simulationStore'
 /**
  * Poll the engine for world state.
  *
- * Polls quickly while the simulation is running and slowly when it is not, so
- * an idle dashboard does not hammer the backend. This is a stand-in until the
- * WebSocket telemetry channel arrives in PHASE 7.
+ * Since PHASE 7 the WebSocket carries live telemetry, so this runs slowly: it
+ * fetches the things the frame does not carry (scenario list, seed, config
+ * hash) and acts as the fallback when the socket is unavailable.
  */
 export function useSimulationPolling(): void {
   const refresh = useSimulationStore((s) => s.refresh)
   const loadScenarios = useSimulationStore((s) => s.loadScenarios)
-  const clockState = useSimulationStore((s) => s.status?.clock.state)
+  const transport = useSimulationStore((s) => s.transport)
 
   useEffect(() => {
     void loadScenarios()
   }, [loadScenarios])
 
   useEffect(() => {
-    const intervalMs = clockState === 'RUNNING' ? 200 : 1000
+    // The socket is carrying state, so poll rarely just to stay in sync on the
+    // fields it does not include. Without it, poll fast enough to be usable.
+    const intervalMs = transport === 'live' ? 5000 : 500
     void refresh()
     const timer = window.setInterval(() => void refresh(), intervalMs)
     return () => window.clearInterval(timer)
-  }, [refresh, clockState])
+  }, [refresh, transport])
 }

@@ -23,7 +23,8 @@
 | `core/compute.py` | CPU/GPU detection with CPU fallback | 0 |
 | `core/clock.py` | Fixed-timestep clock; simulation vs. real vs. render time | 1 |
 | `core/world_state.py` | Authoritative truth state | 1 |
-| `core/event_bus.py` | Publish/subscribe system events | 1 |
+| `core/event_bus.py` | Publish/subscribe system events, sequenced | 1, 7 |
+| `core/telemetry.py` | WebSocket broadcaster with per-client cursors | 7 |
 | `core/simulation_engine.py` | Tick loop, lifecycle, speed control | 1 |
 | `simulation/aircraft.py` | Fictional airframe parameters and control demands | 2 |
 | `simulation/physics.py` | Newton-Euler 6DOF, quaternion attitude, RK4 | 2 |

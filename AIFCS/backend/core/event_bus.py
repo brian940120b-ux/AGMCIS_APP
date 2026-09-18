@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -56,7 +56,12 @@ class EventType(StrEnum):
 
 @dataclass(frozen=True)
 class Event:
-    """One immutable occurrence on the bus."""
+    """One immutable occurrence on the bus.
+
+    ``sequence`` is assigned by the bus on publish and increases monotonically
+    for the lifetime of a run, so a telemetry client can ask for "everything
+    after N" without relying on timestamps.
+    """
 
     type: EventType
     simulation_time: float = 0.0
@@ -66,9 +71,11 @@ class Event:
     message: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     wall_time: float = field(default_factory=time.time)
+    sequence: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "sequence": self.sequence,
             "type": self.type.value,
             "simulation_time": self.simulation_time,
             "tick": self.tick,
@@ -87,6 +94,7 @@ class EventBus:
     """Synchronous publish/subscribe hub with a bounded recent-event history."""
 
     def __init__(self, history_size: int = 500) -> None:
+        self._sequence = 0
         self._subscribers: dict[EventType, list[Subscriber]] = {}
         self._global_subscribers: list[Subscriber] = []
         self._history: deque[Event] = deque(maxlen=history_size)
@@ -117,13 +125,16 @@ class EventBus:
 
     # ------------------------------------------------------------ publishing
 
-    def publish(self, event: Event) -> None:
+    def publish(self, event: Event) -> Event:
         """Deliver an event to all matching subscribers.
 
-        SIMULATION_TICK fires at the tick rate, so it is kept out of the
-        history buffer to avoid evicting events anyone actually reads.
+        Returns the event with its sequence assigned. SIMULATION_TICK fires at
+        the tick rate, so it is kept out of the history buffer to avoid evicting
+        events anyone actually reads.
         """
         self._published_count += 1
+        self._sequence += 1
+        event = replace(event, sequence=self._sequence)
         if event.type is not EventType.SIMULATION_TICK:
             self._history.append(event)
 
@@ -137,11 +148,11 @@ class EventBus:
                     extra={"event": "SUBSCRIBER_ERROR", "event_type": event.type.value},
                 )
 
+        return event
+
     def emit(self, event_type: EventType, **kwargs: Any) -> Event:
         """Convenience: build an Event and publish it in one call."""
-        event = Event(type=event_type, **kwargs)
-        self.publish(event)
-        return event
+        return self.publish(Event(type=event_type, **kwargs))
 
     # -------------------------------------------------------------- history
 
@@ -152,8 +163,21 @@ class EventBus:
             events = [e for e in events if e.type is event_type]
         return events[-limit:]
 
+    def events_after(self, sequence: int, limit: int = 200) -> list[Event]:
+        """Events newer than a sequence the caller has already seen.
+
+        Bounded by the history buffer, so a client that falls far behind gets
+        the most recent window rather than everything it missed.
+        """
+        return [e for e in self._history if e.sequence > sequence][-limit:]
+
     def clear_history(self) -> None:
         self._history.clear()
+
+    @property
+    def sequence(self) -> int:
+        """Highest sequence assigned so far."""
+        return self._sequence
 
     @property
     def published_count(self) -> int:

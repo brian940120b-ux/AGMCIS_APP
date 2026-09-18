@@ -258,3 +258,29 @@ export interface CommunicationsStatus {
     datalink_tracks: Record<string, number>
   }
 }
+
+// ---------------------------------------------------------------- PHASE 7
+
+/** One frame pushed over /ws/simulation. */
+export interface TelemetryFrame {
+  type: 'snapshot' | 'telemetry'
+  sequence: number
+  wall_time: number
+  clock: ClockSnapshot
+  scenario: string | null
+  state_hash: string
+  entities: Entity[]
+  /** Only what this client has not already received. */
+  events: SimEvent[]
+  decisions: AgentDecision[]
+  controller: ControllerStatus
+  sensors: SensorStatus
+  communications: CommunicationsStatus
+  agents: {
+    agent_count: number
+    decision_rate_hz: number
+    total_decisions: number
+  }
+}
+
+export type TransportState = 'connecting' | 'live' | 'polling' | 'offline'
