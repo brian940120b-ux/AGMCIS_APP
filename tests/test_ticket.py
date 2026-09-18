@@ -324,3 +324,102 @@ def test_no_price_means_no_ticket_not_a_guessed_quantity():
         {"SOL-USDT": 3.0}, [], PRICES, stop_pct=25.0, leverage=3.0)
     assert made == []
     assert refused and "不猜" in refused[0][1]
+
+
+# ══════════════════════════════════════════════════════════
+# 七、為什麼是這一單
+# ══════════════════════════════════════════════════════════
+def with_reason(**kw):
+    args = dict(reason="新開倉:收盤站上 50 日均線",
+                signal=(76000.0, 72149.2, 5.34),
+                weight_from=0.0, weight_to=0.14)
+    args.update(kw)
+    return a_ticket(**args)
+
+
+def test_a_ticket_says_why_not_just_what():
+    """2026-09-18 執政官:「我希望他能夠給我為什麼開單,理由是什麼。」
+
+    一張說不出理由的單不該被按下去 —— 那等於把判斷外包給一個你看不見
+    的東西,而虧錢的時候你連哪裡想錯了都查不出來。
+    """
+    why = dict(with_reason().why())
+    assert "站上 50 日均線" in why["訊號"]
+    assert "72,149.2" in why["證據"], "結論要帶證據,不能只有結論"
+    assert "14.0%" in why["配置"]
+
+
+def test_the_reason_never_invents_evidence_it_does_not_have():
+    """缺訊號數字就少一行,**不是編一行**。"""
+    why = dict(a_ticket(reason="平倉:收盤跌破 50 日均線").why())
+    assert "訊號" in why
+    assert "證據" not in why
+
+
+def test_the_stop_explains_that_it_is_not_the_strategy_exit():
+    """把後備停損當成策略出場,是 2026-09-13 記過的那個陷阱。"""
+    assert "災難後備" in dict(with_reason().why())["止損怎麼來的"]
+
+
+# ══════════════════════════════════════════════════════════
+# 八、欄位照 BingX 開單畫面
+# ══════════════════════════════════════════════════════════
+def test_fields_follow_the_bingx_order_form_top_to_bottom():
+    labels = [k for k, _, _ in with_reason().fields()]
+    assert labels[:4] == ["保證金模式", "槓桿", "方向", "數量"]
+    assert labels[-1] == "止損", "止損擺最後一個 —— 它是送出前最後確認的"
+
+
+def test_quantity_notional_and_margin_are_all_given():
+    """**App 讓你填哪一格,我不知道。** 三個都給,免得在手機上乘除 ——
+    那是最容易打錯的一步。"""
+    got = {k: v for k, v, _ in with_reason().fields()}
+    assert got["數量"] == "0.01"
+    assert got["交易總額"] == "760.00"          # 0.01 × 76000
+    assert got["保證金"] == "253.33"            # 760 ÷ 3
+
+
+def test_values_are_clean_strings_ready_to_paste():
+    """沒有千分位、沒有單位。**多一個逗號就是一張被拒的單。**"""
+    for _, value, _ in with_reason().fields():
+        assert "," not in value
+        assert "USDT" not in value and "×" not in value
+
+
+def test_no_markdown_asterisks_leak_into_the_pasted_text():
+    """這些字串會被 html.escape 後直接印 —— 星號不會變粗體,
+    只會變成兩個星號。"""
+    for _, value, note in with_reason().fields():
+        assert "**" not in value and "**" not in note
+
+
+# ══════════════════════════════════════════════════════════
+# 九、不猜 deeplink
+# ══════════════════════════════════════════════════════════
+def test_no_made_up_deeplink_by_default():
+    """2026-09-13 我猜了三條,執政官實測全部打不開。
+
+    **猜一條打不開的連結比不給連結糟** —— 它讓人以為是自己手機的問題。
+    """
+    from portfolio.ticket import BINGX_LINK_VERIFIED, bingx_links
+
+    links = bingx_links("BTCUSDT")
+    assert len(links) == 1
+    assert links[0][1].startswith("https://")
+    assert "bingx://" not in links[0][1], "不准再猜 app scheme"
+    assert BINGX_LINK_VERIFIED is False
+
+
+def test_a_verified_template_can_be_supplied_without_touching_code(monkeypatch):
+    """哪天拿到真的會動的連結,設環境變數就好,不用改程式。"""
+    import importlib
+
+    monkeypatch.setenv("BINGX_LINK_TEMPLATE", "https://x.test/{symbol}")
+    import portfolio.ticket as mod
+    importlib.reload(mod)
+    try:
+        assert mod.bingx_links("BTCUSDT")[0][1] == "https://x.test/BTCUSDT"
+        assert mod.BINGX_LINK_VERIFIED is True
+    finally:
+        monkeypatch.delenv("BINGX_LINK_TEMPLATE")
+        importlib.reload(mod)

@@ -47,8 +47,21 @@ DATA = BASE / "data"
 load_env()
 
 
-def _refresh_universe() -> None:
-    """交易池由 portfolio.paper.SYMBOLS 固定,這裡只確保日線快取是新的。"""
+def _refresh_daily_bars() -> None:
+    """更新那七個幣的日線快取。
+
+    ⚠️ **這裡不會換交易池。** 名字原本叫 `_refresh_universe`,
+    而它從來沒有 refresh 過任何 universe —— 2026-09-18 執政官問
+    「交易池是會掃描更換嗎」,查下去才發現這個名字騙了所有人,
+    包括我。
+
+    交易池是 `portfolio/paper.SYMBOLS` 裡**寫死的七個幣**。
+    `portfolio/universe.screen()` 有全市場掃描的能力(流動性、
+    歷史長度、交易所狀態),但**主系統沒有任何地方呼叫它**。
+
+    要改成動態交易池是**策略層的決定**(§6),不是換個函式名就好:
+    交易池一換,回測的 Calmar 1.33 就不是這個池子的數字,要重跑。
+    """
     from market_data.history import load_or_download
     from portfolio.paper import LOOKBACK_DAYS, SYMBOLS
     for s in SYMBOLS:
@@ -192,7 +205,7 @@ def funding_symbols() -> list[str]:
 
 def main() -> int:
     print("① 更新日線快取")
-    _refresh_universe()
+    _refresh_daily_bars()
 
     # 交易所合約規格(數量/價格精度、最小量、費率)。放在記帳之前:
     # 訂單層要靠它把數量調到交易所接受的精度,規格過期會產生會被拒的單。

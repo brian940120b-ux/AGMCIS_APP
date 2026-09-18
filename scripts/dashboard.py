@@ -316,6 +316,15 @@ tbody tr:first-child td{border-top:none}
 .ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
 .ticket td:last-child{font-family:var(--mono);text-align:right}
 .ticket .why{text-align:right}
+/* 為什麼是這一單。一張說不出理由的單不該被按下去。 */
+.why-box{margin-top:11px;padding-top:10px;
+ border-top:1px solid var(--line)}
+.why-h{font-size:11px;color:var(--dim);margin-bottom:6px;
+ letter-spacing:.5px}
+.why-row{display:flex;gap:10px;font-size:12px;
+ line-height:1.7;padding:2px 0}
+.why-row span:first-child{color:var(--dim);flex:0 0 76px}
+.why-row span:last-child{flex:1;text-align:right}
 .ticket button.cp{background:none;border:none;color:inherit;
  font:inherit;padding:0;cursor:pointer;text-align:right;
  display:inline-flex;align-items:center;gap:7px}
@@ -402,19 +411,13 @@ def _ticket_card(t) -> str:
         + "".join(
             f'<tr><td>{html.escape(label)}</td><td>'
             f'<button class="cp" data-v="{html.escape(value)}">'
-            f'<b>{html.escape(value)}</b>{html.escape(unit)}'
+            f'<b>{html.escape(value)}</b>'
             '<span class="cpi">複製</span></button>'
             + (f'<div class="why">{html.escape(note)}</div>'
                if note else '')
             + '</td></tr>'
-            for label, value, note, unit in (
-                ("數量", t.fields()[0][1], t.fields()[0][2], ""),
-                ("槓桿", t.fields()[1][1], t.fields()[1][2], "×"),
-                ("保證金", t.margin_mode, "", ""),
-                ("停損", t.fields()[2][1], t.fields()[2][2], ""),
-            ))
+            for label, value, note in t.fields())
         +
-        f'<tr><td>預估佔用</td><td>{margin} USDT</td></tr>'
         f'<tr><td>預估強平</td><td>{liq}'
         '<div class="why">我方算的,交易所這個產品不回</div></td></tr>'
         f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
@@ -424,6 +427,15 @@ def _ticket_card(t) -> str:
         f'<tr><td>單號</td><td class="why">{html.escape(t.ticket_id)}</td>'
         '</tr>'
         '</tbody></table>'
+        # ── 為什麼要按這一單 ─────────────────────────────
+        # 2026-09-18 執政官:「我希望他能夠給我為什麼開單,理由是什麼。」
+        # 一張說不出理由的單不該被按下去 —— 那等於把判斷外包給一個
+        # 你看不見的東西,而虧錢的時候你連哪裡想錯了都查不出來。
+        + '<div class="why-box"><div class="why-h">為什麼是這一單</div>'
+        + "".join(
+            f'<div class="why-row"><span>{html.escape(k)}</span>'
+            f'<span>{v}</span></div>' for k, v in t.why())
+        + '</div>'
         + '<div class="tlinks">' + "".join(
             f'<a class="tl" href="{html.escape(url)}">'
             f'{html.escape(label)}</a>'
@@ -522,14 +534,16 @@ def block_tickets() -> str:
             '(2026-09-13 GET+POST 各問一次,對照組證實)。'
             '訊號、部位大小、風控、強平距離全部自動,'
             '<b>只有送單這一吋是手動的</b>。</p>'
-            '<div class="flag">點數字就複製,點下面的連結開 BingX。<br>'
-            '⚠️ <b>「連結把參數都填好、你只要按開單」做不到</b> —— '
-            '不是我偷懶,是任何交易所都沒有這種連結。一條連結能決定'
-            '一筆交易的方向、數量、槓桿,那是資安漏洞不是功能。<br>'
-            'BingX 也沒有公開任何 deeplink 規格(2026-09-13 查過官方 API '
-            '文件與支援中心)。所以下面三條連結是**候選**,'
-            '<b>哪一條真的會開起 App 只有你點得出來</b> —— '
-            '點一次告訴我哪條對,我把另外兩條拿掉。</div>'
+            '<div class="flag">欄位順序照 <b>BingX 標準合約開單畫面</b>,'
+            '點數字就複製。<b>數量、交易總額、保證金三個都給</b> —— '
+            'App 讓你填哪一格就用哪一個,不用自己在手機上乘除。<br>'
+            '⚠️ <b>連結目前只到 BingX 首頁。</b> 2026-09-13 我給的三條 '
+            'deeplink 是**猜的**,而執政官實測<b>打不開</b> —— '
+            'BingX 沒有公開任何 deeplink 規格,而開發環境連 bingx.com '
+            '都連不上,我驗不了。<b>猜一條打不開的連結比不給連結糟</b>:'
+            '它讓人以為是自己手機的問題。<br>'
+            '要修好只有一個方法:<b>在 BingX App 裡打開那個合約,'
+            '用「分享」把連結複製給我</b>,我把它變成模板。</div>'
             + sizing_basis())
 
     if got.get("error"):

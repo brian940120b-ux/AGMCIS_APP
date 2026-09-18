@@ -59,26 +59,39 @@ DEFAULT_TTL_MIN = 30
 # 而部位大小整套邏輯是建立在那個價格上的。
 DEFAULT_BAND_PCT = 1.0
 
-# BingX 的 App 連結。**沒有一條是官方文件保證的。**
+# BingX 的 App 連結。
 #
-# 2026-09-13 查證:BingX 沒有公開任何 deeplink 規格 —— 官方 API 文件、
-# 支援中心、GitHub 都沒有。所以下面這幾條是**候選**,不是事實。
+# ═══ 2026-09-18:第一版三條都打不開,而我沒有辦法自己測 ═══
+# 執政官回報「App 打不開」。`bingx://trade?symbol=…` 是我**猜**的 ——
+# BingX 沒有公開任何 deeplink 規格(查過官方 API 文件、支援中心、
+# GitHub),而開發環境連 bingx.com 都連不上(代理擋著),
+# 所以我連「這個網址存不存在」都驗不了。
 #
-# 而且要先講清楚一件做不到的事:
-#   **「連結把所有參數填好,你只要按開單」在任何交易所都不存在。**
-#   一條連結能決定一筆交易的方向、數量、槓桿,那是資安漏洞不是功能 ——
-#   任何人傳你一條連結就能讓你開一個倉。沒有交易所會做這個。
+# **猜一條打不開的連結,比不給連結糟** —— 它讓人以為是自己手機的問題。
 #
-# 做得到的最好是這樣:連結把 App 開到**正確的合約頁**,
-# 每個數值一鍵複製,貼上去。少按幾下,但不會少確認。
+# 所以改成:預設只給一條**一定到得了**的網站首頁,其餘交給執政官。
+# 真正會動的那條只有一個方法拿到:**在 BingX App 裡打開那個合約,
+# 用「分享」複製連結貼給我**,我把它變成模板。在那之前這裡不猜。
 #
-# 哪一條真的會開起 App 只有在手機上點得出來。所以三條都給,
-# 讓執政官點一次告訴我哪條對 —— 這裡不假裝知道。
-BINGX_LINKS = (
-    ("在 App 開啟", "bingx://trade?symbol={symbol}"),
-    ("在網頁開啟", "https://bingx.com/en/standard/{symbol}"),
-    ("網頁(備用)", "https://bingx.com/en/futures/{symbol}"),
-)
+# 可以用環境變數覆蓋,免得為了改一條網址還要動程式碼:
+#   BINGX_LINK_TEMPLATE="https://…/{symbol}"
+import os as _os
+
+_TEMPLATE = _os.environ.get("BINGX_LINK_TEMPLATE", "").strip()
+
+#: 還沒有人證實過任何一條 deeplink。這個旗標讓面板說實話。
+BINGX_LINK_VERIFIED = bool(_TEMPLATE)
+
+
+def bingx_links(symbol: str) -> list:
+    """開啟 BingX 的連結。回 [(標籤, 網址)]。
+
+    沒設 `BINGX_LINK_TEMPLATE` 就只給網站首頁 —— **不猜 deeplink**。
+    """
+    if _TEMPLATE:
+        return [("在 BingX 開啟", _TEMPLATE.format(symbol=symbol))]
+    return [("開啟 BingX(首頁,要自己找合約)", "https://bingx.com/")]
+
 
 OPEN_LONG = "OPEN_LONG"
 OPEN_SHORT = "OPEN_SHORT"
@@ -150,6 +163,15 @@ class Ticket:
     checks: tuple = ()
     warnings: tuple = ()
 
+    #: **為什麼要開這一單。** 一張說不出理由的單不該被按下去 ——
+    #: 那等於把判斷外包給一個你看不見的東西。
+    reason: str = ""
+    #: 訊號當下的數字:(收盤, 均線, 距離%)。理由要有證據,不能只有結論。
+    signal: tuple | None = None
+    #: 目標權重從多少變到多少。
+    weight_from: float | None = None
+    weight_to: float | None = None
+
     # ── 有效性 ────────────────────────────────────────
     def expired_at(self, now: datetime | None = None) -> bool:
         return _iso(_utc(now)) > self.valid_until_utc
@@ -206,22 +228,67 @@ class Ticket:
         return "\n".join(lines)
 
     def links(self) -> list:
-        """開啟 BingX 的候選連結。**哪一條有效還沒被證實**(見 BINGX_LINKS)。"""
-        return [(label, tpl.format(symbol=self.symbol))
-                for label, tpl in BINGX_LINKS]
+        """開啟 BingX 的連結。見 `bingx_links` —— **不猜 deeplink**。"""
+        return bingx_links(self.symbol)
 
     def fields(self) -> list:
-        """要一個一個貼進 App 的欄位。(標籤, 值, 說明)
+        """BingX 標準合約開單畫面要填的每一格。(標籤, 值, 說明)
+
+        ═══ 順序照 App 的表單,不照我方便 ═══
+        2026-09-18 執政官:「我希望資訊是能比照 BingX 標準合約開單
+        畫面要填的資訊。」所以由上到下就是 App 上由上到下:
+        保證金模式 → 槓桿 → 方向 → 數量 → 止損。
+
+        ═══ 數量、保證金、交易總額**三個都給** ═══
+        BingX 的開單框可以用「數量」也可以用「保證金」下單,而它
+        顯示的是「交易總額」。**你會看到哪一個,我不知道** ——
+        所以三個都算好,填到哪一格就用哪一個。
+        少給一個,你就得在手機上自己乘除,而那是最容易打錯的一步。
 
         值是**乾淨的字串** —— 沒有千分位、沒有單位、沒有正負號裝飾,
         因為它要被原封不動貼進輸入框。多一個逗號就是一張被拒的單。
         """
         out = [
-            ("數量", f"{self.quantity:.10g}", ""),
-            ("槓桿", f"{self.leverage:.10g}", "倍"),
-            ("停損", f"{self.stop_price:.10g}",
-             "一定要設 —— 這是機器死掉時唯一的保護"),
+            ("保證金模式", self.margin_mode, "逐倉:這一倉爆掉不會拖累別倉"),
+            ("槓桿", f"{self.leverage:.10g}", ""),
+            ("方向", self.tap, ""),
+            ("數量", f"{self.quantity:.10g}", "幣數"),
         ]
+        if self.est_notional is not None:
+            out.append(("交易總額", f"{self.est_notional:.2f}",
+                        "USDT —— App 上多半顯示這個"))
+        if self.est_margin is not None:
+            out.append(("保證金", f"{self.est_margin:.2f}",
+                        "USDT —— 用保證金下單就填這格"))
+        out.append(("止損", f"{self.stop_price:.10g}",
+                    "一定要設 —— 這是機器死掉時唯一的保護"))
+        return out
+
+    def why(self) -> list:
+        """**為什麼要按這一單。** 結論 + 證據,不是只有結論。
+
+        一張說不出理由的單不該被按下去 —— 那等於把判斷外包給一個
+        你看不見的東西,而虧錢的時候你連哪裡想錯了都查不出來。
+        """
+        out = []
+        if self.reason:
+            out.append(("訊號", self.reason))
+        if self.signal:
+            px, ma, gap = self.signal
+            out.append(("證據",
+                        f"收盤 {px:,.6g} vs 50 日均線 {ma:,.6g},"
+                        f"{'高出' if gap >= 0 else '低於'} {abs(gap):.2f}%"))
+        if self.weight_from is not None and self.weight_to is not None:
+            out.append(("配置", f"目標權重 {self.weight_from:.1%} → "
+                                f"{self.weight_to:.1%}"))
+        if self.est_notional is not None and self.quantity:
+            out.append(("數量怎麼來的",
+                        f"權益 × 目標權重 ÷ 報價 {self.quoted_price:,.6g} "
+                        f"= {self.quantity:.8g},再套交易所的數量精度"))
+        out.append(("止損怎麼來的",
+                    f"進場價的 {abs((self.stop_price / self.quoted_price - 1)) * 100:.0f}%"
+                    " —— 這是災難後備,不是策略出場:策略出場是均線,"
+                    "而這一條只回答「機器死掉時這個倉最多虧多少」"))
         return out
 
     def to_dict(self) -> dict:
@@ -241,6 +308,9 @@ class Ticket:
             "est_notional": self.est_notional,
             "strategy": self.strategy, "signal_day": self.signal_day,
             "checks": list(self.checks), "warnings": list(self.warnings),
+            "reason": self.reason, "signal": self.signal,
+            "weight_from": self.weight_from, "weight_to": self.weight_to,
+            "why": self.why(),
         }
 
 
@@ -251,6 +321,9 @@ def build(symbol: str, action: str, quantity: float, price: float,
           ttl_min: int = DEFAULT_TTL_MIN,
           band_pct: float = DEFAULT_BAND_PCT,
           min_liq_distance_pct: float = 20.0,
+          reason: str = "", signal: tuple | None = None,
+          weight_from: float | None = None,
+          weight_to: float | None = None,
           now: datetime | None = None) -> Ticket:
     """開一張指令單。**任何一個閘沒過就拋,不印半張。**
 
@@ -326,6 +399,8 @@ def build(symbol: str, action: str, quantity: float, price: float,
         est_margin=margin, est_notional=notional,
         strategy=strategy, signal_day=signal_day,
         checks=tuple(checks), warnings=tuple(warnings),
+        reason=reason, signal=signal,
+        weight_from=weight_from, weight_to=weight_to,
     )
 
 
@@ -449,10 +524,25 @@ def make_tickets(plan: dict, stop_pct: float, leverage: float) -> tuple:
                 strategy=str(plan.get("cfg").strategy if plan.get("cfg")
                              else ""),
                 signal_day=str(plan.get("signal_day") or ""),
+                reason=str(getattr(order, "reason", "") or ""),
+                signal=_signal_of(plan, order.symbol),
+                weight_from=getattr(order, "weight_from", None),
+                weight_to=getattr(order, "weight_to", None),
             ))
         except TicketRefused as e:
             refused.append((order.symbol, str(e)))
     return made, refused
+
+
+def _signal_of(plan: dict, symbol: str):
+    """訊號當下的 (收盤, 均線, 距離%)。缺任何一個就回 None ——
+    **理由可以少一行證據,但不能有一行是編的。**"""
+    mas = plan.get("mas") or {}
+    prices = plan.get("prices") or {}
+    ma, px = mas.get(symbol), prices.get(symbol)
+    if not ma or not px:
+        return None
+    return (float(px), float(ma), (float(px) - float(ma)) / float(ma) * 100.0)
 
 
 # ══════════════════════════════════════════════════════════
