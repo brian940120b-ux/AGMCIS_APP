@@ -22,8 +22,9 @@
     (前 2/3 / 後 1/3),而且是**時序切分不是幣種切分**:
     這條策略的風險是時間上的過擬合(在已知的崩盤前離場)。
 
-三、**多重比較校正。** 試 32 次,最好的那一次「看起來贏」
-    幾乎是必然的。p 值乘上試過的次數(Bonferroni)才算數。
+三、**多重比較校正。** 試幾十次,最好的那一次「看起來贏」
+    幾乎是必然的。p 值乘上**有效**試驗次數(Bonferroni)才算數 ——
+    有效,是因為網格裡會有行為完全一樣的重複項,而那些不該各算一次。
     **試了幾次這個數字會被記在提案裡** —— 沒有它,
     「我們找到更好的了」這句話沒有意義。
 
@@ -152,32 +153,53 @@ def grid(incumbent: Variant) -> list:
 # 統計:試了很多次之後,「最好的那個」有多少是運氣
 # ══════════════════════════════════════════════════════════
 
-def block_bootstrap_pvalue(challenger_rets, incumbent_rets, *,
-                           paths: int = BOOTSTRAP_PATHS,
-                           block: int = BLOCK_DAYS,
-                           seed: int = 20260913) -> float | None:
-    """挑戰者的優勢是運氣的機率(單尾)。
+def _calmar_of(rets, periods_per_year: float = 365.0) -> float | None:
+    """一條日報酬序列的 Calmar(年化報酬 ÷ 最大回撤)。"""
+    if not rets:
+        return None
+    equity, peak, mdd = 1.0, 1.0, 0.0
+    for r in rets:
+        equity *= (1.0 + r)
+        peak = max(peak, equity)
+        if peak > 0:
+            mdd = max(mdd, (peak - equity) / peak)
+    if equity <= 0 or mdd <= 1e-9:
+        return None
+    years = len(rets) / periods_per_year
+    if years <= 0:
+        return None
+    return (equity ** (1.0 / years) - 1.0) / mdd
 
-    ═══ 做法:配對差值 + 區塊 bootstrap + **置中的虛無** ═══
-    一、先算逐日**差值** d[i] = 挑戰者[i] − 現任[i]。
-        配對是關鍵:兩邊看的是同一天的市場,所以差值裡沒有
-        「抽到不同時期」的雜訊,只有策略的差別。
-    二、把 d **減掉它自己的平均**,得到一條「沒有優勢」的序列 ——
-        這就是虛無假設長的樣子。
-    三、從那條置中序列裡**按區塊**重抽,看重抽出來的平均
-        還有多常大到跟觀察值一樣。
 
-    ═══ 第二步是我第一版漏掉的,而漏掉它整個統計就是錯的 ═══
-    第一版直接從原始資料重抽 —— 但原始資料**含有那個效果**,
-    所以重抽出來的差值圍繞著觀察值而不是零,`P(重抽 ≥ 觀察)` 會
-    趨近 0.5。那不是 p 值,那是一個看起來像 p 值的數字。
-    測試 `test_a_clearly_better_challenger_gets_a_small_p` 抓到它:
-    一條每天都穩定贏 0.4% 的序列被算出 p=0.17。
+def calmar_bootstrap(challenger_rets, incumbent_rets, *,
+                     paths: int = BOOTSTRAP_PATHS,
+                     block: int = BLOCK_DAYS,
+                     seed: int = 20260913) -> float | None:
+    """重抽之後,挑戰者**還是輸**的比例。當成 p 值用。
 
-    ═══ 為什麼要 block ═══
-    日報酬有自相關(趨勢策略尤其明顯:連續在場的日子長得像)。
-    逐日獨立重抽會打散那個結構,讓路徑看起來比實際平順,於是
-    低估風險、高估顯著性 —— 而那個方向剛好是「讓提案容易通過」。
+    ═══ 2026-09-18:上一版測錯了東西 ═══
+    上一版 bootstrap 的是**平均日報酬**的差。但整套挑選的準則是
+    **Calmar**(年化 ÷ 最大回撤)—— 兩件事不一樣:
+
+      實測:100 日均線的驗證段 Calmar 0.65 > 現任 0.48,**而它的
+      平均日報酬比現任低**。它贏在回撤小,不是贏在報酬高。
+
+    於是舊版對它回 p=1.0(「根本沒贏」),而閘門說它贏了 0.17 Calmar。
+    **一個用 A 挑、用 B 檢定的流程,永遠檢定不到它挑的東西。**
+    一個靠降低回撤取勝的挑戰者在舊版裡**永遠**過不了。
+
+    ═══ 這個數字是什麼,以及它不是什麼 ═══
+    做法:把兩條日報酬**配對**按區塊重抽(同一組索引,所以看的是
+    同一段市場),每次重建兩條權益曲線、各算一次 Calmar,
+    數挑戰者沒贏的比例。
+
+    ⚠️ **這不是嚴格的虛無假設檢定。** 它量的是「重抽的歷史裡,
+    這個優勢有多常站得住」—— 也就是**重抽不確定性**,不是一個
+    置中虛無下的尾機率。Calmar 是比值又是路徑統計量,置中沒有
+    一個誠實的做法,而硬做一個出來會比說清楚更糟。
+
+    所以它被當成 p 值丟進 Bonferroni 是一個**近似**。近似的方向:
+    它比真正的 p 值**寬鬆**,所以校正後的門檻要當成下限而不是保證。
     """
     n = min(len(challenger_rets or []), len(incumbent_rets or []))
     if n < block * 3:
@@ -185,34 +207,56 @@ def block_bootstrap_pvalue(challenger_rets, incumbent_rets, *,
 
     a = list(challenger_rets)[-n:]
     b = list(incumbent_rets)[-n:]
-    diff = [a[i] - b[i] for i in range(n)]
-    observed = sum(diff) / n
-    if observed <= 0:
-        return 1.0                       # 根本沒贏
+    base_a, base_b = _calmar_of(a), _calmar_of(b)
+    if base_a is None or base_b is None or base_a <= base_b:
+        return 1.0                       # 原始樣本就沒贏
 
-    centred = [x - observed for x in diff]      # ← 虛無:沒有優勢
     rng = random.Random(seed)
     starts = max(1, n - block)
-    hits = 0
+    losses = 0
     for _ in range(paths):
-        total = 0.0
-        count = 0
-        while count < n:
+        ra, rb = [], []
+        while len(ra) < n:
             i = rng.randrange(starts)
             for j in range(i, min(i + block, n)):
-                total += centred[j]
-                count += 1
-                if count >= n:
+                ra.append(a[j])
+                rb.append(b[j])
+                if len(ra) >= n:
                     break
-        if total / n >= observed:
-            hits += 1
-    return hits / paths
+        ca, cb = _calmar_of(ra), _calmar_of(rb)
+        if ca is None or cb is None or ca <= cb:
+            losses += 1
+    return losses / paths
+
+
+def effective_trials(results) -> int:
+    """真正獨立的試驗有幾次。
+
+    ═══ 2026-09-18:網格裡有一半是重複的 ═══
+    實測發現 `lev2` 與 `lev3` 每一組的訓練/驗證/回撤**完全一樣** ——
+    波動目標在 15~35% 之間時,總曝險根本碰不到槓桿上限,所以那個
+    參數是**惰性的**。47 種裡大約一半是同一個東西換個名字。
+
+    而 Bonferroni 乘的是「試了幾次」。把重複的各算一次,等於**無中
+    生有地加嚴了校正** —— 一個真的有效的改良會因為我把網格寫得太
+    冗餘而被擋掉。那不是保守,那是算錯。
+
+    `results` 是 [(訓練指標, 驗證指標)],用四捨五入後的結果去重。
+    """
+    seen = set()
+    for train, test in results:
+        seen.add((
+            round(float(train.get("calmar") or -99), 4),
+            round(float(test.get("calmar") or -99), 4),
+            round(float(test.get("max_dd_pct") or -1), 3),
+        ))
+    return max(1, len(seen))
 
 
 def bonferroni(p: float | None, trials: int) -> float | None:
     """試了 `trials` 次,最好的那一次的 p 值要乘上 `trials`。
 
-    **這是整支檔案最重要的一行。** 試 32 次,其中一次「看起來贏」
+    **這是整支檔案最重要的一行。** 試幾十次,其中一次「看起來贏」
     幾乎是必然的 —— 不校正的話,這個引擎每次都會找到一個提案,
     而那些提案平均而言一文不值。
     """
@@ -353,7 +397,8 @@ def judge_challenger(incumbent: Variant, challenger: Variant, *,
         p_corr is not None and p_corr < ALPHA,
         f"原始 p={p_raw if p_raw is None else round(p_raw, 4)}"
         f" × 試過 {trials} 次 = {p_corr if p_corr is None else round(p_corr, 4)}"
-        " —— 試 32 次,其中一次看起來贏幾乎是必然的")
+        f" —— 試 {trials} 次(已去掉行為重複的),"
+        "其中一次看起來贏幾乎是必然的")
 
     return Proposal(
         proposal_id=proposal_id(incumbent, challenger, as_of),

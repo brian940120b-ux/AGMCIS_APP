@@ -146,19 +146,60 @@ def test_a_challenger_that_never_wins_gets_p_one():
     rng = random.Random(1)
     inc = [rng.gauss(0.001, 0.02) for _ in range(400)]
     cha = [x - 0.002 for x in inc]
-    assert R.block_bootstrap_pvalue(cha, inc) == 1.0
+    assert R.calmar_bootstrap(cha, inc, paths=200) == 1.0
 
 
 def test_a_clearly_better_challenger_gets_a_small_p():
     rng = random.Random(2)
-    inc = [rng.gauss(0.0, 0.01) for _ in range(600)]
-    cha = [x + 0.004 for x in inc]
-    p = R.block_bootstrap_pvalue(cha, inc, paths=400)
+    inc = [rng.gauss(0.0005, 0.02) for _ in range(800)]
+    cha = [r * 0.5 + 0.0006 for r in inc]      # 一半波動、略高報酬
+    p = R.calmar_bootstrap(cha, inc, paths=300)
     assert p is not None and p < 0.05
 
 
+def test_the_test_is_on_calmar_because_that_is_what_we_select_on():
+    """**用 A 挑、用 B 檢定的流程,檢定不到它挑的東西。**
+
+    2026-09-18 實測抓到:100 日均線的驗證段 Calmar 0.65 > 現任 0.48,
+    **而它的平均日報酬比現任低** —— 它贏在回撤小。
+    舊版 bootstrap 平均日報酬,對它回 p=1.0(「根本沒贏」),
+    於是一個靠降低回撤取勝的挑戰者**永遠**過不了。
+    """
+    rng = random.Random(7)
+    inc = [rng.gauss(0.0012, 0.03) for _ in range(800)]
+    cha = [r * 0.35 + 0.0004 for r in inc]      # 報酬低很多,但回撤小很多
+
+    assert sum(cha) / len(cha) < sum(inc) / len(inc), "挑戰者報酬確實較低"
+    assert R._calmar_of(cha) > R._calmar_of(inc), "但 Calmar 較高"
+    assert R.calmar_bootstrap(cha, inc, paths=300) < 0.5, \
+        "檢定要看得到這個優勢 —— 舊版看不到"
+
+
 def test_too_short_a_sample_gives_no_number_rather_than_a_bad_one():
-    assert R.block_bootstrap_pvalue([0.01] * 10, [0.0] * 10) is None
+    assert R.calmar_bootstrap([0.01] * 10, [0.0] * 10) is None
+
+
+# ══════════════════════════════════════════════════════════
+# 有效試驗次數
+# ══════════════════════════════════════════════════════════
+def test_duplicate_variants_count_as_one_trial():
+    """**乘名目次數 = 無中生有地加嚴校正。**
+
+    2026-09-18 實測:波動目標 15~35% 時總曝險碰不到槓桿上限,
+    所以 lev2 與 lev3 每一組的訓練/驗證/回撤完全一樣 ——
+    47 種裡大約一半是同一個東西換個名字。
+    """
+    same = (m(1.2), m(0.6))
+    other = (m(1.5), m(0.7))
+    assert R.effective_trials([same, same, same]) == 1
+    assert R.effective_trials([same, other]) == 2
+    assert R.effective_trials([]) == 1, "至少算一次,不准回 0"
+
+
+def test_effective_trials_looks_at_behaviour_not_names():
+    a = ({"calmar": 1.2000001}, {"calmar": 0.6, "max_dd_pct": 10.0})
+    b = ({"calmar": 1.2000002}, {"calmar": 0.6, "max_dd_pct": 10.0})
+    assert R.effective_trials([a, b]) == 1
 
 
 # ══════════════════════════════════════════════════════════
