@@ -46,7 +46,10 @@ ENTRY_POINTS = {
     "positions_from": "exchange/bingx/standard_usdt.py",
     "liquidation_price": "exchange/bingx/standard_usdt.py",
     "judge_challenger": "portfolio/research.py",
-    "block_bootstrap_pvalue": "portfolio/research.py",
+    # 2026-09-18 改名:block_bootstrap_pvalue → calmar_bootstrap
+    # (舊版檢定平均日報酬,而挑選的準則是 Calmar)。
+    "calmar_bootstrap": "portfolio/research.py",
+    "effective_trials": "portfolio/research.py",
     "decide": "portfolio/research.py",
     "merge": "portfolio/research.py",
     "summary": "portfolio/screen.py",
