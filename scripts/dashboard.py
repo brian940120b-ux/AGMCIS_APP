@@ -423,7 +423,6 @@ def _ticket_card(t) -> str:
                if note else '')
             + '</td></tr>'
             for label, value, note in t.fields())
-        +
         # 填完之後用來核對的 —— 不是拿來填的
         + '<tr><td colspan="2" class="sect">填完之後畫面上應該是</td></tr>'
         + "".join(

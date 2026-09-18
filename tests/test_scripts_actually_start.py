@@ -140,12 +140,37 @@ def test_the_dashboard_really_starts_the_way_systemd_starts_it():
                     "面板當成腳本跑會當場死掉 —— systemd 就是這樣跑的:\n"
                     + out[-1500:])
             time.sleep(0.5)
-            # 綁上埠就算起來了
             import socket
             with socket.socket() as s:
                 if s.connect_ex(("127.0.0.1", 8791)) == 0:
-                    return
-        pytest.fail("30 秒還沒綁上埠")
+                    break
+        else:
+            pytest.fail("30 秒還沒綁上埠")
+
+        # ── 綁上埠不等於渲染得出來 ────────────────────────
+        # 2026-09-18:面板整頁只剩一行「面板渲染失敗:TypeError」,
+        # 而這條測試在上面那個 connect_ex == 0 就 return 了,全綠。
+        # handler 把例外接住、回 200、印一行字 —— systemd 說 active、
+        # deploy.sh 說換好了、/health 是好的。只有真的打開頁面的人知道。
+        # 所以現在真的抓一次。
+        #
+        # **但這條守不住全部。** 它只跑得到「這台機器此刻的資料
+        # 產得出來的那些卡」—— 沒有訊號就沒有指令單,那張卡的程式碼
+        # 一行都不會被執行到。實測:把上面那個 bug 放回去,這條照樣綠,
+        # 抓到它的是 test_dashboard_renders.py 那四條。
+        # 這條測的是「整頁組得起來」,逐塊的死活在那邊。
+        page = _fetch("http://127.0.0.1:8791/")
+        assert "面板渲染失敗" not in page, (
+            "頁面回 200,但內容是渲染失敗:\n" + page[:800])
+        assert "AGMCIS" in page and "</html>" in page, (
+            "頁面沒渲染完整:\n" + page[:800])
     finally:
         proc.kill()
         proc.wait(timeout=10)
+
+
+def _fetch(url: str) -> str:
+    """離線時面板會退化成本地快取,重試會拖到十幾秒 —— 等它。"""
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read().decode("utf-8", "replace")
