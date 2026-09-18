@@ -539,6 +539,7 @@ def build(symbol: str, action: str, quantity: float, price: float,
           weight_to: float | None = None,
           exit_price: float | None = None,
           exit_rule: str = "",
+          stale_price: float | None = None,
           now: datetime | None = None) -> Ticket:
     """開一張指令單。**任何一個閘沒過就拋,不印半張。**
 
@@ -548,6 +549,16 @@ def build(symbol: str, action: str, quantity: float, price: float,
     """
     if action not in _ACTIONS:
         raise TicketRefused(f"不認得的動作 {action!r}")
+    # 報價不是現價的時候**一定要講**。一張用昨天開盤價報的單,
+    # 跟一張用現價報的,在畫面上長得一模一樣 —— 而前者的本金、數量、
+    # 止損全部是照一個已經不存在的價格算的。
+    stale_note = None
+    if stale_price:
+        stale_note = (
+            f"⚠️ **問不到現價,這張單是用訊號日的開盤價 "
+            f"{float(stale_price):,.6g} 報的** —— 本金、數量、止損"
+            "全部照那個價格算。**按之前先對一下交易所現價**,"
+            "差超過 1% 就不要按,等下一張。")
     if quantity <= 0:
         raise TicketRefused(f"數量要是正數,收到 {quantity}")
     if price <= 0:
@@ -575,6 +586,8 @@ def build(symbol: str, action: str, quantity: float, price: float,
     margin = notional / leverage if leverage else None
 
     checks, warnings = [], [PRODUCT_WARNING]
+    if stale_note:
+        warnings.append(stale_note)
 
     # 閘一:停損要在強平之前。**擺在強平後面的停損等於沒有停損。**
     if liq is not None:
@@ -717,24 +730,59 @@ def app_symbol(symbol: str) -> str:
     return symbol.replace("-", "")
 
 
-def make_tickets(plan: dict, stop_pct: float, leverage: float) -> tuple:
+def make_tickets(plan: dict, stop_pct: float, leverage: float,
+                 marks: dict | None = None) -> tuple:
     """把今日訂單變成指令單。
+
+    ═══ marks:**用現價報價,不要用昨天的開盤價** ═══
+    2026-09-18 執政官:「價格跟交易所不一樣啊。」
+
+    對。`Order.price` 是 `plan()` 裡的 `idx[s][exec_day].o` ——
+    **成交日那根日線的開盤價**,註解自己寫著「預期成交價(隔日開盤)」。
+    那是給回測用的:訊號用收盤、成交在隔日開盤,兩邊隔一個可交易的
+    間隙。但人是**現在**在按的,而現在離那個開盤最多差 24 小時。
+
+    後果不只是數字難看:本金、數量、止損全部是照那個價格算的,
+    所以照著填會用一個錯的規模去冒一個不是原本那個的風險 ——
+    而這張單自己的價格帶是 ±1%,它**照自己的規則早就作廢了**。
+
+    所以有現價就用現價報價。**維持的是名目金額**(那才是策略指定的
+    東西:權益 × 目標權重),數量跟著現價重算。
+
+    ⚠️ 平倉單不重算數量 —— 平 5.4 顆就是 5.4 顆,跟價格無關。
+    
 
     回 (開得出來的, 開不出來的)。**開不出來的不會消失** ——
     一張被閘門擋下的單如果安靜地不見了,看板上就會是「今天沒事」,
     而實際上是「今天有事,但系統拒絕告訴你」。
     """
+    px = {app_symbol(k): float(v) for k, v in (marks or {}).items() if v}
     made, refused = [], []
     for order in plan.get("orders") or []:
         is_close = getattr(order, "weight_to", 0.0) == 0.0
         action = (CLOSE if is_close else
                   OPEN_LONG if order.side == "BUY" else OPEN_SHORT)
+        sym = app_symbol(order.symbol)
+
+        # 現價優先。拿不到就退回開盤價,**而那件事會寫在警語裡** ——
+        # 一張用昨天價格報的單看起來跟用現價報的一模一樣。
+        live = px.get(sym)
+        price = live if live else order.price
+        if is_close:
+            qty = abs(order.qty)          # 平倉的量與價格無關
+        elif live and order.price:
+            # 維持名目(權益 × 目標權重),數量跟著現價走
+            qty = abs(order.qty) * float(order.price) / float(live)
+        else:
+            qty = abs(order.qty)
+
         try:
             made.append(build(
-                symbol=app_symbol(order.symbol),
+                symbol=sym,
                 action=action,
-                quantity=abs(order.qty),
-                price=order.price,
+                quantity=qty,
+                price=price,
+                stale_price=(None if live else order.price),
                 leverage=leverage,
                 stop_pct=stop_pct,
                 strategy=str(plan.get("cfg").strategy if plan.get("cfg")

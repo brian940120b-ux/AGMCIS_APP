@@ -466,9 +466,14 @@ def _ticket_card(t, now=None) -> str:
     # 正是要測的東西。生產上照樣是 None = 現在。
     dead = t.expired_at(now)
     cls = "ticket gone" if dead else "ticket"
+    # 價格帶帶進 DOM —— executable()/price_in_band() 寫好了,但**面板
+    # 從來沒呼叫過**(2026-09-18 查出來,這是「寫好沒接上」的第四次)。
+    # 一張照自己規則早該作廢的單還能按,那條規則等於不存在。
     return (
         f'<div class="{cls}" '
-        f'data-until="{html.escape(t.valid_until_utc)}">'
+        f'data-until="{html.escape(t.valid_until_utc)}" '
+        f'data-sym="{html.escape(t.symbol)}" '
+        f'data-lo="{t.price_low:.10g}" data-hi="{t.price_high:.10g}">'
         f'<div class="t-head"><span class="sym">'
         f'{html.escape(t.symbol)}</span>'
         + ('<span class="pill p-dead">已過期 · 不要按</span>' if dead else
@@ -515,7 +520,9 @@ def _ticket_card(t, now=None) -> str:
             for label, value, note in t.exit_plan())
         +
         f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
-        f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
+        f'{t.price_high:,.6g}'
+        '<div class="why">交易所現價 <span class="tnow">—</span>'
+        ' —— 跑出這個範圍就作廢,等下一張</div>'
         '</td></tr>'
         # 手機上讀 UTC 字串沒有意義 —— 要的是「還剩多久」。
         # 那個倒數由前端每秒更新(伺服器算的只是第一幀)。
@@ -595,7 +602,16 @@ def block_tickets() -> str:
                 return {"error": p["error"]}
             if BACKSTOP_PCT is None:
                 return {"error": "BACKSTOP_PCT 還沒有人決定(§102)"}
-            made, refused = make_tickets(p, BACKSTOP_PCT, LEVERAGE_CAP)
+            # **用現價報價。** plan() 給的是成交日那根日線的開盤價
+            # (回測的節奏),而人是現在在按的 —— 兩者最多差 24 小時,
+            # 而本金/數量/止損全部照報價算。2026-09-18 執政官:
+            # 「價格跟交易所不一樣啊。」
+            try:
+                _, live_marks, _, _, _ = sim_marks()
+            except Exception:                        # noqa: BLE001
+                live_marks = {}
+            made, refused = make_tickets(p, BACKSTOP_PCT, LEVERAGE_CAP,
+                                         marks=live_marks)
 
             # ── 對齊單 ────────────────────────────────────
             # 上面那批是**鏡像**:模擬今天要換手什麼,就推什麼。
@@ -977,7 +993,7 @@ def sim_snapshot() -> dict:
             a, marks, _, age, src = sim_marks()
             lv = live(a, marks)
             return {"live": lv, "card": score(), "age_s": age,
-                    "source": src}
+                    "source": src, "marks": marks}
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
     # 1 秒。串流是逐筆推的,快取放 15 秒等於把即時壓回 15 秒一跳。
@@ -1001,6 +1017,16 @@ def sim_payload() -> dict:
                 "excess_pct": lv.excess_pct,
                 "unrealized": lv.unrealized_pnl,
                 "realized": lv.realized_pnl,
+                # 指令單的價格帶檢查要用同一組價格 —— 卡上顯示的現價
+                # 與判斷作廢的現價必須是同一個,不然會出現「顯示在帶內
+                # 卻被撤掉」這種說不清楚的狀況。
+                #
+                # ⚠️ 用 marks 不是 lv.legs:legs 只有**持倉中**的幣,
+                # 而需要價格帶檢查的正是**還沒開的那些**。
+                # 用 legs 的話,開倉單一張都檢查不到 —— 而那剛好是
+                # 唯一會因為價格跑掉而害人填錯規模的一種單。
+                "marks": {k.replace("-", ""): v
+                          for k, v in (got.get("marks") or {}).items()},
                 "rows": _sim_rows(lv)}
     except Exception as e:                           # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}
@@ -1813,6 +1839,37 @@ connect();
 
    撤掉 ≠ 消失:一張安靜不見的單會讓畫面變成「今天沒有要按的」,
    而那是假話 —— 實際上是「有,但窗口關了」。                     */
+/* 價格帶 —— 用串流回來的現價檢查每一張單還算不算數。
+   ticket.price_in_band() 在伺服器端寫好了但沒有人呼叫;而真正需要
+   它的時刻是**頁面開著、價格在動**的時候,所以判斷放在這裡最直接。
+   跑出帶外就跟過期一樣撤掉:數量與止損是照報價算的,價格走了 1%,
+   那個數量代表的風險就不是原本那個了。                          */
+function tickBand(marks){{
+  document.querySelectorAll('.ticket[data-sym]').forEach(function(el){{
+    var now = marks[el.dataset.sym];
+    if(now === undefined || now === null) return;
+    var cell = el.querySelector('.tnow');
+    if(cell) cell.textContent = now.toLocaleString(undefined,
+      {{minimumFractionDigits:2, maximumFractionDigits:6}});
+    var lo = parseFloat(el.dataset.lo), hi = parseFloat(el.dataset.hi);
+    if(!(now < lo || now > hi)) return;
+    if(el.classList.contains('gone')) return;
+    el.classList.add('gone');
+    var pill = el.querySelector('.t-head .pill');
+    if(pill){{ pill.className = 'pill p-dead';
+               pill.textContent = '價格跑掉了 · 不要按'; }}
+    var head = el.querySelector('.t-head');
+    if(head && !el.querySelector('.tdead')){{
+      var d = document.createElement('div');
+      d.className = 'flag warn tdead';
+      d.innerHTML = '現價已經跑出這張單的有效範圍 —— <b>不要照它按</b>。'
+        + '本金與止損是照報價算的,價格走掉之後那個數量代表的風險'
+        + '就不是原本那個了。系統會用新價格重算,幾分鐘內會再推一張。';
+      head.parentNode.insertBefore(d, head.nextSibling);
+    }}
+  }});
+}}
+
 function tickExpiry(){{
   var now = Date.now();
   document.querySelectorAll('.ticket[data-until]').forEach(function(el){{
@@ -1895,6 +1952,7 @@ function simApply(d){{
   simPut('s-rea', simNum(d.realized, 2, true), d.realized);
   var body = document.getElementById('s-legs');
   if(body && d.rows) body.innerHTML = d.rows;
+  if(d.marks) tickBand(d.marks);
   /* 說得出**來源**與**年齡**的才叫即時。
      「每 N 秒更新」只是我們問的頻率;那筆價格本身有多舊是另一回事,
      而後者才是真正的尺度。說不出年齡的「即時」是沒有證據的話。 */

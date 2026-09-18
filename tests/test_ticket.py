@@ -500,3 +500,84 @@ def test_a_verified_template_can_be_supplied_without_touching_code(monkeypatch):
     finally:
         monkeypatch.delenv("BINGX_LINK_TEMPLATE")
         importlib.reload(mod)
+
+
+# ══════════════════════════════════════════════════════════
+# 報價必須是**現在**的價格 · 2026-09-18
+# ══════════════════════════════════════════════════════════
+#
+# 執政官:「價格跟交易所不一樣啊。」
+#
+# 對。plan() 的 prices 是 `idx[s][exec_day].o` —— 成交日那根日線的
+# **開盤價**,Order.price 的註解自己寫著「預期成交價(隔日開盤)」。
+# 那是回測的節奏(訊號用收盤、成交在隔日開盤,中間隔一個可交易的
+# 間隙)。但人是**現在**在按的,而現在離那個開盤最多差 24 小時。
+#
+# 後果不只是數字難看:本金、數量、止損全部照那個價格算,所以照著填
+# 會用一個錯的規模去冒一個不是原本那個的風險 —— 而這張單自己的價格帶
+# 是 ±1%,它照自己的規則早就作廢了。
+
+class _Order:
+    def __init__(self, symbol, side, qty, price, notional, weight_to=0.14):
+        self.symbol, self.side, self.qty = symbol, side, qty
+        self.price, self.notional = price, notional
+        self.reason, self.weight_from, self.weight_to = "", 0.0, weight_to
+
+
+def _plan(order):
+    return {"orders": [order], "signal_day": "2026-09-18", "cfg": None,
+            "prices": {order.symbol: order.price}}
+
+
+def test_a_ticket_is_quoted_at_the_live_price_not_yesterdays_open():
+    from portfolio.ticket import make_tickets
+    o = _Order("BTC-USDT", "BUY", 0.01, 70000.0, 700.0)
+    made, refused = make_tickets(_plan(o), 25.0, 3.0,
+                                 marks={"BTC-USDT": 77000.0})
+    assert not refused, refused
+    assert made[0].quoted_price == 77000.0, "報的還是日線開盤價"
+
+
+def test_requoting_keeps_the_notional_the_strategy_asked_for():
+    """**維持的是名目金額**(權益 × 目標權重)—— 那才是策略指定的東西。
+
+    價格漲了就少買幾顆,不是照舊顆數買下去:照舊顆數會讓這一檔的
+    曝險跟著價格一起長大,而目標權重根本沒變。
+    """
+    from portfolio.ticket import make_tickets
+    o = _Order("BTC-USDT", "BUY", 0.01, 70000.0, 700.0)
+    made, _ = make_tickets(_plan(o), 25.0, 3.0, marks={"BTC-USDT": 77000.0})
+    assert made[0].quantity * 77000.0 == pytest.approx(700.0)
+
+
+def test_a_close_ticket_keeps_its_quantity_whatever_the_price_does():
+    """平 5.4 顆就是 5.4 顆。按名目重算會讓平倉平不乾淨,
+    而殘倉是沒有人在管的倉。"""
+    from portfolio.ticket import make_tickets
+    o = _Order("BTC-USDT", "SELL", 5.4, 70000.0, 378000.0, weight_to=0.0)
+    made, _ = make_tickets(_plan(o), 25.0, 3.0, marks={"BTC-USDT": 77000.0})
+    assert made[0].quantity == 5.4
+
+
+def test_without_a_live_price_the_ticket_says_it_is_quoting_stale():
+    """一張用昨天開盤價報的單,跟一張用現價報的,在畫面上長得一模一樣。"""
+    from portfolio.ticket import make_tickets
+    o = _Order("BTC-USDT", "BUY", 0.01, 70000.0, 700.0)
+    made, _ = make_tickets(_plan(o), 25.0, 3.0, marks={})
+    assert made[0].quoted_price == 70000.0
+    warns = " ".join(made[0].warnings)
+    assert "問不到現價" in warns and "先對一下交易所現價" in warns
+
+
+def test_the_price_band_is_actually_enforced_somewhere():
+    """`price_in_band()` 2026-09-13 就寫好了,而面板**從來沒呼叫過**
+    —— 「寫好沒接上」的第四次。一張照自己規則早該作廢的單還能按,
+    那條規則等於不存在。
+
+    現在由前端拿串流價檢查(那正是它該發生的時刻:頁面開著、價格在動)。
+    """
+    import scripts.dashboard as dash
+    page = dash.render()
+    assert "function tickBand(" in page
+    assert "data-lo=" in dash._ticket_card(a_ticket())
+    assert "價格跑掉了 · 不要按" in page
