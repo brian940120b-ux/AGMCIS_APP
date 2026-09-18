@@ -364,88 +364,6 @@ def tone(v: float) -> str:
 # ══════════════════════════════════════════════════════════
 # 區塊
 # ══════════════════════════════════════════════════════════
-def block_account() -> str:
-    """帳戶。數字帶 id,由 /api/live 每 10 秒就地更新(不重載整頁)。
-
-    ═══ 記帳權益 vs 即時權益 ═══
-    記帳是每日一次(訊號用收盤、成交在隔日開盤)—— 那是策略的節奏。
-    即時是每 10 秒 —— 那只給人看,**不進任何決策、不寫任何帳本**。
-    讓即時價格進到決策裡,策略就從日線變成盯盤,
-    而回測的 Calmar 1.33 是在日線規則下算出來的。
-    """
-    a = _json(DATA / "portfolio_account.json")
-    if not a:
-        return ('<div class="card"><h2>部位大小的依據(紙上權益)</h2>'
-                '<p class="note">尚未記帳 —— 每日 00:30 UTC 自動執行。'
-                '<b>沒有它就算不出指令單的數量。</b></p></div>')
-    eq = float(a.get("equity", 0) or 0)
-    ret = float(a.get("return_pct", 0) or 0)
-    # BingX 的「已實現盈虧」是**扣完手續費與資金費的淨額**
-    # (原文:Realized PnL = 已平倉損益 − 交易手續費 − 資金費)。
-    # 面板顯示淨額以與交易所一致;毛額與各項成本在下方註解列出。
-    rp_gross = float(a.get("realized_pnl", 0) or 0)
-    rp = float(a.get("realized_pnl_net", rp_gross) or 0)
-    up = float(a.get("unrealized_pnl", 0) or 0)
-    dd = float(a.get("drawdown_pct", 0) or 0)
-    cells = [
-        f'<div class="kv"><div class="l">可用保證金</div>'
-        f'<div class="v" id="k-cash">'
-        f'{float(a.get("available_margin", a.get("cash", 0))):,.0f}</div></div>',
-        f'<div class="kv"><div class="l">已用保證金</div>'
-        f'<div class="v" id="k-um">{float(a.get("used_margin", 0)):,.0f}</div>'
-        '</div>',
-        f'<div class="kv"><div class="l">已實現</div>'
-        f'<div class="v {tone(rp)}" id="k-rp">{rp:+,.2f}</div></div>',
-        f'<div class="kv"><div class="l">未實現</div>'
-        f'<div class="v {tone(up)}" id="k-up">{up:+,.2f}</div></div>',
-        f'<div class="kv"><div class="l">曝險</div>'
-        f'<div class="v" id="k-ex">{float(a.get("exposure", 0)):.0%}</div></div>',
-        f'<div class="kv"><div class="l">回撤</div>'
-        f'<div class="v {"up" if dd <= 15 else "down"}" id="k-dd">'
-        f'{dd:.2f}%</div></div>',
-        kv("成交", f"{a.get('orders_filled', 0)} 單"),
-        kv("記帳", f"{a.get('days', 0)} 天"),
-        kv("累計成本",
-           f"{float(a.get('fee_paid', 0)) + float(a.get('funding_paid', 0)):,.2f}"),
-    ]
-    return ('<div class="card"><h2>部位大小的依據(紙上權益) '
-            '<span class="live-dot" id="live-dot"></span>'
-            '<span class="live-t" id="live-t">即時</span></h2>'
-            f'<div class="big {tone(ret)}" id="k-eq">{eq:,.2f}'
-            '<span style="font-size:14px;color:var(--dim)"> USDT</span></div>'
-            f'<div class="sub {tone(ret)}" id="k-ret">{ret:+.2f}% · 起始 '
-            f'{float(a.get("start_equity", 10000)):,.0f}</div>'
-            f'<div class="grid">{"".join(cells)}</div>'
-            f'<p class="note">策略 <b>{html.escape(str(a.get("strategy", "—")))}'
-            # 2026-09-10 改寫:原本寫「槓桿上限 20×(實際使用約 0.5×)」——
-            # 那個括號讓人以為安全,但 0.5× 是**帳戶曝險**,而每一倉的槓桿
-            # 是 20×、強平距離只有 4.5%。09-10 UNI 就是這樣被強平的,
-            # 而查下去六個倉全在懸崖邊(BNB 只剩 0.14%)。
-            # 面板必須直接顯示**逐倉強平距離**,那才是會殺死部位的數字。
-            f'</b> · 逐倉槓桿 <b>{float(a.get("leverage", 1)):.0f}×</b>'
-            f'(強平距離 {(1 / max(float(a.get("leverage", 1)), 1e-9) - float(a.get("maint_margin_rate", 0.005))) * 100:.1f}%'
-            f' —— 單幣逆向走這麼多,那一倉就歸零)· '
-            f'帳戶曝險 {float(a.get("exposure", 0)):.0%}(由波動公式決定,'
-            f'與強平距離無關)· 逐倉 · '
-            f'維持保證金率 {float(a.get("maint_margin_rate", 0.005)):.2%}<br>'
-            f'錢包餘額 {float(a.get("balance", 0)):,.2f} · 手續費 '
-            f'{float(a.get("fee_paid", 0)):,.2f} · 資金費 '
-            f'{float(a.get("funding_paid", 0)):,.2f} USDT<br>'
-            f'「已實現」為交易所定義的<b>淨額</b>(平倉損益 '
-            f'{rp_gross:+,.2f} − 手續費 − 資金費)· 資金費逐幣各收自己的'
-            f'費率,每 8 小時結算一次(00/08/16 UTC)<br>'
-            '<b>即時盈虧每 10 秒更新</b>,只給人看 —— '
-            '記帳仍是每日一次(訊號用收盤、成交在隔日開盤),'
-            '即時價格不進任何決策。</p>'
-            '<div class="flag">⚠️ <b>這是紙上帳本,不是交易所的帳。</b>'
-            '它在這裡的唯一理由是:<b>指令單的數量是照這個權益算出來的</b>。'
-            '真正的帳在上面那塊「交易所帳戶」。<br>'
-            '而它模擬的是<b>永續</b>的成本(資金費、費率),'
-            'U 本位標準合約的成本一個字都還沒驗證過 —— '
-            '所以這裡的損益是一個<b>參考值</b>,不是這個產品的績效。'
-            '</div></div>')
-
-
 def _build():
     """這個行程跑的是哪一版。
 
@@ -512,6 +430,35 @@ def _ticket_card(t) -> str:
             for label, url in t.links())
         + '</div>'
         + warn + '</div>')
+
+
+def sizing_basis() -> str:
+    """指令單的數量是照什麼算出來的 —— **一行,不是一張卡。**
+
+    2026-09-18 執政官:「我現在只要標準合約的,其他的一律我不想看到。」
+
+    原本這裡有一整張「部位大小的依據(紙上權益)」:權益、可用保證金、
+    已實現、未實現、曝險、回撤、手續費、**資金費**…… 而那些是
+    **永續**的成本模型算出來的,不是 U 本位標準合約的。
+
+    整張拿掉。但**不能整個藏起來** —— 指令單上每一個數量都是拿這個
+    權益乘出來的,看不到它就等於看不到「為什麼是這個量」。
+    所以留一行,擺在它被用到的地方。
+    """
+    a = _json(DATA / "portfolio_account.json")
+    if not a:
+        return ('<div class="flag">數量依據:<b>還沒有記帳</b> —— '
+                '沒有權益就算不出指令單的數量。每日 00:30 UTC 自動執行。'
+                '</div>')
+    eq = float(a.get("equity", 0) or 0)
+    exposure = float(a.get("exposure", 0) or 0)
+    return ('<div class="flag">數量依據:模擬帳戶權益 '
+            f'<b>{eq:,.2f} USDT</b> × 曝險 {exposure:.0%} '
+            f'× 槓桿 {float(a.get("leverage", 1)):g}×。<br>'
+            '模擬帳戶用的是<b>永續</b>的成本模型(資金費、費率),'
+            'U 本位標準合約的成本一個字都還沒驗證過 —— '
+            '所以它算出來的<b>數量</b>可以用,它算出來的<b>損益</b>'
+            '不是這個產品的績效。</div>')
 
 
 def block_tickets() -> str:
@@ -582,7 +529,8 @@ def block_tickets() -> str:
             'BingX 也沒有公開任何 deeplink 規格(2026-09-13 查過官方 API '
             '文件與支援中心)。所以下面三條連結是**候選**,'
             '<b>哪一條真的會開起 App 只有你點得出來</b> —— '
-            '點一次告訴我哪條對,我把另外兩條拿掉。</div>')
+            '點一次告訴我哪條對,我把另外兩條拿掉。</div>'
+            + sizing_basis())
 
     if got.get("error"):
         return (head + '<p class="note">算不出來:'
@@ -1032,6 +980,15 @@ def block_gaps() -> str:
         '<code>allOrders</code> 的 cumQuote 與 executedQty 比對得出實際'
         '成交價,有幾筆標準合約成交就量得出來。')
 
+    live = _json(DATA / "portfolio_contract.json") or {}
+    passed, total = live.get("passed", 0), live.get("total", 8)
+    gap(passed >= total, "實盤資格",
+        f'<b>{passed}/{total} 條</b>通過。'
+        '這是「什麼時候可以開始用真錢」的閘門 —— '
+        f'{html.escape(str(live.get("verdict") or "尚未評估"))}<br>'
+        '門檻在乾淨樣本為零時寫下,<b>不得事後放寬</b>。'
+        '八條全過也只是「有資格談」。')
+
     gap(False, "持倉欄位",
         '這個產品的持倉回應<b>沒有 liquidationPrice 也沒有 markPrice</b>'
         '(官方欄位表確認),餘額<b>沒有 equity</b>。'
@@ -1047,27 +1004,6 @@ def block_gaps() -> str:
             '而巡檢每 10 分鐘就報一次。那次的教訓不是「要多報一點」,是'
             '<b>沒有被看見的警告等於不存在</b> —— 所以這一塊在面板上,'
             '不在某份文件裡。</div></div>')
-
-
-def block_contract() -> str:
-    c = _json(DATA / "portfolio_contract.json")
-    if not c:
-        return ''
-    rows = "".join(
-        f'<tr><td class="{"up" if x.get("passed") else "down"}">'
-        f'{"✓" if x.get("passed") else "✗"}</td>'
-        f'<td class="sym">{html.escape(str(x.get("name")))}</td>'
-        f'<td><div class="why">{html.escape(str(x.get("detail")))}</div></td>'
-        '</tr>' for x in (c.get("criteria") or []))
-    p, t = c.get("passed", 0), c.get("total", 8)
-    return ('<div class="card"><h2>實盤資格契約</h2>'
-            f'<div class="big {"up" if p >= t else ""}">{p}<span '
-            'style="font-size:16px;color:var(--dim)">/' f'{t}</span></div>'
-            '<div class="scroll"><table><tbody>' + rows + '</tbody></table></div>'
-            f'<p class="note">{html.escape(str(c.get("verdict", "")))}</p>'
-            '<div class="flag">門檻在乾淨樣本為零時寫下,<b>不得事後放寬</b>。'
-            '八條全過也只是「有資格談」—— 實盤仍需人工簽署,永不自動化。'
-            '</div></div>')
 
 
 def block_system() -> str:
@@ -1142,10 +1078,11 @@ def render() -> str:
     # 順序照「要不要動手」排:
     #   指令單(要按)→ 交易所實際(真相)→ 訊號(為什麼)
     #   → 部位大小的依據(數量從哪來)
-    desk = (block_tickets() + block_exchange() + block_screen()
-            + block_account())
-    system = (block_gaps() + block_proposals()
-              + block_contract() + block_system())
+    # 2026-09-18:只留 U 本位標準合約的東西。
+    # 紙上帳本縮成指令單裡的一行(它決定數量,但它是永續的成本模型);
+    # 實盤資格縮成「還沒關掉的洞」的一行。
+    desk = block_tickets() + block_exchange() + block_screen()
+    system = block_gaps() + block_proposals() + block_system()
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
