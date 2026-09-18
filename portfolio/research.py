@@ -100,8 +100,13 @@ class Variant:
     """一組參數。**現任者也是一個 Variant** —— 沒有特權。
 
     `kind` 決定訊號規則:
-      "ma"       收盤在 N 日均線之上才持有(現任)
-      "breakout" 突破 N 日高進場、跌破 M 日低出場(Donchian / 海龜)
+      "ma"        收盤在 N 日均線之上才持有(現任)
+      "breakout"  突破 N 日高進場、跌破 M 日低出場(Donchian / 海龜)
+      "longshort" 站上 N 日均線做多,**跌破做空**
+
+    ⚠️ **多空版沒有新增任何自由參數** —— 同一條均線、同一個回看期。
+    唯一的差別是「跌破」那一邊:現任是空手(曝險 0),多空版是做空。
+    所以它跟現任是最乾淨的一次對照,而且校正上不吃虧。
 
     ⚠️ **突破類多兩個參數**(entry_n / exit_n,加上可選的 confirm_bars),
     而均線只有一個,還是教科書值。參數多的一方在同樣的證據下更容易
@@ -116,13 +121,16 @@ class Variant:
 
     @property
     def key(self) -> str:
-        head = (f"ma{self.ma}" if self.kind == "ma"
-                else f"bo{self.ma}-{self.exit_n}")
+        head = ({"ma": f"ma{self.ma}",
+                 "longshort": f"ls{self.ma}"}.get(
+                     self.kind, f"bo{self.ma}-{self.exit_n}"))
         return f"{head}-vol{self.vol_target_pct:g}-lev{self.leverage_cap:g}"
 
     def describe(self) -> str:
-        head = (f"{self.ma} 日均線" if self.kind == "ma"
-                else f"突破 {self.ma} 日高 / 跌破 {self.exit_n} 日低出場")
+        head = ({"ma": f"{self.ma} 日均線",
+                 "longshort": f"{self.ma} 日均線多空(跌破做空)"}.get(
+                     self.kind,
+                     f"突破 {self.ma} 日高 / 跌破 {self.exit_n} 日低出場"))
         return (f"{head} · 波動目標 {self.vol_target_pct:g}% · "
                 f"槓桿上限 {self.leverage_cap:g}×")
 
@@ -146,6 +154,18 @@ def grid(incumbent: Variant) -> list:
                 out.append(Variant(ma=entry_n, vol_target_pct=vol,
                                    leverage_cap=lev, kind="breakout",
                                    exit_n=exit_n))
+            # 多空版(2026-09-18 執政官問「除了做多有做空嗎」加進來)。
+            # `ma_long_short` 2026-09-08 就寫好了,附了完整的預先登記
+            # 理由,然後**沒有任何地方呼叫它** —— 既不在 registry()
+            # 裡,研究迴路也沒試過。寫好卻沒接上的東西不會自己生效,
+            # 它只會在某天被發現的時候讓人以為系統早就在做那件事。
+            #
+            # 接上的方式是讓它**當挑戰者**,不是直接開啟:做空改變的
+            # 是風險的形狀,不是只是多一個方向。它要跟其他人走同一道
+            # 閘(訓練段贏、驗證段也贏、回撤在契約內、多重比較校正)。
+            for ma in MA_GRID:
+                out.append(Variant(ma=ma, vol_target_pct=vol,
+                                   leverage_cap=lev, kind="longshort"))
     return out
 
 

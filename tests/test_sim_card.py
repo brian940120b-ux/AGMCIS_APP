@@ -197,3 +197,61 @@ def test_the_emitted_javascript_has_a_valid_thousands_separator():
     page = dash.render()
     m = re.search(r"var t = Math\.abs.*", page)
     assert m and r"/\B(?=(\d{3})+(?!\d))/g" in m.group(0), m and m.group(0)
+
+
+# ══════════════════════════════════════════════════════════
+# 五、只做多這件事要寫在畫面上
+# ══════════════════════════════════════════════════════════
+def test_the_card_says_the_live_strategy_is_long_only():
+    """2026-09-18 執政官:「除了做多有做空嗎?」
+
+    現在的答案是**沒有**。不寫在畫面上的話,看到持倉列上那個「多」
+    標籤的人,會以為那是**這一筆**的方向,而不是系統唯一做得出來
+    的方向。
+    """
+    html = render_with(acct(), {})
+    assert "只做多" in html
+    assert "空手" in html and "不做空" in html
+
+
+def test_the_long_short_rule_is_wired_into_the_research_grid():
+    """`ma_long_short` 2026-09-08 就寫好了,附了完整的預先登記理由,
+    然後**沒有任何地方呼叫它** —— registry() 裡沒有,研究迴路也沒試過。
+
+    寫好卻沒接上的東西不會自己生效,它只會在某天被發現的時候,
+    讓人以為系統早就在做那件事了。
+    """
+    from portfolio.research import Variant, grid
+    kinds = {v.kind for v in grid(Variant(ma=50, vol_target_pct=27.0,
+                                          leverage_cap=3.0))}
+    assert "longshort" in kinds
+
+
+def test_the_research_runner_can_actually_build_the_long_short_rule():
+    """接進網格還不夠 —— 跑的人要真的認得那個 kind,
+    否則它會被當成均線跑一遍,而表格上看起來一切正常。"""
+    import importlib.util
+    from portfolio.research import Variant
+    spec = importlib.util.spec_from_file_location(
+        "rsrch", Path(__file__).resolve().parents[1] / "scripts/research.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    ls = m.weights_fn(Variant(ma=50, vol_target_pct=27.0, leverage_cap=3.0,
+                              kind="longshort"))
+    ma = m.weights_fn(Variant(ma=50, vol_target_pct=27.0, leverage_cap=3.0))
+
+    # 造一段資料:X 在均線之下 —— 多空版該是負權重,均線版該是空手
+    from datetime import datetime, timedelta, timezone
+
+    from portfolio.sim import Bar
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    dates = [t0 + timedelta(days=i) for i in range(60)]
+    closes = [100.0] * 59 + [50.0]
+    idx = {s: {dates[i]: Bar(dates[i], c, c, c, c, 0.0)
+               for i, c in enumerate(closes)} for s in m.SYMBOLS}
+    w_ls = ls(59, dates, idx)
+    w_ma = ma(59, dates, idx)
+    assert w_ls and all(v < 0 for v in w_ls.values()), \
+        f"跌破均線,多空版該做空,拿到 {w_ls}"
+    assert not w_ma, f"跌破均線,現任該空手,拿到 {w_ma}"

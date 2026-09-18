@@ -37,7 +37,8 @@ interpreter.require()
 from portfolio import judge, research as R
 from portfolio.paper import (LEVERAGE_CAP, STRATEGY, SYMBOLS,
                              VOL_LOOKBACK, VOL_TARGET_ANNUAL_PCT)
-from portfolio.rules import donchian_breakout, ma_filter, vol_target
+from portfolio.rules import (donchian_breakout, ma_filter, ma_long_short,
+                             vol_target)
 from portfolio.sim import align, metrics, simulate
 
 LINE = "═" * 64
@@ -46,8 +47,12 @@ WARMUP = 205          # 夠 200 日均線 + 緩衝
 
 def weights_fn(v: R.Variant):
     """把一組參數變成 simulate() 吃的權重函式。"""
-    base = (donchian_breakout(SYMBOLS, v.ma, v.exit_n)
-            if v.kind == "breakout" else ma_filter(SYMBOLS, v.ma))
+    if v.kind == "breakout":
+        base = donchian_breakout(SYMBOLS, v.ma, v.exit_n)
+    elif v.kind == "longshort":
+        base = ma_long_short(SYMBOLS, v.ma)
+    else:
+        base = ma_filter(SYMBOLS, v.ma)
     return vol_target(base, v.vol_target_pct, VOL_LOOKBACK, SYMBOLS,
                       v.leverage_cap)
 
@@ -123,7 +128,8 @@ def main(argv=None) -> int:
     #    2026-09-18 第一次跑,前十名全是 ma —— 而我在突破那支寫錯過
     #    三次,所以「bo 不在榜上」必須分得出是「跑輸」還是「沒跑」。
     print(f"\n  {'每一族最好的那一個':<30}{'訓練':>8}{'驗證':>8}{'回撤':>8}")
-    for kind, label in (("ma", "均線"), ("breakout", "突破(支撐壓力)")):
+    for kind, label in (("ma", "均線"), ("breakout", "突破(支撐壓力)"),
+                        ("longshort", "均線多空(跌破做空)")):
         fam = [r for r in rows if r[0].kind == kind]
         if not fam:
             print(f"  {label:<28}**一個都沒跑出來** —— 那是 bug,不是結果")
@@ -131,8 +137,10 @@ def main(argv=None) -> int:
         v, tr, te, _ = fam[0]
         print(f"  {label} {v.key:<22}{tr.get('calmar') or 0:>8.2f}"
               f"{te.get('calmar') or 0:>8.2f}{te.get('max_dd_pct', 0):>7.1f}%")
-    print("\n  兩族量的是同一件事(均線是平滑版,突破是離散版),"
-          "\n  而突破多兩個參數,所以要贏得更明顯才算數。")
+    print("\n  均線與突破量的是同一件事(均線是平滑版,突破是離散版),"
+          "\n  而突破多兩個參數,所以要贏得更明顯才算數。"
+          "\n  多空版沒有多任何參數 —— 它跟現任的差別只有「跌破」"
+          "那一邊:\n  現任空手,它做空。所以這是最乾淨的一次對照。")
 
     effective = R.effective_trials([(tr, te) for _, tr, te, _ in rows])
     if effective < len(rows):

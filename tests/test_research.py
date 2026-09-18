@@ -42,11 +42,28 @@ def judged(**over):
 # 一、網格
 # ══════════════════════════════════════════════════════════
 def test_the_grid_is_small_and_the_incumbent_is_not_a_trial():
+    """網格的每一次變大都必須是**刻意的**,而且要在這裡登記。
+
+    2026-09-18 加了多空族(執政官問「除了做多有做空嗎」),
+    網格從 47 變成 79。這條測試當場變紅 —— 那正是它的用途:
+    舊系統測了 1391 個配置,實際通過 15 案而雜訊預期 52 案,
+    也就是**搜尋本身在製造假陽性**。網格悄悄長大就是那條路。
+
+    為什麼這一次的變大是可接受的:
+      · 多空族**沒有新增任何自由參數** —— 它用的就是同一組 MA_GRID,
+        同一組波動目標。它不是把參數空間撐大,是對同一組參數
+        問一個結構性的問題:「跌破的時候空手,還是做空?」
+      · Bonferroni 乘的是**有效**試驗數(行為去重後),多空族因此
+        照樣要付校正的代價 —— 加進來只會讓門檻更高,不會更鬆。
+
+    上限留在 96:再往上就必須先回答「這些是新假說,還是在掃參數」。
+    """
     g = R.grid(INC)
     combos = len(R.VOL_GRID) * len(R.LEV_GRID)
-    assert len(g) == combos * (len(R.MA_GRID) + len(R.BREAKOUT_GRID)) - 1
+    per_combo = len(R.MA_GRID) + len(R.BREAKOUT_GRID) + len(R.MA_GRID)
+    assert len(g) == combos * per_combo - 1
     assert INC not in g, "現任者是被挑戰的對象,不算一次試驗"
-    assert len(g) < 64, "網格一旦變大,這支就是過擬合機器"
+    assert len(g) < 96, "網格一旦變大,這支就是過擬合機器"
 
 
 def test_breakout_is_a_challenger_not_a_special_case():
@@ -56,9 +73,28 @@ def test_breakout_is_a_challenger_not_a_special_case():
     比較像「真正的技術分析」就給它特權。
     """
     kinds = {v.kind for v in R.grid(INC)}
-    assert kinds == {"ma", "breakout"}
+    assert kinds == {"ma", "breakout", "longshort"}
     bo = [v for v in R.grid(INC) if v.kind == "breakout"]
     assert {(v.ma, v.exit_n) for v in bo} == set(R.BREAKOUT_GRID)
+
+
+def test_long_short_is_a_challenger_too_and_adds_no_new_parameters():
+    """2026-09-18 執政官問「除了做多有做空嗎」。
+
+    答案:現役策略只做多,而多空版的程式碼 2026-09-08 就寫好了,
+    附了完整的預先登記理由,然後**沒有任何地方呼叫它**。
+
+    接上的方式是讓它當挑戰者,不是直接開啟 —— 做空改變的是風險的
+    形狀。而它用的是**同一組 MA_GRID**:唯一的差別在「跌破」那一邊,
+    現任空手,它做空。沒有新參數,所以這是最乾淨的一次對照。
+    """
+    ls = [v for v in R.grid(INC) if v.kind == "longshort"]
+    assert {v.ma for v in ls} == set(R.MA_GRID), "多空族該用同一組均線長度"
+    assert all(v.exit_n == 0 for v in ls), "多空版不該有出場參數"
+    v = R.Variant(ma=50, vol_target_pct=27.0, leverage_cap=3.0,
+                  kind="longshort")
+    assert v.key.startswith("ls50")
+    assert "做空" in v.describe()
 
 
 def test_the_breakout_values_are_textbook_not_searched():
