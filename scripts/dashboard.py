@@ -316,6 +316,16 @@ tbody tr:first-child td{border-top:none}
 .ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
 .ticket td:last-child{font-family:var(--mono);text-align:right}
 .ticket .why{text-align:right}
+/* 過期的指令單 —— 撤掉,但不消失 */
+.ticket.gone{opacity:.5}
+.ticket.gone .cp{pointer-events:none;text-decoration:line-through;
+ opacity:.6}
+.ticket.gone .tlinks,.ticket.gone .why-box{display:none}
+.pill.p-dead{background:var(--down-bg);border-color:var(--down-bd);
+ color:var(--down)}
+.tdead{margin:10px 0 2px}
+.tleft{font-weight:700}
+.tleft.soon{color:var(--down)}
 /* 區塊小標 —— 一張卡裡分「此刻」與「這套好不好」兩段 */
 .sect-h{color:var(--dim);font-size:11px;letter-spacing:.6px;
  margin:14px 0 8px;padding-top:11px;border-top:1px solid var(--line)}
@@ -427,7 +437,7 @@ def _build():
     return current(__file__)
 
 
-def _ticket_card(t) -> str:
+def _ticket_card(t, now=None) -> str:
     """一張指令單的 HTML。
 
     鏡像單與對齊單共用這一個 —— 兩邊各寫一份的話,遲早有一邊
@@ -437,13 +447,39 @@ def _ticket_card(t) -> str:
                    for w in t.warnings)
     liq = (f'{t.est_liq_price:,.6g}' if t.est_liq_price is not None else '—')
     margin = (f'{t.est_margin:,.2f}' if t.est_margin is not None else '—')
+    # ── 過期就撤掉 ────────────────────────────────────
+    # 2026-09-18 執政官:「如果訊號單有效期限過了就撤掉。」
+    #
+    # 撤掉 = **不能再按**,不是「消失」。一張安靜不見的單會讓畫面
+    # 變成「今天沒有要按的」,而那是一句假話 —— 實際上是「有,但
+    # 窗口關了」。這兩件事的處置完全不同:前者什麼都不用做,
+    # 後者要等下一張重算出來。
+    #
+    # 伺服器這邊每 180 秒重算一次,所以這裡通常不會看到過期的;
+    # 真正會過期的是**開著沒關的頁面** —— TTL 是 30 分鐘,手機擺著
+    # 半小時就死了,而畫面上跟活的一模一樣。所以前端也有一份計時器
+    # (simExpire),時間到就地撤掉,不等重新整理。
+    # now 可注入 —— 不然這張卡只能拿真實時鐘測,而「過期」這件事
+    # 正是要測的東西。生產上照樣是 None = 現在。
+    dead = t.expired_at(now)
+    cls = "ticket gone" if dead else "ticket"
     return (
-            '<div class="ticket">'
+        f'<div class="{cls}" '
+        f'data-until="{html.escape(t.valid_until_utc)}">'
         f'<div class="t-head"><span class="sym">'
         f'{html.escape(t.symbol)}</span>'
-        f'<span class="pill {"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
-        f'{html.escape(t.tap)}</span></div>'
-        '<table><tbody>'
+        + ('<span class="pill p-dead">已過期 · 不要按</span>' if dead else
+           f'<span class="pill '
+           f'{"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
+           f'{html.escape(t.tap)}</span>')
+        + '</div>'
+        + ('<div class="flag warn tdead">這張單的有效期限過了 —— '
+           '<b>不要照它按</b>。數量與止損是照當時的價格算的,'
+           '價格走掉之後那個數量代表的風險就不是原本那個了。<br>'
+           '系統會重算;訊號還在、價格還在帶內的話,'
+           '幾分鐘內會再推一張新的(單號會不一樣)。</div>'
+           if dead else '')
+        + '<table><tbody>'
         + '<tr><td colspan="2" class="sect">要填的(順序照 App)</td></tr>'
         + "".join(
             f'<tr><td>{html.escape(label)}</td><td>'
@@ -475,7 +511,11 @@ def _ticket_card(t) -> str:
         f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
         f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
         '</td></tr>'
-        f'<tr><td>有效到</td><td>{html.escape(t.valid_until_utc)}</td></tr>'
+        # 手機上讀 UTC 字串沒有意義 —— 要的是「還剩多久」。
+        # 那個倒數由前端每秒更新(伺服器算的只是第一幀)。
+        f'<tr><td>有效到</td><td><span class="tleft">—</span>'
+        f'<div class="why">{html.escape(t.valid_until_utc)} UTC</div>'
+        '</td></tr>'
         f'<tr><td>單號</td><td class="why">{html.escape(t.ticket_id)}</td>'
         '</tr>'
         '</tbody></table>'
@@ -1754,6 +1794,58 @@ connect();
    開倉均價(琥珀虛線)與強平價(紅虛線)—— 看走勢的目的是知道
    「現在離我的進場點和爆倉點多遠」,不是純粹看圖形。
    資料走 /api/klines,只餵眼睛,不進任何決策。                   */
+/* ══ 指令單的有效期限 ══════════════════════════════════════
+   2026-09-18 執政官:「如果訊號單有效期限過了就撤掉。」
+
+   伺服器每 180 秒重算一次,所以從伺服器出來的單很少是過期的。
+   真正會過期的是**開著沒關的頁面** —— TTL 30 分鐘,手機擺著半小時
+   那張單就死了,而畫面上跟活的一模一樣,照著按會用一個過時的數量
+   去冒一個不是原本那個的風險。
+
+   所以這裡每秒檢查一次:剩幾分鐘就印幾分鐘,時間到就**就地撤掉**
+   (複製鈕失效、連結收起、標成「已過期 · 不要按」),不等重新整理。
+
+   撤掉 ≠ 消失:一張安靜不見的單會讓畫面變成「今天沒有要按的」,
+   而那是假話 —— 實際上是「有,但窗口關了」。                     */
+function tickExpiry(){{
+  var now = Date.now();
+  document.querySelectorAll('.ticket[data-until]').forEach(function(el){{
+    var until = Date.parse(el.dataset.until);
+    if(isNaN(until)) return;
+    var left = until - now;
+    var lab = el.querySelector('.tleft');
+    if(left > 0){{
+      var m = Math.floor(left/60000), sec = Math.floor((left%60000)/1000);
+      if(lab){{
+        lab.textContent = (m > 0 ? m + ' 分 ' : '') + sec + ' 秒後過期';
+        lab.className = 'tleft' + (left < 300000 ? ' soon' : '');
+      }}
+      return;
+    }}
+    if(el.classList.contains('gone')) return;   /* already withdrawn */
+    el.classList.add('gone');
+    if(lab){{ lab.textContent = '已過期'; lab.className = 'tleft soon'; }}
+    var pill = el.querySelector('.t-head .pill');
+    if(pill){{ pill.className = 'pill p-dead';
+               pill.textContent = '已過期 · 不要按'; }}
+    var head = el.querySelector('.t-head');
+    if(head && !el.querySelector('.tdead')){{
+      var d = document.createElement('div');
+      d.className = 'flag warn tdead';
+      d.innerHTML = '這張單的有效期限過了 —— <b>不要照它按</b>。'
+        + '數量與止損是照當時的價格算的,價格走掉之後那個數量'
+        + '代表的風險就不是原本那個了。<br>'
+        + '系統會重算;訊號還在、價格還在帶內的話,'
+        + '幾分鐘內會再推一張新的(單號會不一樣)。';
+      head.parentNode.insertBefore(d, head.nextSibling);
+    }}
+  }});
+}}
+if(document.querySelector('.ticket[data-until]')){{
+  tickExpiry();
+  setInterval(tickExpiry, 1000);
+}}
+
 /* ══ 模擬帳戶的即時數字 ══════════════════════════════════════
    2026-09-18 執政官:「我想看到即時的盈虧數字變化。」
    每 15 秒跟 /api/sim 要一次,數字變了就換掉並閃一下。
