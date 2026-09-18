@@ -45,7 +45,7 @@ from portfolio.account import Account
 # costs 的估計值已不再用於記帳 —— 資金費改收 specs 提供的交易所實際結算值
 from portfolio.execution import get_executor
 from portfolio.orders import build_orders, format_orders
-from portfolio.rules import _sma, registry, vol_target
+from portfolio.rules import _sma, exit_level_of, registry, vol_target
 from portfolio.sim import Bar
 
 log = get_logger("portfolio.paper")
@@ -212,6 +212,10 @@ def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     prices = {s: idx[s][exec_day].o for s in idx if exec_day in idx[s]}
     mas = {s: m for s in syms
            if (m := _sma(idx, s, dates, i, cfg.vol_lookback)) is not None}
+    # 出場價:策略今天要在哪個價位把這檔放掉(2026-09-18 執政官要的)。
+    # **跟策略要,不跟 mas 要** —— mas 用的是 vol_lookback,它現在
+    # 剛好也是 50,但那是巧合,不是同一個東西。
+    exits = {s: exit_level_of(fn, s, dates, idx, i) for s in syms}
 
     a = Account.load(cfg.state_path)
     held_w = a.weights(prices)
@@ -230,6 +234,7 @@ def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     return {"signal_day": day.isoformat(), "exec_day": exec_day.isoformat(),
             "target": target, "held": held_w, "equity": eq,
             "prices": prices, "bars_exec": bars_exec, "mas": mas,
+            "exits": exits,
             "orders": orders, "symbols": syms, "cfg": cfg,
             "returns": returns,
             "already_done": a.last_signal_day == day.isoformat()}

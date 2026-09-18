@@ -49,7 +49,8 @@ NOW = datetime(2026, 9, 18, 8, 0, tzinfo=timezone.utc)
 def a_ticket():
     return build(symbol="AAVEUSDT", action=OPEN_LONG, quantity=5.4,
                  price=128.52, leverage=3.0, stop_pct=25.0,
-                 strategy="50MA", signal_day="2026-09-18", now=NOW)
+                 strategy="50MA", signal_day="2026-09-18",
+                 exit_price=112.40, exit_rule="跌破 50 日均線", now=NOW)
 
 
 # ══════════════════════════════════════════════════════════
@@ -62,12 +63,13 @@ def test_the_ticket_card_actually_renders():
     assert html.count("<table>") == html.count("</table>")
 
 
-def test_the_card_shows_both_sections_in_order():
-    """要填的在上,填完核對的在下 —— 順序照 App。"""
+def test_the_card_shows_its_sections_in_order():
+    """要填的 → 填完核對 → 打算在哪裡結束。順序照動手的先後。"""
     html = dash._ticket_card(a_ticket())
     fill = html.index("要填的")
     check = html.index("填完之後畫面上應該是")
-    assert fill < check, "核對欄跑到輸入欄前面 —— 照著填會填錯"
+    exit_ = html.index("打算在哪裡結束")
+    assert fill < check < exit_, "區塊順序亂了 —— 照著填會填錯"
 
 
 def test_every_field_the_app_asks_for_reaches_the_page():
@@ -79,6 +81,9 @@ def test_every_field_the_app_asks_for_reaches_the_page():
         assert value in html, f"「{label}」的值 {value} 沒出現在面板上"
     for label, value, _ in t.verify_after():
         assert label in html, f"要核對的「{label}」沒出現在面板上"
+    for label, value, _ in t.exit_plan():
+        assert label in html, f"出場計畫的「{label}」沒出現在面板上"
+        assert value in html, f"「{label}」的值 {value} 沒出現在面板上"
 
 
 # ══════════════════════════════════════════════════════════

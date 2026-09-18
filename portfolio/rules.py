@@ -36,6 +36,42 @@ def _sma(idx: dict, sym: str, dates: list, i: int, n: int) -> float | None:
     return sum(vals) / len(vals) if len(vals) >= n * 0.8 else None
 
 
+def _forward_exit(inner, outer):
+    """把 inner 的出場線接到 outer 上(包裝器用)。"""
+    fn = getattr(inner, "exit_level", None)
+    if fn is not None:
+        outer.exit_level = fn
+
+
+def exit_level_of(fn, sym: str, dates: list, idx: dict,
+                  i: int) -> tuple[float | None, str]:
+    """這個策略今天要在**哪個價格**把 sym 放掉。
+
+    ═══ 為什麼不直接讀 plan() 裡的 `mas` ═══
+    `mas` 是用 `cfg.vol_lookback` 算的,而 vol_lookback 現在是 50,
+    策略也是 50 日均線 —— **兩個 50 只是剛好相等**。
+    把 mas 當成出場線,哪天策略換成 100 日均線,出場價會安安靜靜地
+    繼續報 50 日均線,而畫面上看不出任何異狀。
+
+    所以出場線一律**跟策略要**,不跟任何剛好相等的東西要。
+
+    ═══ 回傳 ═══
+    `(價格, 說明)`。算不出來時價格是 None,而說明講的是**為什麼**
+    沒有 —— 「這個策略沒有定義出場價」和「資料不夠算」是兩回事,
+    不可以都印成一個空白。
+    """
+    get = getattr(fn, "exit_level", None)
+    if get is None:
+        return None, "這個策略沒有逐幣的出場價"
+    try:
+        price, how = get(sym, dates, idx, i)
+    except Exception as e:                           # noqa: BLE001
+        return None, f"出場價算不出來:{type(e).__name__}: {e}"
+    if price is None:
+        return None, f"{how} —— 但資料不夠算出那條線"
+    return float(price), how
+
+
 def hold_all(symbols: list[str]):
     """等權買入持有 —— 這是基準,不是策略。"""
     w = 1.0 / len(symbols)
@@ -60,6 +96,11 @@ def ma_filter(symbols: list[str], n: int):
             if b and m and b.c > m:
                 on.append(s)
         return {s: 1.0 / len(symbols) for s in on} if on else {}
+
+    # 出場線 = 同一條均線。**進場與出場是同一個條件的兩面**,
+    # 所以它掛在這裡,而不是別處重算一次 —— 改了 n,兩邊一起改。
+    f.exit_level = lambda sym, dates, idx, i: (
+        _sma(idx, sym, dates, i, n), f"跌破 {n} 日均線")
     return f
 
 
@@ -189,6 +230,9 @@ def donchian_breakout(symbols: list[str], entry_n: int = 20,
 
         return {s: 1.0 / len(symbols) for s in on} if on else {}
 
+    f.exit_level = lambda sym, dates, idx, i: (
+        _extreme(idx, sym, dates, i, exit_n, high=False),
+        f"跌破 {exit_n} 日最低")
     return f
 
 
@@ -250,6 +294,11 @@ def scaled(fn, scale: float):
 
     def f(i, dates, idx):
         return {k: v * s for k, v in (fn(i, dates, idx) or {}).items()}
+
+    # 縮放只改部位大小,**不改進出時點** —— 出場線原封不動往外傳。
+    # 不轉發的話,包一層就把出場價弄不見了,而外面看起來只是
+    # 「這個策略沒有出場價」,不會有人發現是被包掉的。
+    _forward_exit(fn, f)
     return f
 
 
@@ -336,6 +385,8 @@ def vol_target(fn, target_annual_pct: float, lookback: int = 50,
             return want
         scale = min(leverage_cap, target_annual_pct / vol_ann)
         return {k: v * scale for k, v in want.items()}
+
+    _forward_exit(fn, f)
     return f
 
 

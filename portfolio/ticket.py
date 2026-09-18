@@ -226,6 +226,12 @@ class Ticket:
     weight_from: float | None = None
     weight_to: float | None = None
 
+    #: **策略的出場價**(2026-09-18 執政官:「我希望還有出場價」)。
+    #: 跟 stop_price 是兩件不同的東西,見 `exit_plan()`。
+    exit_price: float | None = None
+    #: 那個價格是怎麼來的,例如「跌破 50 日均線」。
+    exit_rule: str = ""
+
     # ── 有效性 ────────────────────────────────────────
     def expired_at(self, now: datetime | None = None) -> bool:
         return _iso(_utc(now)) > self.valid_until_utc
@@ -339,6 +345,69 @@ class Ticket:
                         "App 也會顯示一個 —— 2026-09-18 實測兩邊差 0.07%"))
         return out
 
+    def exit_plan(self) -> list:
+        """**這一單打算在哪裡結束。**(標籤, 值, 說明)
+
+        ═══ 兩條線,不是一條 ═══
+        · **出場價** —— 策略真正的出場。它就是進場條件的反面:
+          站上均線才持有,跌破就放掉。**這條線每天會動。**
+        · **止損** —— 機器死掉時的後備。它是一個固定的災難上限,
+          不是策略的一部分。
+
+        正常情況下出場價比止損近得多,所以先到的永遠是出場價,
+        止損一輩子不會被碰到 —— **那正是它該有的樣子**。
+        反過來(止損比出場價近)代表後備線在替策略做決定,
+        那是一個要看見的異常,所以下面會講出來。
+
+        ═══ 為什麼出場價不填進 App ═══
+        兩個理由,第二個才是關鍵:
+
+        一、**它每天會動。** 今天填進去,明天就是舊的。
+        二、**判定方式不一樣。** 策略用**收盤價**判斷跌破(插針穿過去
+            再收回來不算,這條是 donchian_breakout 裡擋掉最多假突破
+            的規則);而 App 的止損是**盤中觸價**就成交。
+            把均線填進 App 的止損框,等於把「收盤跌破才走」偷偷換成
+            「盤中戳到就走」—— 那會被上下影線掃出場,而回測裡
+            **從來沒發生過這件事**。實際交易於是系統性地輸給回測,
+            且看不出來是為什麼。
+
+        所以這條線由系統盯著,到了會推一張平倉指令單。
+        """
+        if self.exit_price is None:
+            return [("出場價", "—", self.exit_rule or "這個策略沒給出場價")]
+
+        px = self.quoted_price
+        exit_gap = (self.exit_price - px) / px * 100.0
+        stop_gap = (self.stop_price - px) / px * 100.0
+        out = [
+            ("出場價", f"{self.exit_price:,.6g}",
+             f"{self.exit_rule} —— 離現價 {abs(exit_gap):.1f}%。"
+             "這條線每天會動,**不要填進 App**:系統盯著,到了推平倉單"),
+            ("止損", f"{self.stop_price:,.10g}",
+             f"離現價 {abs(stop_gap):.1f}% —— 後備,填進 App 的是這個"),
+        ]
+
+        # 方向對不對:做多的出場線該在現價**下面**。
+        # 在上面代表現價已經跌破均線了 —— 這張單一開就該出場。
+        wrong_side = ((self.action == OPEN_LONG and exit_gap > 0) or
+                      (self.action == OPEN_SHORT and exit_gap < 0))
+        if wrong_side:
+            out.append(("⚠️ 方向不對", "出場線跑到現價的另一邊",
+                        f"{self.exit_rule}的線在現價{'上' if exit_gap > 0 else '下'}"
+                        "面 —— 訊號日到現在價格已經穿回去了,"
+                        "這張單一開就符合出場條件。**先別按**"))
+        elif abs(stop_gap) < abs(exit_gap):
+            out.append(("⚠️ 止損比出場價近", "後備線在替策略做決定",
+                        f"止損 {abs(stop_gap):.1f}% < 出場 {abs(exit_gap):.1f}%"
+                        " —— 會先被止損掃掉,而回測裡出場的是策略那條線。"
+                        "要嘛降槓桿把止損拉遠,要嘛這檔現在太遠離均線"))
+        else:
+            out.append(("哪一條先到", self.exit_rule,
+                        f"出場 {abs(exit_gap):.1f}% 比止損 "
+                        f"{abs(stop_gap):.1f}% 近 —— 正常,"
+                        "止損是碰不到才對"))
+        return out
+
     def why(self) -> list:
         """**為什麼要按這一單。** 結論 + 證據,不是只有結論。
 
@@ -360,9 +429,12 @@ class Ticket:
             out.append(("數量怎麼來的",
                         f"權益 × 目標權重 ÷ 報價 {self.quoted_price:,.6g} "
                         f"= {self.quantity:.8g},再套交易所的數量精度"))
+        # 「策略出場是均線」原本寫死在這裡 —— 策略換成突破就變成假話。
+        # 改成用這張單自己帶的 exit_rule。
+        real_exit = self.exit_rule or "策略自己的出場條件"
         out.append(("止損怎麼來的",
                     f"進場價的 {abs((self.stop_price / self.quoted_price - 1)) * 100:.0f}%"
-                    " —— 這是災難後備,不是策略出場:策略出場是均線,"
+                    f" —— 這是災難後備,不是策略出場:策略出場是{real_exit},"
                     "而這一條只回答「機器死掉時這個倉最多虧多少」"))
         return out
 
@@ -385,6 +457,7 @@ class Ticket:
             "checks": list(self.checks), "warnings": list(self.warnings),
             "reason": self.reason, "signal": self.signal,
             "weight_from": self.weight_from, "weight_to": self.weight_to,
+            "exit_price": self.exit_price, "exit_rule": self.exit_rule,
             "why": self.why(),
         }
 
@@ -399,6 +472,8 @@ def build(symbol: str, action: str, quantity: float, price: float,
           reason: str = "", signal: tuple | None = None,
           weight_from: float | None = None,
           weight_to: float | None = None,
+          exit_price: float | None = None,
+          exit_rule: str = "",
           now: datetime | None = None) -> Ticket:
     """開一張指令單。**任何一個閘沒過就拋,不印半張。**
 
@@ -476,6 +551,7 @@ def build(symbol: str, action: str, quantity: float, price: float,
         checks=tuple(checks), warnings=tuple(warnings),
         reason=reason, signal=signal,
         weight_from=weight_from, weight_to=weight_to,
+        exit_price=exit_price, exit_rule=exit_rule,
     )
 
 
@@ -603,10 +679,26 @@ def make_tickets(plan: dict, stop_pct: float, leverage: float) -> tuple:
                 signal=_signal_of(plan, order.symbol),
                 weight_from=getattr(order, "weight_from", None),
                 weight_to=getattr(order, "weight_to", None),
+                **_exit_of(plan, order.symbol),
             ))
         except TicketRefused as e:
             refused.append((order.symbol, str(e)))
     return made, refused
+
+
+def _exit_of(plan: dict, symbol: str) -> dict:
+    """這一檔的出場價 —— **從 plan 拿,plan 從策略拿**(rules.exit_level_of)。
+
+    拿不到就是 `exit_price=None` + 一句說明為什麼。
+    說明不能省:「沒有出場價」和「有但算不出來」是兩件事,
+    印成同一個空白的話,一個壞掉的策略看起來會像一個買入持有的策略。
+    """
+    got = (plan.get("exits") or {}).get(symbol)
+    if not got:
+        return {"exit_price": None, "exit_rule": "這個計畫沒帶出場價"}
+    price, how = got
+    return {"exit_price": None if price is None else float(price),
+            "exit_rule": str(how)}
 
 
 def _signal_of(plan: dict, symbol: str):
@@ -645,6 +737,7 @@ def _signal_of(plan: dict, symbol: str):
 def catch_up(sim_positions: dict, exchange_positions, prices: dict,
              stop_pct: float, leverage: float, *,
              strategy: str = "", signal_day: str = "",
+             exits: dict | None = None,
              tolerance: float = 1e-8) -> tuple:
     """讓真實帳戶追上模擬帳戶要按哪幾張。
 
@@ -666,6 +759,10 @@ def catch_up(sim_positions: dict, exchange_positions, prices: dict,
 
     want = {app_symbol(k): float(v or 0.0) for k, v in sim_positions.items()}
     px = {app_symbol(k): float(v) for k, v in (prices or {}).items() if v}
+    # 出場價的 key 來自 plan(BTC-USDT),迴圈裡的 symbol 是 App 代號
+    # (BTCUSDT)—— 不轉的話每張對齊單都會安靜地變成「沒有出場價」,
+    # 而畫面上看起來只像這個策略本來就沒有出場條件。
+    ex = {app_symbol(k): v for k, v in (exits or {}).items()}
 
     made, refused, notes = [], [], []
 
@@ -703,7 +800,10 @@ def catch_up(sim_positions: dict, exchange_positions, prices: dict,
             made.append(build(
                 symbol=symbol, action=action, quantity=abs(delta),
                 price=price, leverage=leverage, stop_pct=stop_pct,
-                strategy=strategy, signal_day=signal_day))
+                strategy=strategy, signal_day=signal_day,
+                # 對齊單開的是真倉,它跟鏡像單一樣要有出場價 ——
+                # 少給的話,補上來的倉會是唯一一批沒人知道何時該放掉的。
+                **_exit_of({"exits": ex}, symbol)))
         except TicketRefused as e:
             refused.append((symbol, str(e)))
 

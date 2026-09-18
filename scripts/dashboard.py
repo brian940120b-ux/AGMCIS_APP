@@ -430,6 +430,16 @@ def _ticket_card(t) -> str:
             + (f'<div class="why">{html.escape(note)}</div>' if note else '')
             + '</td></tr>'
             for label, value, note in t.verify_after())
+        # ── 這一單打算在哪裡結束 ──────────────────────
+        # 2026-09-18 執政官:「我希望還有出場價。」
+        # 出場價是**策略的**出場(跌破均線 / 跌破 N 日低),止損是
+        # 機器死掉時的後備。兩個放一起才看得出哪一條會先到。
+        + '<tr><td colspan="2" class="sect">打算在哪裡結束</td></tr>'
+        + "".join(
+            f'<tr><td>{html.escape(label)}</td><td>{html.escape(value)}'
+            + (f'<div class="why">{html.escape(note)}</div>' if note else '')
+            + '</td></tr>'
+            for label, value, note in t.exit_plan())
         +
         f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
         f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
@@ -529,7 +539,8 @@ def block_tickets() -> str:
                     held, BingXStandardUSDT().rich_positions(),
                     p.get("prices") or {}, BACKSTOP_PCT, LEVERAGE_CAP,
                     strategy=str(getattr(p.get("cfg"), "strategy", "")),
-                    signal_day=str(p.get("signal_day") or ""))
+                    signal_day=str(p.get("signal_day") or ""),
+                    exits=p.get("exits") or {})
             except Exception as e:                   # noqa: BLE001
                 # 對齊算不出來**不該讓整塊消失** —— 上面那批鏡像單
                 # 是獨立的,它們照樣要印出來。
