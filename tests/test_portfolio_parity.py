@@ -110,11 +110,19 @@ def test_benchmark_pays_funding_too():
     """
     assert costs.funding_annual_pct() > 0
     src = Path(paper.__file__).read_text(encoding="utf-8")
-    # 不變量:基準的報酬算式裡必須真的扣掉資金費,不是只在註解裡提一句
-    i = src.index("bench = sum(legs)")
-    tail = src[i:i + 700]
-    assert "funding" in tail and "bench -=" in tail, \
+    # 2026-09-18:基準算式從 tick() 裡抽成 benchmark_pct(),因為面板
+    # 要即時算一份。抽出來之後這條測試改看那個函式 —— 不變量沒變:
+    # 基準的報酬算式裡必須真的扣掉資金費,不是只在註解裡提一句。
+    body = _benchmark_source(src)
+    assert "funding" in body and "bench -=" in body, \
         "基準也是永續,必須扣資金費 —— 讓基準免付會高估策略的相對表現"
+
+
+def _benchmark_source(src: str) -> str:
+    """benchmark_pct() 的函式本體。"""
+    i = src.index("def benchmark_pct(")
+    j = src.index("\ndef ", i + 1)
+    return src[i:j]
 
 
 def test_benchmark_and_portfolio_use_the_same_funding_source():
@@ -126,14 +134,34 @@ def test_benchmark_and_portfolio_use_the_same_funding_source():
     因為它不會讓任何數字看起來不合理。
     """
     src = Path(paper.__file__).read_text(encoding="utf-8")
-    body = src[src.index("def tick("):]
-    # 組合收資金費的那一行
-    assert "specs.funding_rate_sum" in body.split("bench = sum(legs)")[0], \
+    # 組合這一側:tick() 裡收資金費的那一段
+    tick_body = src[src.index("def tick("):]
+    assert "specs.funding_rate_sum" in tick_body, \
         "組合的資金費必須用交易所實際結算值"
-    # 基準扣資金費的那一段
-    bench_tail = body[body.index("bench = sum(legs)"):][:700]
-    assert "specs.funding_rate_sum" in bench_tail, \
+    # 基準這一側:同一個來源
+    assert "specs.funding_rate_sum" in _benchmark_source(src), \
         "基準的資金費必須用同一個來源(交易所實際結算值)"
+
+
+def test_the_benchmark_formula_exists_exactly_once():
+    """**一個公式只寫一次。**
+
+    2026-09-18 面板要即時顯示「贏基準多少」。如果面板自己再寫一份
+    算法,兩份遲早會分岔 —— 而分岔的那天,畫面上的數字與帳本裡的
+    數字會不一樣,沒有人分得出哪一個是對的(那正是執政官說的
+    「數字對不上」)。
+    """
+    import re
+    roots = Path(paper.__file__).resolve().parents[1]
+    hits = []
+    for f in sorted(roots.rglob("*.py")):
+        if ".git" in f.parts or "tests" in f.parts:
+            continue
+        txt = f.read_text(encoding="utf-8")
+        if re.search(r"bench\s*=\s*sum\(legs\)", txt):
+            hits.append(str(f.relative_to(roots)))
+    assert hits == ["portfolio/paper.py"], (
+        "基準算式出現在不只一個地方,或搬家了沒更新這條測試:" + str(hits))
 
 
 # ══════════════════════════════════════════════════════════

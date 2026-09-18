@@ -251,3 +251,97 @@ def score(curve_path: Path | None = None,
         return Scorecard(**base, verdict=BLOCKED, because=why)
     why.insert(0, "贏得過買入持有,而且回撤在契約內。")
     return Scorecard(**base, verdict=GOOD, because=why)
+
+
+# ══════════════════════════════════════════════════════════
+# 即時快照 —— 同一個瞬間的所有數字
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-18 執政官:「數字對不上,我只要一個,就是系統自行模擬的
+# 資訊,並且我想看到即時的盈虧數字變化。」
+#
+# 對不上是真的,而且是設計出來的:成績單的權益來自每日記帳那一刻
+# (00:30 的收盤價),持倉卡的未實現用的是現在的即時價。兩個不同
+# 時間點的價格,當然是兩個數字。
+#
+# 修法不是「挑一個顯示」,是**讓所有「現在」的數字出自同一組價格**。
+# 所以這裡一次算完:權益、報酬、基準、未實現、逐檔盈虧 ——
+# 全部餵同一個 marks,同一個瞬間。
+#
+# 只有歷史才會的東西(最大回撤、走完幾次進出、記了幾天)留在帳本,
+# 而且**標明它們是到上一次記帳為止的**,不假裝是即時的。
+
+
+@dataclass(frozen=True)
+class Live:
+    """此刻的模擬帳戶。**每一格都出自同一組價格。**"""
+
+    at: str = ""
+    equity: float | None = None
+    start_equity: float | None = None
+    return_pct: float | None = None
+    benchmark_pct: float | None = None
+    excess_pct: float | None = None
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    exposure: float | None = None
+    #: 逐檔:{代號: {qty, avg, mark, pnl, roi}}。問不到價的那檔 mark=None。
+    legs: dict = field(default_factory=dict)
+    #: 問不到現價的代號。**它們沒有算進上面任何一個合計。**
+    missing: list = field(default_factory=list)
+
+
+def live(account, marks: dict, now: datetime | None = None) -> Live:
+    """把帳戶 + 一組價格,算成一個瞬間的完整畫面。
+
+    `marks` 缺哪一檔,那一檔就**整個不參與合計** —— 不用開倉均價
+    頂替。用均價頂替會讓那一檔的盈虧顯示成 0,而 0 跟「不知道」
+    在畫面上長得一樣,意思卻相反。
+    """
+    from portfolio.paper import benchmark_pct
+    now = now or datetime.now(timezone.utc)
+
+    held = {s: p for s, p in account.positions.items()
+            if abs(p.position_amt) > 1e-12}
+    # 缺價的只算**持倉**那些 —— 基準籃子缺一檔是基準的事,
+    # 不該被報成「你有一個倉的死活不知道」。
+    missing = sorted(s for s in held if marks.get(s) is None)
+    # ⚠️ 價格要涵蓋**持倉 ∪ 基準籃子**,不是只有持倉。
+    # 第一版只餵持倉的價格,於是策略空手的時候基準整個算不出來 ——
+    # 而空手正是最想知道「不交易的話現在是賺是賠」的時候。
+    ok = {s: float(v) for s, v in marks.items() if v is not None}
+
+    legs, unreal = {}, 0.0
+    for s, pos in sorted(held.items()):
+        mark = ok.get(s)
+        if mark is None:
+            legs[s] = {"qty": pos.position_amt, "avg": pos.avg_price,
+                       "mark": None, "pnl": None, "roi": None}
+            continue
+        pnl = pos.unrealized(mark)
+        margin = pos.initial_margin()
+        legs[s] = {"qty": pos.position_amt, "avg": pos.avg_price,
+                   "mark": mark, "pnl": pnl,
+                   "roi": (pnl / margin * 100) if margin else None}
+        unreal += pnl
+
+    eq = account.balance + unreal
+    start = account.start_equity or None
+    ret = (eq / start * 100 - 100) if start else None
+
+    # 基準走 paper.benchmark_pct —— **同一個公式**,只是餵即時價。
+    # 面板自己再寫一份的話,兩份遲早分岔,而那就是「數字對不上」。
+    bench = None
+    try:
+        bench = benchmark_pct(account, ok, int(now.timestamp() * 1000))
+    except Exception:                                # noqa: BLE001
+        bench = None
+
+    return Live(
+        at=now.isoformat(timespec="seconds"),
+        equity=eq, start_equity=start, return_pct=ret,
+        benchmark_pct=bench,
+        excess_pct=(None if (ret is None or bench is None) else ret - bench),
+        realized_pnl=account.realized_pnl, unrealized_pnl=unreal,
+        exposure=(account.exposure(ok) if held and ok else None),
+        legs=legs, missing=missing)

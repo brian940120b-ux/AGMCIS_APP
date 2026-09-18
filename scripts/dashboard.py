@@ -316,6 +316,12 @@ tbody tr:first-child td{border-top:none}
 .ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
 .ticket td:last-child{font-family:var(--mono);text-align:right}
 .ticket .why{text-align:right}
+/* 區塊小標 —— 一張卡裡分「此刻」與「這套好不好」兩段 */
+.sect-h{color:var(--dim);font-size:11px;letter-spacing:.6px;
+ margin:14px 0 8px;padding-top:11px;border-top:1px solid var(--line)}
+/* 數字換掉的時候閃一下 —— 沒有這個,「即時」在畫面上看不出來 */
+@keyframes tickflash{from{background:var(--up-bg)}to{background:transparent}}
+.tick{animation:tickflash .7s ease-out;border-radius:5px}
 /* 模擬持倉表 —— 手機上五欄,所以字要小、數字要對齊 */
 .pos{width:100%;border-collapse:collapse;margin-top:10px;
  font-size:12.5px}
@@ -794,69 +800,139 @@ def block_exchange() -> str:
     return out + '</div>'
 
 
-def block_score() -> str:
-    """成績單 —— **這套現在到底好不好。**
+def sim_marks() -> tuple:
+    """模擬帳戶持有的每一檔的現價。回 (價格, 問不到的)。
 
-    2026-09-18 執政官:「我想和之前一樣能讓系統自行去交易模擬,
-    現在這個的績效到底好不好?」
+    ⚠️ **這是永續(swap)的公開行情,不是標準合約的。**
+    標準合約沒有公開行情端點(contract/v1 只有三個要簽名的 GET),
+    兩個產品追同一個現貨,價格貼得很近但不是同一個數字。
+    所以它只餵眼睛:即時盈虧看個大概可以,對帳不能用它。
+    """
+    from portfolio.account import Account
+    a = Account.load()
+    # 持倉 ∪ 基準籃子。**基準籃子不能漏** —— 策略空手的時候,
+    # 「不交易的話現在是賺是賠」正是最該看到的那個數字。
+    want = {s for s, pos in a.positions.items()
+            if abs(pos.position_amt) > 1e-12} | set(a.bench_start or {})
+    marks, missing = {}, []
+    for sym in sorted(want):
+        got = klines(sym, "15m", 2)
+        bars = got.get("bars") or []
+        if bars:
+            marks[sym] = bars[-1]["c"]
+        else:
+            missing.append(sym)
+    return a, marks, missing
 
-    這張卡最重要的功能是**能夠說「還不知道」**。
-    一個跑了十天的模擬做成績效卡,會是一個綠色的 +3%,而那個數字
-    不是問題的答案 —— 判斷有沒有資格回答的邏輯在
-    `portfolio/scorecard.py`,這裡只負責把它印出來。
+
+def sim_snapshot() -> dict:
+    """面板與 /api/sim 共用的那一份資料。**只有這一份。**
+
+    2026-09-18 執政官:「數字對不上,我只要一個。」
+    對不上是因為以前有兩個來源:成績單讀每日記帳的檔案(00:30 的
+    收盤價),持倉卡用現在的即時價。修法不是挑一個顯示,是讓所有
+    「現在」的數字**出自同一組價格**,而那就是這個函式。
     """
     def _compute():
         try:
-            from portfolio.scorecard import score
-            return {"s": score()}
+            from portfolio.scorecard import live, score
+            a, marks, _ = sim_marks()
+            lv = live(a, marks)
+            return {"live": lv, "card": score()}
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
+    return _cached("sim", 15, _compute)
 
-    got = _cached("score", 120, _compute)
-    head = '<div class="card"><h2>成績單 —— 這套到底好不好</h2>'
+
+def _n(v, spec: str = ",.2f") -> str:
+    return "—" if v is None else format(v, spec)
+
+
+def block_sim() -> str:
+    """模擬帳戶 —— 系統自己在跑的那一份。**面板上唯一的績效來源。**
+
+    2026-09-18 執政官:「我只要一個,就是系統自行模擬的資訊,
+    並且我想看到即時的盈虧數字變化。」
+
+    所以這一張把原本的「模擬持倉」與「成績單」合成一張:
+
+      · 上半:**此刻**的權益 / 報酬 / 贏基準 / 未實現 —— 每 15 秒
+        自己更新,全部出自同一組即時價,不會互相對不上。
+      · 中間:逐檔的盈虧,同一組價格。
+      · 下半:這套行不行的裁決,以及只有帳本才知道的東西
+        (最大回撤、走完幾次進出、記了幾天)—— **標明是到上一次
+        記帳為止的**,不假裝即時。
+    """
+    got = sim_snapshot()
+    head = ('<div class="card"><h2>模擬帳戶 —— 系統自己在跑的</h2>')
     if got.get("error"):
         return (head + '<div class="flag warn">算不出來:'
                 + html.escape(got["error"]) + '</div></div>')
 
-    s = got["s"]
+    lv, s = got["live"], got["card"]
     from portfolio.scorecard import BAD, BLOCKED, GOOD, UNKNOWN
 
+    note = ('<p class="note">10,000 USDT 模擬金,<b>系統自己下單、'
+            '自己記帳</b>,不需要你動手 —— 你要動手的是上面的指令單。'
+            '現價走永續公開行情(標準合約沒有公開行情端點),'
+            '<b>只餵眼睛,不做對帳</b>。</p>')
+
+    # ── 此刻。id 讓 JS 每 15 秒換掉裡面的數字 ───────────
+    live_cells = (
+        f'<div class="kv"><div class="l">權益</div>'
+        f'<div class="v" id="s-eq">{_n(lv.equity)}</div></div>'
+        f'<div class="kv"><div class="l">報酬</div>'
+        f'<div class="v {tone(lv.return_pct or 0)}" id="s-ret">'
+        f'{_n(lv.return_pct, "+.2f")}%</div></div>'
+        f'<div class="kv"><div class="l">贏基準</div>'
+        f'<div class="v {tone(lv.excess_pct or 0)}" id="s-exc">'
+        f'{_n(lv.excess_pct, "+.2f")}%</div></div>'
+        f'<div class="kv"><div class="l">未實現</div>'
+        f'<div class="v {tone(lv.unrealized_pnl)}" id="s-unr">'
+        f'{lv.unrealized_pnl:+,.2f}</div></div>'
+        f'<div class="kv"><div class="l">已實現</div>'
+        f'<div class="v {tone(lv.realized_pnl)}" id="s-rea">'
+        f'{lv.realized_pnl:+,.2f}</div></div>')
+    out = [head, note,
+           '<div class="sect-h">此刻 · <span id="s-at">每 15 秒自己更新'
+           '</span></div>',
+           f'<div class="grid">{live_cells}</div>']
+
+    # ── 逐檔 ──────────────────────────────────────
+    if not lv.legs:
+        out.append('<div class="flag">模擬帳戶目前<b>空手</b> —— '
+                   '七個幣都在 50 日均線之下,或波動目標把規模壓到零。'
+                   '空手是一個部位,不是沒在跑。</div>')
+    else:
+        out.append('<table class="pos"><thead><tr><th>幣種</th><th>數量</th>'
+                   '<th>開倉均價</th><th>現價</th><th>未實現</th></tr></thead>'
+                   '<tbody id="s-legs">' + _sim_rows(lv) + '</tbody></table>')
+    if lv.missing:
+        out.append('<div class="flag warn">問不到現價的:<b>'
+                   + html.escape("、".join(lv.missing))
+                   + '</b> —— 這幾檔<b>完全沒有</b>算進上面的合計。'
+                   '合計因此是偏少的,不是完整的。</div>')
+
+    # ── 這套行不行 ────────────────────────────────
     tone_of = {GOOD: "ok", BAD: "warn", BLOCKED: "warn", UNKNOWN: ""}
-    cls = tone_of.get(s.verdict, "")
-    out = [head,
-           f'<div class="flag {cls}"><b>{html.escape(s.verdict)}</b><br>'
-           + "<br>".join(_md_bold(b) for b in s.because) + '</div>']
+    out.append('<div class="sect-h">這套到底好不好</div>')
+    out.append(f'<div class="flag {tone_of.get(s.verdict, "")}">'
+               f'<b>{html.escape(s.verdict)}</b><br>'
+               + "<br>".join(_md_bold(b) for b in s.because) + '</div>')
 
-    # ── 實跑的數字。**放在裁決下面,不是上面。** ──────────
-    # 數字放最上面,人會先讀數字再讀裁決,而裁決講的正是
-    # 「這些數字現在還不能當答案」。
-    cells = []
-    if s.return_pct is not None:
-        cells.append(kv("模擬報酬", f"{s.return_pct:+.2f}%",
-                        tone(s.return_pct)))
-    if s.benchmark_pct is not None:
-        cells.append(kv("等權買入持有", f"{s.benchmark_pct:+.2f}%",
-                        tone(s.benchmark_pct)))
-    if s.excess_pct is not None:
-        cells.append(kv("贏基準", f"{s.excess_pct:+.2f}%",
-                        tone(s.excess_pct)))
-    if s.equity is not None:
-        cells.append(kv("權益", f"{s.equity:,.2f}"))
-    if s.max_dd_pct is not None:
-        cells.append(kv("最大回撤", f"{s.max_dd_pct:.1f}%",
-                        "down" if s.max_dd_pct > 15.0 else ""))
-    cells.append(kv("走完的進出", f"{s.round_trips} 次"))
-    cells.append(kv("記帳天數", f"{s.days} 天"))
-    if s.stale_days is not None:
-        cells.append(kv("模擬在跑", "是" if s.running else "<b>停了</b>",
-                        "up" if s.running else "down"))
-    out.append(f'<div class="grid">{"".join(cells)}</div>')
+    # 只有帳本才知道的 —— **標明它們不是即時的**
+    hist = [kv("最大回撤", f"{s.max_dd_pct:.1f}%" if s.max_dd_pct is not None
+               else "—", "down" if (s.max_dd_pct or 0) > 15.0 else ""),
+            kv("走完的進出", f"{s.round_trips} 次"),
+            kv("記帳天數", f"{s.days} 天"),
+            kv("模擬在跑", "是" if s.running else "<b>停了</b>",
+               "up" if s.running else "down")]
+    out.append(f'<div class="grid">{"".join(hist)}</div>')
+    out.append('<p class="note">上面這四格來自<b>每日記帳的帳本</b>,'
+               f'算到 {html.escape(s.last_day or "—")} 為止 —— '
+               '它們不是即時的,也不該是:回撤與進出次數本來就是'
+               '一段時間累積出來的東西。</p>')
 
-    if s.first_day and s.last_day:
-        out.append(f'<p class="note">記帳期間 {html.escape(s.first_day)} ~ '
-                   f'{html.escape(s.last_day)}</p>')
-
-    # ── 回測:目前唯一有統計意義的證據 ──────────────────
     if s.backtest:
         train, test, test_dd, as_of = s.backtest
         f = lambda v: "—" if v is None else f"{float(v):.2f}"
@@ -868,124 +944,40 @@ def block_score() -> str:
             + (f' · 驗證段回撤 <b>{float(test_dd):.1f}%</b>'
                if test_dd is not None else '')
             + f'(研究迴路 {html.escape(str(as_of))} 記的)<br>'
-            '**看驗證段那個。** 訓練段是挑出這組參數的那一段,'
+            '<b>看驗證段那個。</b> 訓練段是挑出這組參數的那一段,'
             '它一定好看 —— 挑的時候就是照著它挑的。'
             '驗證段是這組參數沒看過的資料,只有它算數。</div>')
     else:
         out.append('<div class="flag warn">還沒有回測證據 —— '
-                   '`data/proposals.json` 裡沒有現任的訓練/驗證數字。'
-                   '跑一次 <code>python scripts/research.py</code>。</div>')
+                   '<code>data/proposals.json</code> 裡沒有現任的'
+                   '訓練/驗證數字。跑一次 '
+                   '<code>python scripts/research.py</code>。</div>')
     return "".join(out) + '</div>'
 
 
-
-def last_price(sym: str) -> float | None:
-    """現價 —— 用 15m K 棒的最後一根收盤。
-
-    ⚠️ **這是永續(swap)的公開行情,不是標準合約的。**
-    標準合約沒有公開行情端點(contract/v1 只有三個要簽名的 GET),
-    兩個產品追同一個現貨,價格貼得很近但**不是同一個數字**。
-    所以這個價格只餵眼睛:即時盈虧看個大概可以,對帳不能用它。
-    """
-    got = klines(sym, "15m", 2)
-    bars = got.get("bars") or []
-    return bars[-1]["c"] if bars else None
-
-
-def block_positions() -> str:
-    """模擬帳戶現在抱著什麼,以及現在賺賠多少。
-
-    2026-09-18 執政官:「我也希望看到他買了什麼,即時盈虧像之前那樣。」
-
-    ⚠️ **這一張是模擬帳戶,不是你的交易所帳戶。** 兩者的差別就是
-    「指令單」那一塊要你按的東西 —— 模擬先動,你照著按,真實才會跟上。
-    這張卡上的盈虧是**模擬的**,你的錢沒有跟著動。
-    """
-    def _compute():
-        try:
-            from portfolio.account import Account
-            a = Account.load()
-            held = {s: pos for s, pos in a.positions.items()
-                    if abs(pos.position_amt) > 1e-12}
-            marks, missing = {}, []
-            for sym in held:
-                px = last_price(sym)
-                if px is None:
-                    missing.append(sym)
-                else:
-                    marks[sym] = px
-            return {"a": a, "held": held, "marks": marks, "missing": missing}
-        except Exception as e:                       # noqa: BLE001
-            return {"error": f"{type(e).__name__}: {e}"}
-
-    got = _cached("positions", 30, _compute)
-    head = '<div class="card"><h2>模擬持倉 —— 系統現在抱著什麼</h2>'
-    if got.get("error"):
-        return (head + '<div class="flag warn">算不出來:'
-                + html.escape(got["error"]) + '</div></div>')
-
-    a, held, marks = got["a"], got["held"], got["marks"]
-    note = ('<p class="note">這是<b>模擬帳戶</b>的倉,不是你的交易所帳戶。'
-            '現價走永續公開行情(標準合約沒有公開行情端點),'
-            '兩者貼得很近但不是同一個數字 —— <b>只餵眼睛,不做對帳</b>。'
-            '<br>權益、報酬、這套行不行 —— 那些在下面的<b>成績單</b>,'
-            '這張只回答「現在抱著什麼」。</p>')
-
-    if not held:
-        return (head + note + '<div class="flag">模擬帳戶目前<b>空手</b> —— '
-                '七個幣都在 50 日均線之下,或波動目標把規模壓到零。'
-                '空手是一個部位,不是沒在跑。</div></div>')
-
-    # 有現價才算得出盈虧;算不出來的**列出來**,不從畫面上消失。
-    eq = a.equity(marks) if marks else None
+def _sim_rows(lv) -> str:
+    """逐檔那幾列。JS 更新時原封不動換掉這一段。"""
     rows = []
-    for sym in sorted(held):
-        pos = held[sym]
-        mark = marks.get(sym)
-        long_ = pos.position_amt > 0
+    for sym, g in lv.legs.items():
+        long_ = g["qty"] > 0
         cells = [
             f'<td class="sym">{html.escape(sym.replace("-", ""))}'
             f'<span class="pill {"p-buy" if long_ else "p-sell"}">'
             f'{"多" if long_ else "空"}</span></td>',
-            f'<td>{abs(pos.position_amt):,.6g}</td>',
-            f'<td>{pos.avg_price:,.6g}</td>',
+            f'<td>{abs(g["qty"]):,.6g}</td>',
+            f'<td>{g["avg"]:,.6g}</td>',
         ]
-        if mark is None:
+        if g["mark"] is None:
             cells.append('<td colspan="2" class="why">問不到現價 —— '
                          '<b>不是 0,是不知道</b></td>')
         else:
-            pnl = pos.unrealized(mark)
-            roi = (pnl / pos.initial_margin() * 100
-                   if pos.initial_margin() else 0.0)
-            cells.append(f'<td>{mark:,.6g}</td>')
-            cells.append(f'<td class="{tone(pnl)}">{pnl:+,.2f}'
-                         f'<div class="why">{roi:+.1f}% 本金</div></td>')
+            cells.append(f'<td>{g["mark"]:,.6g}</td>')
+            roi = ('' if g["roi"] is None
+                   else f'<div class="why">{g["roi"]:+.1f}% 本金</div>')
+            cells.append(f'<td class="{tone(g["pnl"])}">'
+                         f'{g["pnl"]:+,.2f}{roi}</td>')
         rows.append("<tr>" + "".join(cells) + "</tr>")
-
-    # 2026-09-18 執政官:「成績單跟模擬持倉是不是重複了?」—— 是,
-    # 權益兩張卡都印。分工改成:**這張只回答「現在抱著什麼」**,
-    # 帳戶層的成績(權益、報酬、已實現、回撤)歸成績單。
-    # 一個數字只出現在一個地方:兩邊各印一次的話,哪天它們因為取數
-    # 時點不同而對不起來,看的人只會困惑,不會知道該信哪一個。
-    tot = sum(held[s].unrealized(marks[s]) for s in held if s in marks)
-    cells = [kv("未實現合計", f"{tot:+,.2f}", tone(tot)),
-             kv("持倉檔數", f"{len(held)} 檔")]
-    if eq:
-        cells.append(kv("曝險", f"{a.exposure(marks) * 100:,.0f}%"))
-
-    warn = ""
-    if got["missing"]:
-        warn = ('<div class="flag warn">問不到現價的:<b>'
-                + html.escape("、".join(sorted(got["missing"])))
-                + '</b> —— 這幾檔的盈虧沒有算進上面的合計。'
-                '<b>合計因此是偏少的,不是完整的。</b></div>')
-
-    return (head + note
-            + '<table class="pos"><thead><tr>'
-              '<th>幣種</th><th>數量</th><th>開倉均價</th>'
-              '<th>現價</th><th>未實現</th></tr></thead><tbody>'
-            + "".join(rows) + '</tbody></table>'
-            + f'<div class="grid">{"".join(cells)}</div>' + warn + '</div>')
+    return "".join(rows)
 
 
 def block_screen() -> str:
@@ -1352,8 +1344,15 @@ def render() -> str:
     #   ⑤ 幣種        為什麼是這些幣
     # ②③相鄰是刻意的:模擬與真實的差距是這個系統最容易出事的地方,
     # 隔著別的卡片看,那個差距就不會被注意到。
-    desk = (block_tickets() + block_positions() + block_exchange()
-            + block_score() + block_screen())
+    # 順序照「我現在要做什麼」由上而下(2026-09-18):
+    #   ① 指令單     要你動手的,永遠第一
+    #   ② 模擬帳戶   系統自己在跑的 —— 指令單就是從這裡推出來的
+    #   ③ 交易所帳戶 你實際有什麼 —— ②和③的差距就是①
+    #   ④ 幣種       為什麼是這些幣
+    # ②原本是「模擬持倉」+「成績單」兩張,數字對不上(一張讀每日記帳
+    # 的檔案,一張用即時價),2026-09-18 合成一張,同一組價格算完。
+    desk = (block_tickets() + block_sim() + block_exchange()
+            + block_screen())
     system = block_gaps() + block_proposals() + block_system()
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
@@ -1624,6 +1623,63 @@ connect();
    開倉均價(琥珀虛線)與強平價(紅虛線)—— 看走勢的目的是知道
    「現在離我的進場點和爆倉點多遠」,不是純粹看圖形。
    資料走 /api/klines,只餵眼睛,不進任何決策。                   */
+/* ══ 模擬帳戶的即時數字 ══════════════════════════════════════
+   2026-09-18 執政官:「我想看到即時的盈虧數字變化。」
+   每 15 秒跟 /api/sim 要一次,數字變了就換掉並閃一下。
+
+   ⚠️ 打回來的是**同一個 sim_snapshot()** —— 頁面剛渲染時用的、
+   這裡輪詢回來的,是同一套算法同一組價格。各寫一份的話,兩份
+   遲早分岔,而那就是「數字對不上」。                            */
+function simPut(id, text, val){{
+  var el = document.getElementById(id);
+  if(!el || el.textContent === text) return;
+  el.textContent = text;
+  if(typeof val === 'number'){{
+    el.className = 'v ' + (val > 0 ? 'up' : (val < 0 ? 'down' : ''));
+  }}
+  el.classList.remove('tick');
+  void el.offsetWidth;          /* 重新觸發動畫 */
+  el.classList.add('tick');
+}}
+
+function simNum(v, dp, sign){{
+  if(v === null || v === undefined) return '—';
+  /* 千分位。這一整段在 Python 的 f-string 裡,所以正規表示式的
+     反斜線要寫兩個 —— 一個的話是 Python 的無效跳脫序列(現在是
+     DeprecationWarning,以後會是錯誤),而輸出的 JS 要的是一個。
+     這行註解第一版自己就犯了這個錯:它把範例寫進了同一個字串裡。 */
+  var t = Math.abs(v).toFixed(dp).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',');
+  if(sign) return (v < 0 ? '-' : '+') + t;
+  return (v < 0 ? '-' : '') + t;
+}}
+
+function simTick(){{
+  fetch('/api/sim?key=' + encodeURIComponent(KEY), {{cache:'no-store'}})
+    .then(function(r){{ return r.json(); }})
+    .then(function(d){{
+      var at = document.getElementById('s-at');
+      if(d.error){{
+        if(at) at.textContent = '更新失敗:' + d.error;
+        return;
+      }}
+      simPut('s-eq',  simNum(d.equity, 2, false));
+      simPut('s-ret', simNum(d.return_pct, 2, true) + '%', d.return_pct);
+      simPut('s-exc', simNum(d.excess_pct, 2, true) + '%', d.excess_pct);
+      simPut('s-unr', simNum(d.unrealized, 2, true), d.unrealized);
+      simPut('s-rea', simNum(d.realized, 2, true), d.realized);
+      var body = document.getElementById('s-legs');
+      if(body && d.rows) body.innerHTML = d.rows;
+      if(at) at.textContent = '剛剛更新 · 每 15 秒';
+    }})
+    .catch(function(){{
+      var at = document.getElementById('s-at');
+      /* 連不上要說連不上 —— 不說的話畫面上會是一組凍住的數字,
+         而凍住的數字跟活著的數字長得一模一樣。 */
+      if(at) at.textContent = '連不上,數字是舊的';
+    }});
+}}
+if(document.getElementById('s-eq')) setInterval(simTick, 15000);
+
 var KSTATE = {{}};   // sid -> {{iv, timer}}
 
 function drawK(sid, bars, entry, liq){{
@@ -1849,6 +1905,31 @@ class Handler(BaseHTTPRequestHandler):
                 payload = {"error": f"不受理的參數 symbol={sym} interval={iv}"}
             else:
                 payload = klines(sym, iv)
+            self._send(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+
+        # ── 模擬帳戶的即時數字 ───────────────────────────────
+        # 2026-09-18 執政官:「我想看到即時的盈虧數字變化。」
+        # 回的是 block_sim() **同一個** sim_snapshot(),所以頁面上
+        # 剛渲染出來的數字與這裡輪詢回來的永遠是同一套算法。
+        if u.path.startswith("/api/sim"):
+            try:
+                got = sim_snapshot()
+                if got.get("error"):
+                    payload = {"error": got["error"]}
+                else:
+                    lv = got["live"]
+                    payload = {
+                        "at": lv.at, "equity": lv.equity,
+                        "return_pct": lv.return_pct,
+                        "excess_pct": lv.excess_pct,
+                        "unrealized": lv.unrealized_pnl,
+                        "realized": lv.realized_pnl,
+                        "rows": _sim_rows(lv),
+                    }
+            except Exception as e:                   # noqa: BLE001
+                payload = {"error": f"{type(e).__name__}: {e}"}
             self._send(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return

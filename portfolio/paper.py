@@ -178,6 +178,40 @@ def _append(path: Path, rec: dict) -> None:
         os.fsync(f.fileno())
 
 
+def benchmark_pct(a, prices: dict, now_ms: int) -> float | None:
+    """等權買入持有的報酬(%),已扣資金費。算不出來回 None。
+
+    ═══ 為什麼是一個獨立的函式 ═══
+    2026-09-18:面板要即時顯示「贏基準多少」,而基準本來只在每日記帳
+    那一刻算一次。如果面板自己再寫一份算法,兩份遲早會分岔 ——
+    而分岔的那一天,畫面上的「贏基準 +0.3%」與帳本裡的數字會不一樣,
+    沒有人分得出哪一個是對的。
+
+    一個公式只寫一次。記帳用它,面板也用它,差別只在餵進去的價格。
+    """
+    if not getattr(a, "bench_start", None):
+        return None
+    legs = [(prices[s] / p0 - 1) for s, p0 in a.bench_start.items()
+            if s in prices and p0 > 0]
+    if not legs:
+        return None
+    bench = sum(legs) / len(legs) * 100
+    # 基準也要扣資金費 —— 組合那一側收的是實際費率,基準若用估計值
+    # 就是拿兩把不同的尺在比,而「勝過基準」是實盤資格契約第三條。
+    if a.started_at:
+        try:
+            start_ms = int(datetime.fromisoformat(
+                a.started_at).timestamp() * 1000)
+        except (TypeError, ValueError):
+            return bench
+        held = [s for s in a.bench_start if s in prices]
+        if held:
+            fees = [specs.funding_rate_sum(s, start_ms, now_ms) * 100
+                    for s in held]
+            bench -= sum(fees) / len(fees)
+    return bench
+
+
 def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     """算出今日該下的單,**不執行**。面板與 Telegram 用這個預覽。
 
@@ -373,20 +407,7 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     # 尺在比 —— 而「勝過基準」是實盤資格契約的第三條,比較有偏差
     # 等於契約在用錯的證據判決。基準等權持有全部標的,所以取逐幣
     # 實際結算合計的平均。
-    bench = None
-    if a.bench_start:
-        legs = [(prices[s] / p0 - 1) for s, p0 in a.bench_start.items()
-                if s in prices and p0 > 0]
-        if legs:
-            bench = sum(legs) / len(legs) * 100
-            if a.started_at:
-                start_ms = int(datetime.fromisoformat(
-                    a.started_at).timestamp() * 1000)
-                held = [s for s in a.bench_start if s in prices]
-                if held:
-                    fees = [specs.funding_rate_sum(s, start_ms, now_ms) * 100
-                            for s in held]
-                    bench -= sum(fees) / len(fees)
+    bench = benchmark_pct(a, prices, now_ms)
 
     dd = ((a.peak_equity - eq) / a.peak_equity * 100) if a.peak_equity else 0.0
     _append(cfg.curve_path, {
