@@ -397,10 +397,26 @@ def judge_challenger(incumbent: Variant, challenger: Variant, *,
         c_new_tr is not None and c_old_tr is not None and c_new_tr > c_old_tr,
         f"Calmar {c_new_tr} vs 現任 {c_old_tr}")
 
+    # ⚠️ 這一關**幾乎是同義反覆**,而那件事要講出來。
+    #
+    # 挑戰者是用**驗證段 Calmar 排序**挑出來的(scripts/research.py
+    # 的 rows.sort),所以被挑中的那個當然在驗證段好看 —— 它就是
+    # 因為好看才被挑中的。這一關過了幾乎不帶資訊。
+    #
+    # 真正替這件事付帳的是最後那一關:Bonferroni 乘上有效試驗數。
+    # 「在驗證段挑最好的,然後校正我看了幾次」是合法的做法,
+    # 但前提是**校正真的有做,而且沒有人把這一關當成證據**。
+    #
+    # 2026-09-18 的實例:ls100-vol35 訓練 0.23 / 驗證 2.24。
+    # 那是過擬合形狀的**反面**,而它同樣不是好消息 —— 它說的是
+    # 兩段的市況相反(訓練段是漲的,做空一路流血;驗證段是跌的,
+    # 做空當然賺)。那是方向,不是本事。擋下它的是回撤 39.7%
+    # 與校正後的 p=1.0,不是這一關。
     add("驗證段也贏過現任",
         c_new_te is not None and c_old_te is not None and c_new_te > c_old_te,
-        f"Calmar {c_new_te} vs 現任 {c_old_te}"
-        "(只贏訓練段 = 過擬合的典型形狀)")
+        f"Calmar {c_new_te} vs 現任 {c_old_te} —— "
+        "⚠️ 挑戰者本來就是按驗證段 Calmar 挑出來的,"
+        "所以這一關過了幾乎不帶資訊,真正算數的是下面的多重比較校正")
 
     worst_dd = max(train.get("max_dd_pct", 99.0),
                    test.get("max_dd_pct", 99.0))

@@ -800,29 +800,78 @@ def block_exchange() -> str:
     return out + '</div>'
 
 
-def sim_marks() -> tuple:
-    """模擬帳戶持有的每一檔的現價。回 (價格, 問不到的)。
+def all_prices() -> dict:
+    """**一次**拿回全部幣種的現價。回 {代號: (價格, 交易所的時間戳毫秒)}。
 
-    ⚠️ **這是永續(swap)的公開行情,不是標準合約的。**
-    標準合約沒有公開行情端點(contract/v1 只有三個要簽名的 GET),
-    兩個產品追同一個現貨,價格貼得很近但不是同一個數字。
-    所以它只餵眼睛:即時盈虧看個大概可以,對帳不能用它。
+    ═══ 為什麼是一次拿全部 ═══
+    2026-09-18 執政官問「能做到即時更新嗎」。原本每一輪要替每個幣
+    各打一次 K 線,7 個幣 5 秒一輪 = 84 次/分,而全系統的速率預算是
+    2 次/秒 = 120 次/分 —— 光面板就吃掉七成,日常記帳、巡檢、
+    交易所查詢全部要跟它搶。
+
+    這個端點一次回 1041 個幣,一輪只要 **1 次**。5 秒一輪 = 12 次/分。
+
+    ═══ 端點的形狀是量出來的,不是猜的 ═══
+    `scripts/probe_price_feed.py` 2026-09-18 在 VPS 上實跑:
+      GET /openApi/swap/v2/quote/price(不帶 symbol)
+      -> code 0,data 是 1041 筆的陣列,{symbol, price, time}
+      -> 我們那七個幣全部在裡面
+    帶 symbol 的對照組回的是**物件**,證明「不帶 symbol = 全部」
+    是這個端點真的支援的行為,不是我讀錯了什麼。
+
+    ⚠️ 這是永續(swap)的行情,不是標準合約的。標準合約沒有公開
+    行情端點,兩個產品追同一個現貨,貼得很近但不是同一個數字 ——
+    **只餵眼睛,不做對帳**。
     """
+    def _fetch():
+        import urllib.request
+        url = "https://open-api.bingx.com/openApi/swap/v2/quote/price"
+        try:
+            with ratelimit.urlopen(url, timeout=8) as r:
+                d = json.loads(r.read().decode("utf-8"))
+        except Exception as e:                       # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+        if str(d.get("code")) != "0":
+            return {"error": f"BingX code={d.get('code')} {d.get('msg')}"}
+        rows = d.get("data")
+        if not isinstance(rows, list):
+            # 形狀變了就說形狀變了 —— 不要假裝拿到了價格。
+            return {"error": f"data 不是陣列,是 {type(rows).__name__}"}
+        out = {}
+        for r in rows:
+            try:
+                out[r["symbol"]] = (float(r["price"]), int(r.get("time") or 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return {"px": out}
+    return _cached("allpx", 4, _fetch)
+
+
+def sim_marks() -> tuple:
+    """模擬帳戶要的那幾檔的現價。回 (帳戶, {代號: 價格}, 問不到的, 最舊幾秒)。"""
+    import time as _t
     from portfolio.account import Account
     a = Account.load()
     # 持倉 ∪ 基準籃子。**基準籃子不能漏** —— 策略空手的時候,
     # 「不交易的話現在是賺是賠」正是最該看到的那個數字。
-    want = {s for s, pos in a.positions.items()
-            if abs(pos.position_amt) > 1e-12} | set(a.bench_start or {})
-    marks, missing = {}, []
-    for sym in sorted(want):
-        got = klines(sym, "15m", 2)
-        bars = got.get("bars") or []
-        if bars:
-            marks[sym] = bars[-1]["c"]
-        else:
+    want = sorted({s for s, pos in a.positions.items()
+                   if abs(pos.position_amt) > 1e-12}
+                  | set(a.bench_start or {}))
+    got = all_prices()
+    if got.get("error"):
+        return a, {}, want, None
+    px = got["px"]
+    marks, missing, ages = {}, [], []
+    now_ms = _t.time() * 1000
+    for sym in want:
+        hit = px.get(sym)
+        if hit is None:
             missing.append(sym)
-    return a, marks, missing
+            continue
+        marks[sym] = hit[0]
+        if hit[1]:
+            ages.append((now_ms - hit[1]) / 1000.0)
+    return a, marks, missing, (max(ages) if ages else None)
 
 
 def sim_snapshot() -> dict:
@@ -836,9 +885,9 @@ def sim_snapshot() -> dict:
     def _compute():
         try:
             from portfolio.scorecard import live, score
-            a, marks, _ = sim_marks()
+            a, marks, _, age = sim_marks()
             lv = live(a, marks)
-            return {"live": lv, "card": score()}
+            return {"live": lv, "card": score(), "age_s": age}
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
     return _cached("sim", 15, _compute)
@@ -904,14 +953,13 @@ def block_sim() -> str:
         f'<div class="v {tone(lv.realized_pnl)}" id="s-rea">'
         f'{lv.realized_pnl:+,.2f}</div></div>')
     out = [head, note,
-           '<div class="sect-h">此刻 · <span id="s-at">每 15 秒自己更新'
+           '<div class="sect-h">此刻 · <span id="s-at">每 5 秒自己更新'
            '</span></div>',
-           # 為什麼是 15 秒不是 1 秒:速率預算。每一輪要替每個幣各打
-           # 一次公開行情,而全系統的預算是 2 次/秒 —— 面板跑太快會
-           # 把日常記帳、巡檢、交易所查詢的額度一起吃掉。
-           # 要更快需要「一次拿全部幣種」的端點,
-           # 而那個端點存不存在由 scripts/probe_price_feed.py 回答,
-           # **不是由我猜**。
+           # 5 秒一輪,一輪 1 次請求(all_prices 一次拿回全部幣種),
+           # = 12 次/分,而全系統預算是 120 次/分。原本每個幣各打一次
+           # K 線,5 秒一輪要 84 次/分,所以才卡在 15 秒。
+           # 端點的形狀是 scripts/probe_price_feed.py 在 VPS 實跑量到的,
+           # 不是我猜的。
            f'<div class="grid">{live_cells}</div>']
 
     # ── 逐檔 ──────────────────────────────────────
@@ -1685,7 +1733,14 @@ function simTick(){{
       simPut('s-rea', simNum(d.realized, 2, true), d.realized);
       var body = document.getElementById('s-legs');
       if(body && d.rows) body.innerHTML = d.rows;
-      if(at) at.textContent = '剛剛更新 · 每 15 秒';
+      /* 印真正的行情年齡 —— 「每 5 秒更新」只是我們問的頻率,
+         交易所那筆價格本身有多舊是另一回事,而那才是「即時」的
+         真正尺度。說不出年齡的「即時」是一句沒有證據的話。 */
+      if(at){{
+        at.textContent = (d.age_s === null || d.age_s === undefined)
+          ? '剛剛更新 · 每 5 秒'
+          : '行情 ' + d.age_s.toFixed(1) + ' 秒前 · 每 5 秒更新';
+      }}
     }})
     .catch(function(){{
       var at = document.getElementById('s-at');
@@ -1694,7 +1749,7 @@ function simTick(){{
       if(at) at.textContent = '連不上,數字是舊的';
     }});
 }}
-if(document.getElementById('s-eq')) setInterval(simTick, 15000);
+if(document.getElementById('s-eq')) setInterval(simTick, 5000);
 
 var KSTATE = {{}};   // sid -> {{iv, timer}}
 
@@ -1937,7 +1992,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     lv = got["live"]
                     payload = {
-                        "at": lv.at, "equity": lv.equity,
+                        "at": lv.at, "age_s": got.get("age_s"),
+                        "equity": lv.equity,
                         "return_pct": lv.return_pct,
                         "excess_pct": lv.excess_pct,
                         "unrealized": lv.unrealized_pnl,

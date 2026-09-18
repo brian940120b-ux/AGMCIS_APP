@@ -328,3 +328,26 @@ def test_a_failing_drawdown_check_still_explains_why_it_matters():
                 "回撤在契約內")
     assert "22.0%" in d
     assert "不可交易" in d and "不因為贏了而放寬" in d
+
+
+def test_the_validation_gate_admits_it_is_nearly_tautological():
+    """挑戰者是用**驗證段 Calmar 排序**挑出來的,所以被挑中的那個
+    當然在驗證段好看 —— 它就是因為好看才被挑中的。
+
+    這一關過了幾乎不帶資訊,而真正替它付帳的是 Bonferroni。
+    不講的話,一個讀表的人會把「✓ 驗證段也贏過現任」當成獨立證據,
+    然後在心裡把校正後的 p=1.0 打個折扣 —— 那正好是反過來的。
+    """
+    d = _detail(judged(), "驗證段也贏過現任")
+    assert "按驗證段 Calmar 挑出來的" in d
+    assert "多重比較校正" in d
+
+
+def test_the_selection_really_is_by_validation_calmar():
+    """上面那句話必須跟程式一致 —— 排序改了而說明沒改,就是一句
+    看起來有根據的錯話。"""
+    from pathlib import Path as _P
+    src = (_P(R.__file__).resolve().parents[1]
+           / "scripts/research.py").read_text(encoding="utf-8")
+    assert 'rows.sort(key=lambda r: (r[2].get("calmar") or -99), reverse=True)' \
+        in src, "挑選方式變了,judge_challenger 裡的說明要跟著改"

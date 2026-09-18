@@ -188,7 +188,41 @@ def test_the_page_says_so_when_the_poll_cannot_reach_the_server():
 
 
 def test_the_poll_interval_is_declared_on_screen():
-    assert "每 15 秒" in render_with(acct(), {})
+    assert "每 5 秒" in render_with(acct(), {})
+
+
+def test_the_prices_come_from_one_bulk_call_not_one_per_symbol():
+    """**一輪一次請求,不是一個幣一次。**
+
+    速率預算是 2 次/秒 = 120 次/分。7 個幣各打一次 K 線、5 秒一輪
+    = 84 次/分,光面板就吃掉七成,日常記帳、巡檢、交易所查詢全部
+    要跟它搶。一次拿回全部的話,5 秒一輪只要 12 次/分。
+
+    端點的形狀是 scripts/probe_price_feed.py 2026-09-18 在 VPS 實跑
+    量到的(不帶 symbol -> code 0,1041 筆陣列,七個幣全在),
+    **不是猜的**。
+    """
+    src = Path(dash.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def sim_marks("):src.index("def sim_snapshot(")]
+    assert "all_prices()" in body
+    assert "klines(" not in body, "sim_marks 不該再逐幣打 K 線"
+
+
+def test_a_changed_response_shape_is_reported_not_papered_over():
+    """交易所哪天改了形狀,要說形狀變了 —— 不要假裝拿到了價格。"""
+    src = Path(dash.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def all_prices("):src.index("def sim_marks(")]
+    assert "data 不是陣列" in body
+
+
+def test_the_screen_shows_how_old_the_quote_actually_is():
+    """「每 5 秒更新」只是我們問的頻率;交易所那筆價格本身有多舊是
+    另一回事,而那才是「即時」的真正尺度。
+
+    說不出年齡的「即時」是一句沒有證據的話。
+    """
+    page = dash.render()
+    assert "行情 ' + d.age_s.toFixed(1) + ' 秒前" in page
 
 
 def test_the_emitted_javascript_has_a_valid_thousands_separator():
