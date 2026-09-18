@@ -61,36 +61,69 @@ DEFAULT_BAND_PCT = 1.0
 
 # BingX 的 App 連結。
 #
-# ═══ 2026-09-18:第一版三條都打不開,而我沒有辦法自己測 ═══
-# 執政官回報「App 打不開」。`bingx://trade?symbol=…` 是我**猜**的 ——
-# BingX 沒有公開任何 deeplink 規格(查過官方 API 文件、支援中心、
-# GitHub),而開發環境連 bingx.com 都連不上(代理擋著),
-# 所以我連「這個網址存不存在」都驗不了。
+# ═══ 2026-09-18:執政官分享了一條真的連結,而我猜錯了 scheme ═══
+# 我猜的是 `bingx://`,三條全打不開。執政官從 App 分享出來的是:
 #
-# **猜一條打不開的連結,比不給連結糟** —— 它讓人以為是自己手機的問題。
+#   https://bingx.com/perpetual/BTC-USDT?ref=…&liveTips=2
+#     &activePageUrl=bingbon%3A%2F%2Ftrade%2Fdetail
+#       %3FcoinName%3DBTC%26valuationCoinName%3DUSDT%26marginCoinName%3DUSDT
 #
-# 所以改成:預設只給一條**一定到得了**的網站首頁,其餘交給執政官。
-# 真正會動的那條只有一個方法拿到:**在 BingX App 裡打開那個合約,
-# 用「分享」複製連結貼給我**,我把它變成模板。在那之前這裡不猜。
+# 把 activePageUrl 解碼出來就是 App 真正吃的那一條:
 #
-# 可以用環境變數覆蓋,免得為了改一條網址還要動程式碼:
-#   BINGX_LINK_TEMPLATE="https://…/{symbol}"
+#   bingbon://trade/detail?coinName=BTC&valuationCoinName=USDT
+#                          &marginCoinName=USDT
+#
+# **scheme 是 `bingbon://`** —— BingX 的前身是 Bingbon,而 App 的
+# URL scheme 沒有跟著改名。這種事情猜不到,只能拿一條真的連結來看。
+#
+# ⚠️ **那條分享連結是「永續」頁面的**(網址路徑是 /perpetual/)。
+# 標準合約的路徑我還沒有樣本 —— 需要執政官從**標準合約**頁面再分享
+# 一條。在那之前 web 連結會開到永續頁,而那是錯的產品,
+# 所以下面把這件事標出來,不假裝它是對的。
+#
+# ref= 那個推薦碼刻意不帶:那是執政官自己的分享碼,對他自己沒有作用,
+# 而我不想把一個看不懂的追蹤參數寫死在程式裡。
 import os as _os
 
+#: 覆蓋用。拿到標準合約的正確連結之後設這個就好,不用改程式碼。
 _TEMPLATE = _os.environ.get("BINGX_LINK_TEMPLATE", "").strip()
 
-#: 還沒有人證實過任何一條 deeplink。這個旗標讓面板說實話。
+#: App 的 URL scheme。2026-09-18 由執政官的分享連結證實。
+APP_LINK = ("bingbon://trade/detail?coinName={base}"
+            "&valuationCoinName={quote}&marginCoinName=USDT")
+
+#: 網頁。⚠️ 這是**永續**的路徑 —— 標準合約的還沒有樣本。
+WEB_LINK = "https://bingx.com/perpetual/{base}-{quote}"
+
+#: 標準合約的連結有沒有被證實過。**沒有,而面板要說實話。**
 BINGX_LINK_VERIFIED = bool(_TEMPLATE)
 
 
-def bingx_links(symbol: str) -> list:
-    """開啟 BingX 的連結。回 [(標籤, 網址)]。
+def split_symbol(symbol: str) -> tuple:
+    """`BTCUSDT` / `BTC-USDT` → `("BTC", "USDT")`。
 
-    沒設 `BINGX_LINK_TEMPLATE` 就只給網站首頁 —— **不猜 deeplink**。
+    切不開就回 (整串, "USDT") —— **不猜**,讓連結壞得看得出來,
+    而不是產生一條指向別的幣的連結。那種錯最貴。
     """
+    plain = symbol.replace("-", "").upper()
+    for quote in ("USDT", "USDC", "USD"):
+        if plain.endswith(quote) and len(plain) > len(quote):
+            return plain[:-len(quote)], quote
+    return plain, "USDT"
+
+
+def bingx_links(symbol: str) -> list:
+    """開啟 BingX 的連結。回 [(標籤, 網址, 註記)]。"""
+    base, quote = split_symbol(symbol)
     if _TEMPLATE:
-        return [("在 BingX 開啟", _TEMPLATE.format(symbol=symbol))]
-    return [("開啟 BingX(首頁,要自己找合約)", "https://bingx.com/")]
+        return [("在 BingX 開啟",
+                 _TEMPLATE.format(symbol=symbol, base=base, quote=quote), "")]
+    return [
+        ("開 App", APP_LINK.format(base=base, quote=quote),
+         "bingbon:// —— 2026-09-18 由分享連結證實"),
+        ("開網頁", WEB_LINK.format(base=base, quote=quote),
+         "⚠️ 這是**永續**頁,不是標準合約 —— 標準合約的網址還沒有樣本"),
+    ]
 
 
 OPEN_LONG = "OPEN_LONG"

@@ -334,6 +334,8 @@ tbody tr:first-child td{border-top:none}
  border-color:var(--up-bd)}
 .tlinks{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;
  padding-top:10px;border-top:1px solid var(--line)}
+.tl-n{display:block;font-size:10px;color:var(--dim);
+ margin-top:3px;font-weight:400}
 .tl{flex:1 1 auto;text-align:center;font-size:12px;
  padding:9px 10px;border-radius:9px;border:1px solid var(--line);
  background:var(--el2);color:var(--ink);text-decoration:none}
@@ -438,8 +440,11 @@ def _ticket_card(t) -> str:
         + '</div>'
         + '<div class="tlinks">' + "".join(
             f'<a class="tl" href="{html.escape(url)}">'
-            f'{html.escape(label)}</a>'
-            for label, url in t.links())
+            f'{html.escape(label)}'
+            + (f'<span class="tl-n">{html.escape(note)}</span>'
+               if note else '')
+            + '</a>'
+            for label, url, note in t.links())
         + '</div>'
         + warn + '</div>')
 
@@ -537,13 +542,16 @@ def block_tickets() -> str:
             '<div class="flag">欄位順序照 <b>BingX 標準合約開單畫面</b>,'
             '點數字就複製。<b>數量、交易總額、保證金三個都給</b> —— '
             'App 讓你填哪一格就用哪一個,不用自己在手機上乘除。<br>'
-            '⚠️ <b>連結目前只到 BingX 首頁。</b> 2026-09-13 我給的三條 '
-            'deeplink 是**猜的**,而執政官實測<b>打不開</b> —— '
-            'BingX 沒有公開任何 deeplink 規格,而開發環境連 bingx.com '
-            '都連不上,我驗不了。<b>猜一條打不開的連結比不給連結糟</b>:'
-            '它讓人以為是自己手機的問題。<br>'
-            '要修好只有一個方法:<b>在 BingX App 裡打開那個合約,'
-            '用「分享」把連結複製給我</b>,我把它變成模板。</div>'
+            '<b>「開 App」用的是 <code>bingbon://</code></b> —— '
+            'BingX 的前身是 Bingbon,而 App 的 URL scheme 沒跟著改名。'
+            '我原本猜 <code>bingx://</code>,三條全打不開;'
+            '2026-09-18 執政官分享了一條真的連結才看出來。'
+            '<b>這種事猜不到,只能拿一條真的來看。</b><br>'
+            '⚠️ 但那條分享連結是<b>永續</b>頁面的 —— '
+            '<b>標準合約的網址我還沒有樣本</b>。所以「開網頁」現在會開到'
+            '永續,那是錯的產品。<br>'
+            '要修好:<b>在 App 裡打開一個「U 本位標準合約」,'
+            '用「分享」把連結給我。</b></div>'
             + sizing_basis())
 
     if got.get("error"):

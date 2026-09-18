@@ -396,18 +396,46 @@ def test_no_markdown_asterisks_leak_into_the_pasted_text():
 # ══════════════════════════════════════════════════════════
 # 九、不猜 deeplink
 # ══════════════════════════════════════════════════════════
-def test_no_made_up_deeplink_by_default():
-    """2026-09-13 我猜了三條,執政官實測全部打不開。
+def test_the_app_scheme_is_the_one_the_share_link_proved():
+    """**`bingbon://`,不是 `bingx://`。**
 
-    **猜一條打不開的連結比不給連結糟** —— 它讓人以為是自己手機的問題。
+    BingX 的前身是 Bingbon,而 App 的 URL scheme 沒跟著改名。
+    我猜的三條 `bingx://` 全打不開;2026-09-18 執政官分享了一條真的
+    連結,把 activePageUrl 解碼出來才看到。**這種事猜不到。**
+    """
+    from portfolio.ticket import bingx_links
+
+    app = bingx_links("BTCUSDT")[0][1]
+    assert app.startswith("bingbon://trade/detail?")
+    assert "coinName=BTC" in app
+    assert "valuationCoinName=USDT" in app
+    assert "bingx://" not in app, "那個猜錯的 scheme 不准回來"
+
+
+def test_the_web_link_admits_it_points_at_the_wrong_product():
+    """那條分享連結是**永續**頁的,標準合約的網址還沒有樣本。
+
+    一條指向錯產品的連結,如果不說,比沒有連結危險。
     """
     from portfolio.ticket import BINGX_LINK_VERIFIED, bingx_links
 
-    links = bingx_links("BTCUSDT")
-    assert len(links) == 1
-    assert links[0][1].startswith("https://")
-    assert "bingx://" not in links[0][1], "不准再猜 app scheme"
+    web = [x for x in bingx_links("BTCUSDT") if x[1].startswith("https://")]
+    assert web and "perpetual" in web[0][1]
+    assert "永續" in web[0][2] and "標準合約" in web[0][2]
     assert BINGX_LINK_VERIFIED is False
+
+
+def test_an_unsplittable_symbol_does_not_produce_a_link_to_another_coin():
+    """切不開就整串當 base —— **不猜**。
+
+    猜錯的話會產生一條指向**別的幣**的連結,而那種錯最貴:
+    畫面上寫 A,連結開到 B,而兩邊都看起來正常。
+    """
+    from portfolio.ticket import split_symbol
+
+    assert split_symbol("WEIRD") == ("WEIRD", "USDT")
+    assert split_symbol("BTC-USDT") == ("BTC", "USDT")
+    assert split_symbol("ETHUSDC") == ("ETH", "USDC")
 
 
 def test_a_verified_template_can_be_supplied_without_touching_code(monkeypatch):
@@ -419,6 +447,7 @@ def test_a_verified_template_can_be_supplied_without_touching_code(monkeypatch):
     importlib.reload(mod)
     try:
         assert mod.bingx_links("BTCUSDT")[0][1] == "https://x.test/BTCUSDT"
+        assert len(mod.bingx_links("BTCUSDT")) == 1
         assert mod.BINGX_LINK_VERIFIED is True
     finally:
         monkeypatch.delenv("BINGX_LINK_TEMPLATE")
