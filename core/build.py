@@ -100,17 +100,39 @@ def _head_commit(root: Path) -> str | None:
     return None
 
 
+#: 這個行程**啟動時**的 commit。
+#:
+#: ⚠️ 2026-09-18:第一版每次呼叫都重讀 `.git`,所以 `git pull` 之後
+#: 不重啟,版本戳會顯示**新的** commit —— 而跑的還是舊的程式碼。
+#: 一個會說謊的版本戳,比沒有版本戳危險:它讓「我明明更新了」
+#: 變成一句有證據的錯話。
+#:
+#: 在 import 的時候抓一次就凍住,跟 STARTED_AT 同一個時刻。
+RUNNING_COMMIT = _head_commit(BASE)
+
+
 @dataclass(frozen=True)
 class Build:
     commit: str | None
-    #: 進入點檔案最後一次被改動的時間。commit 讀不到時的退路 ——
-    #: 它至少能回答「這個檔案是什麼時候的」。
     source_mtime: float | None
     started_at: float
+    #: 工作目錄**現在**的 commit(每次呼叫重讀)。
+    #: 跟 `commit` 不一樣 = **pull 了但沒重啟**。
+    on_disk: str | None = None
 
     @property
     def uptime_s(self) -> float:
         return max(0.0, time.time() - self.started_at)
+
+    @property
+    def stale(self) -> bool:
+        """程式碼更新了,但這個行程還在跑舊的。
+
+        **這一格是 2026-09-18 加的,而它要回答的問題已經被問了四輪:**
+        「我明明 pull 了,為什麼畫面沒變?」
+        """
+        return bool(self.commit and self.on_disk
+                    and self.commit != self.on_disk)
 
     def describe(self) -> str:
         """一行,給人看。**讀不到就明講讀不到,不留空白。**"""
@@ -123,6 +145,9 @@ class Build:
         else:
             age = f"{up / 3600:.1f} 小時前啟動"
         out = f"{commit} · {age}"
+        if self.stale:
+            out += (f"  ⚠️ 磁碟上已經是 {self.on_disk} —— "
+                    "**你 pull 了但沒重啟**")
         if self.source_mtime:
             out += (" · 原始碼 "
                     + time.strftime("%m-%d %H:%M",
@@ -130,7 +155,8 @@ class Build:
         return out
 
     def to_dict(self) -> dict:
-        return {"commit": self.commit, "started_at": self.started_at,
+        return {"commit": self.commit, "on_disk": self.on_disk,
+                "stale": self.stale, "started_at": self.started_at,
                 "uptime_s": round(self.uptime_s, 1),
                 "source_mtime": self.source_mtime,
                 "describe": self.describe()}
@@ -147,5 +173,5 @@ def current(entry: str | os.PathLike | None = None) -> Build:
             mtime = Path(entry).stat().st_mtime
         except OSError:
             mtime = None
-    return Build(commit=_head_commit(BASE), source_mtime=mtime,
-                 started_at=STARTED_AT)
+    return Build(commit=RUNNING_COMMIT, source_mtime=mtime,
+                 started_at=STARTED_AT, on_disk=_head_commit(BASE))

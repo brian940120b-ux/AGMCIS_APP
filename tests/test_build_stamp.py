@@ -38,9 +38,14 @@ def test_an_unreadable_repo_gives_none_not_a_made_up_version(tmp_path,
     """讀不到就回 None。**不要編一個版本號出來。**
 
     一個假的版本號比沒有版本號糟得多:它會讓人相信自己在跑新版。
+
+    2026-09-18 改:`current().commit` 現在是 import 時凍住的快照
+    (見 RUNNING_COMMIT),所以這條改成直接驗讀取函式本身,
+    外加 `on_disk` —— 那一格才是每次呼叫重讀的。
     """
+    assert build._head_commit(tmp_path) is None
     monkeypatch.setattr(build, "BASE", tmp_path)
-    assert build.current(None).commit is None
+    assert build.current(None).on_disk is None
 
 
 def test_the_description_says_so_when_the_version_is_unknown():
@@ -156,3 +161,44 @@ def test_the_page_has_no_card_that_is_not_the_current_system():
     assert found == expected, (
         f"多出來的:{sorted(found - expected)}\n"
         f"不見了的:{sorted(expected - found)}")
+
+
+# ══════════════════════════════════════════════════════════
+# pull 了但沒重啟
+# ══════════════════════════════════════════════════════════
+def test_the_stamp_reports_the_commit_the_process_started_from():
+    """**不是工作目錄現在的 commit。**
+
+    第一版每次呼叫都重讀 .git,所以 `git pull` 之後不重啟,版本戳會
+    顯示**新的** commit —— 而跑的還是舊的程式碼。
+    一個會說謊的版本戳比沒有版本戳危險:它讓「我明明更新了」
+    變成一句**有證據的錯話**。
+    """
+    assert build.RUNNING_COMMIT == build.current(__file__).commit
+
+
+def test_pull_without_restart_is_called_out_by_name():
+    """這個問題 2026-09-18 之前已經被問了四輪。"""
+    stale = build.Build(commit="aaaaaaaaaaaa", source_mtime=None,
+                        started_at=time.time() - 85 * 3600,
+                        on_disk="bbbbbbbbbbbb")
+    assert stale.stale is True
+    text = stale.describe()
+    assert "pull 了但沒重啟" in text
+    assert "bbbbbbbbbbbb" in text, "要說出磁碟上是哪一版"
+
+
+def test_a_freshly_restarted_process_is_not_flagged_stale():
+    same = build.Build(commit="aaaaaaaaaaaa", source_mtime=None,
+                       started_at=time.time(), on_disk="aaaaaaaaaaaa")
+    assert same.stale is False
+    assert "沒重啟" not in same.describe()
+
+
+def test_an_unknown_commit_is_never_called_stale():
+    """讀不到 commit 的時候不准亂喊 —— 那會變成一個永遠在響的警報,
+    而永遠在響的警報等於沒有警報。"""
+    assert build.Build(commit=None, source_mtime=None,
+                       started_at=time.time(), on_disk="x").stale is False
+    assert build.Build(commit="x", source_mtime=None,
+                       started_at=time.time(), on_disk=None).stale is False
