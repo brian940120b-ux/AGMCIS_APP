@@ -242,7 +242,22 @@ def main() -> int:
     except Exception as e:
         log.warning(f"契約更新失敗:{e}")
 
-    print("④ 推播日報")
+    print("④ 研究迴路")
+    # 執政官要的是「**不斷地**經過多次的模擬交易之後發現該怎麼調整」。
+    # 所以它跟記帳一起每天跑,而不是等人想到才跑一次。
+    #
+    # ⚠️ 兩件事刻意如此:
+    #   · 它**只產生提案,不改任何設定** —— 生效要執政官裁決(§102)
+    #   · 它失敗**不得拖垮記帳**。記帳是這個系統的本業,
+    #     研究是加值;一個加值功能把本業弄掛掉,是最蠢的一種當機。
+    try:
+        from scripts.research import main as research_main
+        research_main([])
+    except Exception as e:                       # noqa: BLE001
+        log.warning(f"研究迴路失敗:{e}")
+        print(f"   ⚠ 研究迴路失敗(不影響記帳):{type(e).__name__}: {e}")
+
+    print("⑤ 推播日報")
     msg = _report()
     print(msg)
     telegram.send(msg, html=True)

@@ -102,11 +102,56 @@ def cmd_show(args) -> int:
         print(f"\n{LINE}")
         print(f"  ⚠️ {caveat}")
 
+    _show_catch_up(args, plan)
+
     print(f"\n{LINE}")
     print("  按完之後跑這個,確認有沒有按對:")
     print("    .venv/bin/python scripts/ticket.py --verify")
     print(LINE)
     return 0
+
+
+def _show_catch_up(args, plan: dict) -> None:
+    """對齊單 —— 讓真實帳戶追上模擬。
+
+    上面那批是**鏡像**:模擬今天換手什麼就推什麼。但模擬幾天前就開好
+    了倉,而真實帳戶可能是空的 —— 鏡像只鏡像「從現在開始的變動」。
+    「今天沒有要按的」在那個狀態下是真話,**也是誤導**。
+    """
+    load_env()
+    try:
+        from exchange.bingx.standard import BingXStandardUSDT
+        from portfolio.account import Account
+        from portfolio.ticket import catch_up
+
+        held = {sym: pos.position_amt
+                for sym, pos in Account.load().positions.items()
+                if abs(pos.position_amt) > 1e-12}
+        made, refused, notes = catch_up(
+            held, BingXStandardUSDT().rich_positions(),
+            plan.get("prices") or {}, args.stop_pct, args.leverage,
+            strategy=str(getattr(plan.get("cfg"), "strategy", "")),
+            signal_day=str(plan.get("signal_day") or ""))
+    except Exception as e:                       # noqa: BLE001
+        print(f"\n{LINE}\n  對齊單\n{LINE}\n")
+        print(f"  算不出來:{type(e).__name__}: {e}")
+        print("  **這不代表兩邊一致**,只代表沒問到。")
+        return
+
+    if not made and not refused and not notes:
+        print(f"\n  真實帳戶跟模擬對得上,沒有對齊單。")
+        return
+
+    print(f"\n{LINE}\n  對齊單 —— 讓真實帳戶追上模擬({len(made)} 張)"
+          f"\n{LINE}")
+    print("\n  這一批是**一次性**的:按完之後就交給日常的鏡像。")
+    for t in made:
+        print()
+        print(t.render())
+    for sym, why in refused:
+        print(f"\n  {sym}\n    {why}")
+    for note in notes:
+        print(f"\n  · {note}")
 
 
 def cmd_verify(args) -> int:

@@ -464,6 +464,56 @@ def _build():
     return current(__file__)
 
 
+def _ticket_card(t) -> str:
+    """一張指令單的 HTML。
+
+    鏡像單與對齊單共用這一個 —— 兩邊各寫一份的話,遲早有一邊
+    少印停損。而那是這張卡上唯一不能少的東西。
+    """
+    warn = "".join(f'<div class="why">⚠️ {html.escape(w)}</div>'
+                   for w in t.warnings)
+    liq = (f'{t.est_liq_price:,.6g}' if t.est_liq_price is not None else '—')
+    margin = (f'{t.est_margin:,.2f}' if t.est_margin is not None else '—')
+    return (
+            '<div class="ticket">'
+        f'<div class="t-head"><span class="sym">'
+        f'{html.escape(t.symbol)}</span>'
+        f'<span class="pill {"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
+        f'{html.escape(t.tap)}</span></div>'
+        '<table><tbody>'
+        + "".join(
+            f'<tr><td>{html.escape(label)}</td><td>'
+            f'<button class="cp" data-v="{html.escape(value)}">'
+            f'<b>{html.escape(value)}</b>{html.escape(unit)}'
+            '<span class="cpi">複製</span></button>'
+            + (f'<div class="why">{html.escape(note)}</div>'
+               if note else '')
+            + '</td></tr>'
+            for label, value, note, unit in (
+                ("數量", t.fields()[0][1], t.fields()[0][2], ""),
+                ("槓桿", t.fields()[1][1], t.fields()[1][2], "×"),
+                ("保證金", t.margin_mode, "", ""),
+                ("停損", t.fields()[2][1], t.fields()[2][2], ""),
+            ))
+        +
+        f'<tr><td>預估佔用</td><td>{margin} USDT</td></tr>'
+        f'<tr><td>預估強平</td><td>{liq}'
+        '<div class="why">我方算的,交易所這個產品不回</div></td></tr>'
+        f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
+        f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
+        '</td></tr>'
+        f'<tr><td>有效到</td><td>{html.escape(t.valid_until_utc)}</td></tr>'
+        f'<tr><td>單號</td><td class="why">{html.escape(t.ticket_id)}</td>'
+        '</tr>'
+        '</tbody></table>'
+        + '<div class="tlinks">' + "".join(
+            f'<a class="tl" href="{html.escape(url)}">'
+            f'{html.escape(label)}</a>'
+            for label, url in t.links())
+        + '</div>'
+        + warn + '</div>')
+
+
 def block_tickets() -> str:
     """指令單 —— **這一塊是整個面板現在最重要的東西。**
 
@@ -486,7 +536,36 @@ def block_tickets() -> str:
             if BACKSTOP_PCT is None:
                 return {"error": "BACKSTOP_PCT 還沒有人決定(§102)"}
             made, refused = make_tickets(p, BACKSTOP_PCT, LEVERAGE_CAP)
-            return {"made": made, "refused": refused, "plan": p}
+
+            # ── 對齊單 ────────────────────────────────────
+            # 上面那批是**鏡像**:模擬今天要換手什麼,就推什麼。
+            # 但模擬幾天前就開好了倉,而真實帳戶可能是空的 ——
+            # 鏡像只鏡像「從現在開始的變動」,所以真實帳戶永遠追不上。
+            #
+            # 「今天沒有要按的」在那個狀態下是真話,**也是誤導**。
+            catch, catch_refused, catch_notes = [], [], []
+            try:
+                from exchange.bingx.standard import BingXStandardUSDT
+                from portfolio.account import Account
+                from portfolio.ticket import catch_up
+
+                held = {sym: pos.position_amt
+                        for sym, pos in Account.load().positions.items()
+                        if abs(pos.position_amt) > 1e-12}
+                catch, catch_refused, catch_notes = catch_up(
+                    held, BingXStandardUSDT().rich_positions(),
+                    p.get("prices") or {}, BACKSTOP_PCT, LEVERAGE_CAP,
+                    strategy=str(getattr(p.get("cfg"), "strategy", "")),
+                    signal_day=str(p.get("signal_day") or ""))
+            except Exception as e:                   # noqa: BLE001
+                # 對齊算不出來**不該讓整塊消失** —— 上面那批鏡像單
+                # 是獨立的,它們照樣要印出來。
+                catch_notes = [f"對齊單算不出來:{type(e).__name__}: {e} —— "
+                               "**不代表兩邊一致**,只代表沒問到"]
+
+            return {"made": made, "refused": refused, "plan": p,
+                    "catch": catch, "catch_refused": catch_refused,
+                    "catch_notes": catch_notes}
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
 
@@ -512,57 +591,34 @@ def block_tickets() -> str:
     made = got.get("made") or []
     refused = got.get("refused") or []
 
-    if not made and not refused:
-        return (head + '<p class="note">今天沒有要按的。目標配置與'
-                '現有持倉一致 —— 這條策略本來就不常動。</p></div>')
+    catch = got.get("catch") or []
+    catch_refused = got.get("catch_refused") or []
+    catch_notes = got.get("catch_notes") or []
 
-    cards = []
-    for t in made:
-        warn = "".join(f'<div class="why">⚠️ {html.escape(w)}</div>'
-                       for w in t.warnings)
-        liq = (f'{t.est_liq_price:,.6g}' if t.est_liq_price is not None
-               else '—')
-        margin = (f'{t.est_margin:,.2f}' if t.est_margin is not None else '—')
-        cards.append(
-            '<div class="ticket">'
-            f'<div class="t-head"><span class="sym">'
-            f'{html.escape(t.symbol)}</span>'
-            f'<span class="pill {"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
-            f'{html.escape(t.tap)}</span></div>'
-            '<table><tbody>'
-            + "".join(
-                f'<tr><td>{html.escape(label)}</td><td>'
-                f'<button class="cp" data-v="{html.escape(value)}">'
-                f'<b>{html.escape(value)}</b>{html.escape(unit)}'
-                '<span class="cpi">複製</span></button>'
-                + (f'<div class="why">{html.escape(note)}</div>'
-                   if note else '')
-                + '</td></tr>'
-                for label, value, note, unit in (
-                    ("數量", t.fields()[0][1], t.fields()[0][2], ""),
-                    ("槓桿", t.fields()[1][1], t.fields()[1][2], "×"),
-                    ("保證金", t.margin_mode, "", ""),
-                    ("停損", t.fields()[2][1], t.fields()[2][2], ""),
-                ))
-            +
-            f'<tr><td>預估佔用</td><td>{margin} USDT</td></tr>'
-            f'<tr><td>預估強平</td><td>{liq}'
-            '<div class="why">我方算的,交易所這個產品不回</div></td></tr>'
-            f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
-            f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
-            '</td></tr>'
-            f'<tr><td>有效到</td><td>{html.escape(t.valid_until_utc)}</td></tr>'
-            f'<tr><td>單號</td><td class="why">{html.escape(t.ticket_id)}</td>'
-            '</tr>'
-            '</tbody></table>'
-            + '<div class="tlinks">' + "".join(
-                f'<a class="tl" href="{html.escape(url)}">'
-                f'{html.escape(label)}</a>'
-                for label, url in t.links())
-            + '</div>'
-            + warn + '</div>')
+    if not made and not refused and not catch and not catch_notes:
+        return (head + '<p class="note">今天沒有要按的。目標配置與'
+                '現有持倉一致,而且真實帳戶跟模擬對得上。</p></div>')
+
+    cards = [_ticket_card(t) for t in made]
 
     body = '<div class="tickets">' + "".join(cards) + '</div>' if cards else ''
+
+    if catch or catch_notes or catch_refused:
+        body += ('<h3 class="sub">對齊單 —— 讓真實帳戶追上模擬</h3>'
+                 '<div class="flag">上面那批是<b>鏡像</b>:模擬今天換手'
+                 '什麼就推什麼。但模擬幾天前就開好了倉,而真實帳戶'
+                 '可能是空的 —— 鏡像只鏡像「從現在開始的變動」。<br>'
+                 '這一批是<b>一次性</b>的:按完之後就交給日常的鏡像。'
+                 '</div>')
+        if catch:
+            body += ('<div class="tickets">'
+                     + "".join(_ticket_card(t) for t in catch)
+                     + '</div>')
+        for note in catch_notes:
+            body += f'<div class="flag">{html.escape(note)}</div>'
+        for sym, why in catch_refused:
+            body += (f'<div class="flag"><b>{html.escape(sym)}</b><br>'
+                     f'{html.escape(why)}</div>')
 
     if refused:
         body += ('<h3 class="sub">開不出來的</h3>' + "".join(

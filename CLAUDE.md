@@ -222,6 +222,8 @@ U 本位(`contract/v1`)沒有下單端點,幣本位(`cswap/v1`)有。
 ✅ J 精度從成交史反推    沒有 contracts 端點     standard_usdt.infer_spec
 ✅ K 下單端點定案       **沒有** —— 對照組證實    probe_ustd_order.py
 ✅ L 指令單 + 執行對帳   最後一吋是人按的        portfolio/ticket.py
+✅ P 對齊單             真實帳戶追上模擬        ticket.catch_up()
+✅ Q 研究迴路每日自動跑  提案,不是改動          daily.py ④
    M 停損百分比         證據已備,§102 你決定    stop_evidence.py
    N 交易池             這個產品有哪些幣?       discover_universe.py
    O 成本               費率/資金費/滑點未驗證   costs.STANDARD_COSTS_VERIFIED
@@ -839,6 +841,28 @@ agmcis-dash.service: Scheduled restart job, restart counter is at 93
 
 `scripts/research.py` 跑完沒有產生提案,代表現任參數在整個網格裡
 站得住。一個每次都能找到提案的引擎,找到的東西平均而言一文不值。
+
+### ⚠ 寫好了,但沒有人呼叫(2026-09-18)
+
+`portfolio/ticket.catch_up()` 有完整實作、**六條測試**、詳細的 docstring
+—— 而全倉庫沒有任何地方呼叫它。寫好五天沒人發現。
+
+後果不是「少一個功能」,是**面板上少了一句真話**:模擬持有 7 個倉、
+真實帳戶 0 個倉,而指令單只會說「今天沒有要按的」。那句話是真的,
+也是誤導。
+
+**單元測試擋不住這件事,而且它讓情況更糟** —— `tests/test_ticket.py`
+直接 import `catch_up` 來測,測試本身就是呼叫者,所以那個函式
+看起來活得好好的。
+
+`tests/test_nothing_is_built_but_unwired.py` 掃 AST:功能清單裡的每一個
+進入點,都必須有**產品程式碼**(不含 tests/)用到它。它當場又抓出
+`infer_spec` —— 那個是誤報(它被當 callback 傳進去,不在 Call 位置),
+而修掉誤報的方式是**把檢查放寬到 Load 位置的 Name/Attribute**,
+不是把它從清單裡拿掉。
+
+放寬的代價是同名區域變數會造成漏報。那個方向是安全的:
+**漏報讓一條測試變綠,誤報讓一個能用的功能被當成死碼刪掉。**
 
 ## 六、舊系統的教訓(刪掉程式碼,留下教訓)
 
