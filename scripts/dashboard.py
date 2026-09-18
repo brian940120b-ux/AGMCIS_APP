@@ -316,6 +316,19 @@ tbody tr:first-child td{border-top:none}
 .ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
 .ticket td:last-child{font-family:var(--mono);text-align:right}
 .ticket .why{text-align:right}
+/* 模擬持倉表 —— 手機上五欄,所以字要小、數字要對齊 */
+.pos{width:100%;border-collapse:collapse;margin-top:10px;
+ font-size:12.5px}
+.pos th{color:var(--dim);font-weight:600;text-align:right;
+ padding:5px 0 7px;font-size:11px;letter-spacing:.3px;
+ border-bottom:1px solid var(--line)}
+.pos th:first-child{text-align:left}
+.pos td{padding:8px 0;text-align:right;font-family:var(--mono);
+ border-bottom:1px solid var(--line)}
+.pos td:first-child{text-align:left;font-family:inherit}
+.pos tr:last-child td{border-bottom:none}
+.pos .sym{font-weight:600}
+.pos .why{font-family:inherit}
 .ticket td.sect{color:var(--dim);font-size:10.5px;
  letter-spacing:.5px;padding-top:9px;width:auto;
  border-top:1px solid var(--line)}
@@ -366,8 +379,20 @@ footer{color:var(--dim2);font-size:10.5px;text-align:center;padding:20px 0 6px;
 """
 
 
+def _md_bold(text: str) -> str:
+    """把 **粗體** 轉成 <b>,其餘一律跳脫。
+
+    2026-09-18:幣種卡上印出了字面的 `**不知道**` —— 星號沒有人轉,
+    就這樣進了 HTML。小,但它出現在**最需要被看見的那個字**上。
+    """
+    parts = str(text).split("**")
+    return "".join(html.escape(x) if i % 2 == 0 else f"<b>{html.escape(x)}</b>"
+                   for i, x in enumerate(parts))
+
+
 def kv(label: str, value: str, cls: str = "") -> str:
-    return (f'<div class="kv"><div class="l">{html.escape(label)}</div>'
+    # 標籤走 _md_bold;值維持原樣,因為有呼叫端傳的是 HTML 片段。
+    return (f'<div class="kv"><div class="l">{_md_bold(label)}</div>'
             f'<div class="v {cls}">{value}</div></div>')
 
 
@@ -709,7 +734,7 @@ def block_exchange() -> str:
     if got.get("error"):
         return (head + '<p class="note">問不到:'
                 f'{html.escape(str(got["error"]))}</p>'
-                '<div class="flag">問不到**不代表沒有倉** —— '
+                '<div class="flag">問不到<b>不代表沒有倉</b> —— '
                 '在弄清楚為什麼之前,不要把它當成「帳上是空的」。</div>'
                 '</div>')
 
@@ -823,7 +848,7 @@ def block_score() -> str:
     cells.append(kv("走完的進出", f"{s.round_trips} 次"))
     cells.append(kv("記帳天數", f"{s.days} 天"))
     if s.stale_days is not None:
-        cells.append(kv("模擬在跑", "是" if s.running else "**停了**",
+        cells.append(kv("模擬在跑", "是" if s.running else "<b>停了</b>",
                         "up" if s.running else "down"))
     out.append(f'<div class="grid">{"".join(cells)}</div>')
 
@@ -853,11 +878,111 @@ def block_score() -> str:
     return "".join(out) + '</div>'
 
 
-def _md_bold(text: str) -> str:
-    """把 **粗體** 轉成 <b>,其餘一律跳脫。"""
-    parts = str(text).split("**")
-    return "".join(html.escape(x) if i % 2 == 0 else f"<b>{html.escape(x)}</b>"
-                   for i, x in enumerate(parts))
+
+def last_price(sym: str) -> float | None:
+    """現價 —— 用 15m K 棒的最後一根收盤。
+
+    ⚠️ **這是永續(swap)的公開行情,不是標準合約的。**
+    標準合約沒有公開行情端點(contract/v1 只有三個要簽名的 GET),
+    兩個產品追同一個現貨,價格貼得很近但**不是同一個數字**。
+    所以這個價格只餵眼睛:即時盈虧看個大概可以,對帳不能用它。
+    """
+    got = klines(sym, "15m", 2)
+    bars = got.get("bars") or []
+    return bars[-1]["c"] if bars else None
+
+
+def block_positions() -> str:
+    """模擬帳戶現在抱著什麼,以及現在賺賠多少。
+
+    2026-09-18 執政官:「我也希望看到他買了什麼,即時盈虧像之前那樣。」
+
+    ⚠️ **這一張是模擬帳戶,不是你的交易所帳戶。** 兩者的差別就是
+    「指令單」那一塊要你按的東西 —— 模擬先動,你照著按,真實才會跟上。
+    這張卡上的盈虧是**模擬的**,你的錢沒有跟著動。
+    """
+    def _compute():
+        try:
+            from portfolio.account import Account
+            a = Account.load()
+            held = {s: pos for s, pos in a.positions.items()
+                    if abs(pos.position_amt) > 1e-12}
+            marks, missing = {}, []
+            for sym in held:
+                px = last_price(sym)
+                if px is None:
+                    missing.append(sym)
+                else:
+                    marks[sym] = px
+            return {"a": a, "held": held, "marks": marks, "missing": missing}
+        except Exception as e:                       # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("positions", 30, _compute)
+    head = '<div class="card"><h2>模擬持倉 —— 系統現在抱著什麼</h2>'
+    if got.get("error"):
+        return (head + '<div class="flag warn">算不出來:'
+                + html.escape(got["error"]) + '</div></div>')
+
+    a, held, marks = got["a"], got["held"], got["marks"]
+    note = ('<p class="note">這是<b>模擬帳戶</b>的倉,不是你的交易所帳戶。'
+            '現價走永續公開行情(標準合約沒有公開行情端點),'
+            '兩者貼得很近但不是同一個數字 —— <b>只餵眼睛,不做對帳</b>。</p>')
+
+    if not held:
+        return (head + note + '<div class="flag">模擬帳戶目前<b>空手</b> —— '
+                '七個幣都在 50 日均線之下,或波動目標把規模壓到零。'
+                '空手是一個部位,不是沒在跑。</div></div>')
+
+    # 有現價才算得出盈虧;算不出來的**列出來**,不從畫面上消失。
+    eq = a.equity(marks) if marks else None
+    rows = []
+    for sym in sorted(held):
+        pos = held[sym]
+        mark = marks.get(sym)
+        long_ = pos.position_amt > 0
+        cells = [
+            f'<td class="sym">{html.escape(sym.replace("-", ""))}'
+            f'<span class="pill {"p-buy" if long_ else "p-sell"}">'
+            f'{"多" if long_ else "空"}</span></td>',
+            f'<td>{abs(pos.position_amt):,.6g}</td>',
+            f'<td>{pos.avg_price:,.6g}</td>',
+        ]
+        if mark is None:
+            cells.append('<td colspan="2" class="why">問不到現價 —— '
+                         '<b>不是 0,是不知道</b></td>')
+        else:
+            pnl = pos.unrealized(mark)
+            roi = (pnl / pos.initial_margin() * 100
+                   if pos.initial_margin() else 0.0)
+            cells.append(f'<td>{mark:,.6g}</td>')
+            cells.append(f'<td class="{tone(pnl)}">{pnl:+,.2f}'
+                         f'<div class="why">{roi:+.1f}% 本金</div></td>')
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    tot = sum(held[s].unrealized(marks[s]) for s in held if s in marks)
+    cells = []
+    if eq is not None:
+        cells.append(kv("模擬權益", f"{eq:,.2f}"))
+    cells.append(kv("未實現", f"{tot:+,.2f}", tone(tot)))
+    cells.append(kv("已實現", f"{a.realized_pnl:+,.2f}", tone(a.realized_pnl)))
+    cells.append(kv("持倉檔數", f"{len(held)} 檔"))
+    if eq:
+        cells.append(kv("曝險", f"{a.exposure(marks) * 100:,.0f}%"))
+
+    warn = ""
+    if got["missing"]:
+        warn = ('<div class="flag warn">問不到現價的:<b>'
+                + html.escape("、".join(sorted(got["missing"])))
+                + '</b> —— 這幾檔的盈虧沒有算進上面的合計。'
+                '<b>合計因此是偏少的,不是完整的。</b></div>')
+
+    return (head + note
+            + '<table class="pos"><thead><tr>'
+              '<th>幣種</th><th>數量</th><th>開倉均價</th>'
+              '<th>現價</th><th>未實現</th></tr></thead><tbody>'
+            + "".join(rows) + '</tbody></table>'
+            + f'<div class="grid">{"".join(cells)}</div>' + warn + '</div>')
 
 
 def block_screen() -> str:
@@ -970,7 +1095,7 @@ def block_screen() -> str:
               '一個因為沒問到而沒發現問題的檢查,如果回報通過,'
               '就是在說謊 —— 而在合約上那句謊話的代價是一張不會成交的單,'
               '或一個強平時沒人接的倉。<br>'
-              '篩選**只用結構性條件**(流動性、歷史長度、交易所狀態),'
+              '篩選<b>只用結構性條件</b>(流動性、歷史長度、交易所狀態),'
               '不用「漲最多的前 N 個」那種預測性條件 —— '
               '2026-09-08 實測過一次「按離均線距離取前一半」,'
               '<b>輸給等權持有全部</b>。<br>'
@@ -1192,7 +1317,7 @@ def block_system() -> str:
             'U 本位標準合約<b>沒有下單 API</b>(2026-09-13 GET+POST 各問'
             '一次,對照組證實)—— 所以送單是手動的,'
             '<b>這不是設定,是這個產品的性質</b>。<br>'
-            '而任何**可能**送出訂單的程式路徑仍然被三道鎖擋著:'
+            '而任何<b>可能</b>送出訂單的程式路徑仍然被三道鎖擋著:'
             '① <code>LIVE_ENABLED=False</code> 是原始碼常數,不是設定選項 —— '
             '要開必須改碼、commit、部署;② 實盤資格契約八條;'
             '③ 人工簽署,永不自動化。</div></div>')
@@ -1216,8 +1341,16 @@ def render() -> str:
     # 2026-09-18:只留 U 本位標準合約的東西。
     # 紙上帳本縮成指令單裡的一行(它決定數量,但它是永續的成本模型);
     # 實盤資格縮成「還沒關掉的洞」的一行。
-    desk = (block_tickets() + block_exchange() + block_score()
-            + block_screen())
+    # 順序照「我現在要做什麼」由上而下排(2026-09-18 執政官要求重排):
+    #   ① 指令單      要你動手的,永遠第一
+    #   ② 模擬持倉    系統抱著什麼 —— 指令單就是從這裡推出來的
+    #   ③ 交易所帳戶  你實際抱著什麼 —— ②和③的差距就是①
+    #   ④ 成績單      這套到底行不行
+    #   ⑤ 幣種        為什麼是這些幣
+    # ②③相鄰是刻意的:模擬與真實的差距是這個系統最容易出事的地方,
+    # 隔著別的卡片看,那個差距就不會被注意到。
+    desk = (block_tickets() + block_positions() + block_exchange()
+            + block_score() + block_screen())
     system = block_gaps() + block_proposals() + block_system()
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
