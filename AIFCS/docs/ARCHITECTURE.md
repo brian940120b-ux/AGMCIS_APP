@@ -35,7 +35,11 @@
 | `agents/rule_agent.py` | Deterministic pilot: routes, formation, avoidance | 3 |
 | `agents/guidance.py` | Cascaded guidance loops (moves to controllers in PHASE 4) | 3 |
 | `agents/agent_manager.py` | Decision scheduling and action application | 3 |
-| `controllers/*` | Action validation, command mapping, autopilot | 4 |
+| `controllers/limits.py` | Safety limits and violation taxonomy | 4 |
+| `controllers/action_validator.py` | Reject or clamp a malformed command | 4 |
+| `controllers/command_mapper.py` | Per-entity actuator rate limiting | 4 |
+| `controllers/flight_controller.py` | The only writer of entity controls | 4 |
+| `controllers/autopilot.py` | Guidance and stabilisation loops | 3 |
 | `scoring/*` | Independent score engine and metrics | 9 |
 | `replay/*` | Recorder, player, timeline | 9 |
 | `storage/*` | SQLite models and access | 9 |

@@ -202,3 +202,17 @@ export interface AgentsResponse {
   total_decisions: number
   agents: AgentSummary[]
 }
+
+// ---------------------------------------------------------------- PHASE 4
+
+export interface ControllerStatus {
+  commands_applied: number
+  commands_rejected: number
+  violations: Record<string, number>
+  limits: {
+    max_control_rate_per_s: number
+    max_load_factor: number
+    min_altitude_m: number
+    max_altitude_m: number
+  }
+}

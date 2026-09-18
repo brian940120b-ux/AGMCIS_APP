@@ -26,6 +26,8 @@ import numpy as np
 
 from agents.agent_manager import AgentManager
 from agents.factory import build_agents
+from controllers.flight_controller import FlightController
+from controllers.limits import SafetyLimits, ViolationType
 from core.clock import ClockState, SimulationClock
 from core.config import Settings, get_settings
 from core.event_bus import EventBus, EventType
@@ -66,6 +68,17 @@ class SimulationEngine:
             decision_rate_hz=self.settings.agents.decision_rate_hz,
         )
 
+        self.controller = FlightController(
+            SafetyLimits(
+                max_control_rate_per_s=self.settings.safety.max_control_rate_per_s,
+                max_load_factor=self.settings.safety.max_load_factor,
+                min_altitude_m=self.settings.safety.min_altitude_m,
+                max_altitude_m=self.settings.safety.max_altitude_m,
+                altitude_buffer_m=self.settings.safety.altitude_buffer_m,
+                reject_on_invalid_state=self.settings.safety.reject_on_invalid_state,
+            )
+        )
+
         self.scenario: Scenario | None = None
         self.world = WorldState()
         self.seed: int = self.settings.simulation.seed
@@ -102,6 +115,11 @@ class SimulationEngine:
         for agent in build_agents(scenario, self.settings):
             self.agents.register(agent)
 
+        # Actuators start where the scenario trimmed them, not at neutral.
+        self.controller.reset()
+        for entity in self.world.entities.values():
+            self.controller.seed(entity)
+
         self.clock.reset()
         self.clock.speed = self.settings.simulation.default_speed
         self._end_reason = None
@@ -137,9 +155,15 @@ class SimulationEngine:
         """
         dt = self.clock.dt
 
-        # Agents run first: a decision made this tick is flown this tick.
-        # They write only to entity controls, never to the truth state.
+        # Agents decide at their own slower rate and leave a standing demand.
         self.agents.update(self.world, self.clock.tick_count)
+
+        # The flight controller runs every tick: it validates the demand, keeps
+        # the aircraft inside its envelope and slews the actuators. It is the
+        # only thing that writes entity controls.
+        for entity_id, outcome in self.controller.update(self.world, self.agents.demands, dt):
+            if not outcome.accepted or outcome.violations:
+                self._report_control_violations(entity_id, outcome)
 
         self.integrator.integrate(self.world, dt)
 
@@ -163,6 +187,28 @@ class SimulationEngine:
             EventType.SIMULATION_TICK,
             simulation_time=simulation_time,
             tick=self.clock.tick_count,
+        )
+
+    def _report_control_violations(self, entity_id: str, outcome: Any) -> None:
+        """Publish a rejected or corrected command so it is never silent.
+
+        Rate limiting is expected during any manoeuvre and would swamp the feed,
+        so only genuinely notable corrections are published.
+        """
+        notable = [v for v in outcome.violations if v.type is not ViolationType.RATE_LIMITED]
+        if not notable:
+            return
+
+        self.events.emit(
+            EventType.ACTION_REJECTED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            entity_id=entity_id,
+            message=f"{entity_id}: {notable[0].type.value} on {notable[0].channel}",
+            data={
+                "accepted": outcome.accepted,
+                "violations": [v.to_dict() for v in notable],
+            },
         )
 
     def _duration_reached(self) -> bool:
@@ -308,6 +354,9 @@ class SimulationEngine:
         self.clock.reset()
         self.rng = np.random.default_rng(self.seed)
         self.agents.reset()
+        self.controller.reset()
+        for entity in self.world.entities.values():
+            self.controller.seed(entity)
         self._end_reason = None
         self.events.clear_history()
         self.events.emit(EventType.SIMULATION_RESET, message="simulation reset")
@@ -348,4 +397,5 @@ class SimulationEngine:
             "agent_count": self.agents.count,
             "decision_count": self.agents.decision_count,
             "decision_rate_hz": self.agents.decision_rate_hz,
+            "controller": self.controller.status(),
         }

@@ -11,12 +11,18 @@ import numpy as np
 import pytest
 
 from agents.base_agent import Behaviour, ContactView, Observation, ReasonCode
-from agents.guidance import GuidanceGains, GuidanceState, bearing_deg, compute_controls, heading_error_deg
 from agents.rule_agent import (
     FormationAssignment,
     RouteAssignment,
     RuleAgent,
     RuleAgentConfig,
+)
+from controllers.autopilot import (
+    GuidanceGains,
+    GuidanceState,
+    bearing_deg,
+    compute_controls,
+    heading_error_deg,
 )
 from core.world_state import Team
 

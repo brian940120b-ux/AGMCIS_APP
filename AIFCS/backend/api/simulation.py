@@ -147,6 +147,12 @@ def events(
     return {"count": len(recent), "events": [e.to_dict() for e in recent]}
 
 
+@router.get("/controller")
+def controller(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
+    """Flight controller statistics: what it applied, rejected and corrected."""
+    return engine.controller.status()
+
+
 @router.get("/scenarios")
 def scenarios(
     settings: Settings = Depends(get_settings),

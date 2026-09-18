@@ -31,7 +31,7 @@ from agents.base_agent import (
     Observation,
     ReasonCode,
 )
-from agents.guidance import (
+from controllers.autopilot import (
     GuidanceGains,
     GuidanceState,
     bearing_deg,

@@ -87,6 +87,26 @@ try {
     await page.getByText('AI Decision Feed').first().isVisible(),
     'the decision feed panel should be visible',
   )
+
+  // PHASE 4: every command must have gone through the safety layer.
+  const controller = await (await fetch(`${API_URL}/api/controller`)).json()
+  assert(
+    controller.commands_applied > 0,
+    'the flight controller should have applied commands by now',
+  )
+  assert(
+    typeof controller.limits.max_load_factor === 'number',
+    'the safety limits should be reported',
+  )
+  console.log(
+    `SAFETY -> ${controller.commands_applied} applied, ` +
+      `${controller.commands_rejected} rejected, ` +
+      `corrections: ${JSON.stringify(controller.violations)}`,
+  )
+  assert(
+    await page.getByText('Safety Layer').first().isVisible(),
+    'the safety panel should be visible',
+  )
   await shot(page, '10-running')
 
   // --- PAUSE: the world must genuinely freeze ---

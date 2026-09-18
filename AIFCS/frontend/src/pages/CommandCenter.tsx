@@ -4,6 +4,7 @@ import { DecisionFeed } from '@/components/DecisionFeed'
 import { EntityList } from '@/components/EntityList'
 import { EventFeed } from '@/components/EventFeed'
 import { IntelPanel } from '@/components/IntelPanel'
+import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
 import { SystemStatusPanel } from '@/components/SystemStatusPanel'
@@ -68,9 +69,10 @@ export function CommandCenter() {
 
       {/* Desktop / tablet */}
       <div className="hidden min-h-0 flex-1 gap-3 p-3 lg:grid lg:grid-cols-[300px_1fr_330px]">
-        <div className="flex min-h-0 flex-col gap-3">
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
           <SystemStatusPanel />
           <EntityList />
+          <SafetyPanel />
         </div>
 
         <div className="flex min-h-0 flex-col gap-3">
@@ -102,7 +104,12 @@ export function CommandCenter() {
             </div>
           </>
         )}
-        {tab === 'status' && <SystemStatusPanel />}
+        {tab === 'status' && (
+          <>
+            <SystemStatusPanel />
+            <SafetyPanel />
+          </>
+        )}
         {tab === 'units' && (
           <>
             <EntityList />

@@ -9,13 +9,13 @@ from __future__ import annotations
 import numpy as np
 
 from agents.base_agent import BaseAgent
-from agents.guidance import GuidanceGains
 from agents.rule_agent import (
     FormationAssignment,
     RouteAssignment,
     RuleAgent,
     RuleAgentConfig,
 )
+from controllers.autopilot import GuidanceGains
 from core.config import Settings
 from simulation.scenario import Scenario, ScenarioEntity
 

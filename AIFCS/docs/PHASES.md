@@ -92,14 +92,34 @@ bounded integrator removed it.
 from 425 to ~920 ticks/s (7x to 15x real time). Those calls were spending more
 time in axis-normalisation machinery than in arithmetic.
 
-## PHASE 4 — Flight controller and safety layer — **Next**
+## PHASE 4 — Flight controller and safety layer — **Complete**
 
-Abstract action space (`aileron`, `elevator`, `rudder`, `throttle`).
-`ActionValidator` rejecting NaN/Inf/out-of-range/excessive-rate actions, then
-`CommandMapper` → `FlightController` → physics. Rejections are logged, never
-silently swallowed.
+`ActionValidator` (reject on invalid aircraft state, clamp non-finite and
+out-of-range channels), envelope protection (structural g limit, altitude floor
+and ceiling with a soft buffer), `CommandMapper` (per-entity actuator rate
+limiting), and `FlightController` tying them together. The autopilot guidance
+loops moved from `agents/` to `controllers/autopilot.py`, where they belong.
 
-## PHASE 5 — Sensor model
+The key structural change: the agent manager no longer writes to the aircraft.
+It records a standing demand, and the flight controller — the only writer of
+entity controls in the platform — consumes it every physics tick. One door
+means the safety guarantees can actually be checked.
+
+**Verified:** NaN and Inf demands become neutral while valid channels pass
+through untouched; out-of-range demands are clamped on every channel; a
+non-finite aircraft state rejects the command and keeps the last one; actuators
+slew at exactly the configured rate and converge on the demand; each entity's
+actuators are tracked independently; the load limiter eases pitch-up beyond the
+g limit but never fights a recovery pitch-down; descent is blocked near the
+floor while climbing stays free; normal flight triggers no corrections at all;
+and the whole layer leaves the run deterministic. 34 new tests, 235 total.
+
+**A note on the load factor test:** the first version asserted about 1 g for an
+aircraft at zero pitch. That was wrong — this airframe has `cl_0 = 0`, so zero
+angle of attack means zero lift and zero load factor. Level flight *is* the trim
+attitude, around 1.27 degrees. The code was right and the test premise was not.
+
+## PHASE 5 — Sensor model — **Next**
 
 Separate `TruthState` and `Observation` types. Noise, delay, dropout, limited
 field of regard, confidence estimates. Agents may read only `Observation`.

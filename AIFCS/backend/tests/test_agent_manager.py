@@ -7,6 +7,8 @@ import pytest
 
 from agents.agent_manager import AgentManager, build_observation
 from agents.base_agent import Action, BaseAgent, Behaviour, Decision, Observation
+from controllers.flight_controller import FlightController
+from controllers.limits import SafetyLimits
 from core.event_bus import EventBus, EventType
 from core.simulation_engine import SimulationEngine
 from core.world_state import EntityState, EntityStatus, Team, WorldState
@@ -133,15 +135,20 @@ def test_a_decision_rate_above_the_tick_rate_falls_back_to_every_tick():
 # ---------------------------------------------------------------- application
 
 
-def test_the_manager_applies_controls_to_the_entity():
+def test_the_manager_records_a_demand_rather_than_flying_the_aircraft():
+    """Since PHASE 4 the flight controller is the only writer of entity
+    controls, so the manager leaves a standing demand for it to consume."""
     manager = AgentManager(EventBus(), tick_rate_hz=60, decision_rate_hz=60.0)
     manager.register(StubAgent(controls=ControlInputs(aileron=0.4, throttle=0.9)))
     world = make_world()
 
     manager.update(world, 0)
 
-    assert world.get("BLUE-01").controls.aileron == pytest.approx(0.4)
-    assert world.get("BLUE-01").controls.throttle == pytest.approx(0.9)
+    demand = manager.demands["BLUE-01"]
+    assert demand.aileron == pytest.approx(0.4)
+    assert demand.throttle == pytest.approx(0.9)
+    # The aircraft itself is untouched until the safety layer has run.
+    assert world.get("BLUE-01").controls.aileron == pytest.approx(0.0)
 
 
 def test_the_manager_never_writes_to_the_truth_state():
@@ -160,12 +167,15 @@ def test_the_manager_never_writes_to_the_truth_state():
     assert before.velocity.tolist() == velocity.tolist()
 
 
-def test_out_of_range_commands_are_clamped_before_reaching_the_entity():
+def test_out_of_range_demands_are_clamped_by_the_flight_controller():
+    """The manager passes the raw demand on; the safety layer is what corrects it."""
     manager = AgentManager(EventBus(), tick_rate_hz=60, decision_rate_hz=60.0)
     manager.register(StubAgent(controls=ControlInputs(aileron=5.0, throttle=-3.0)))
     world = make_world()
+    controller = FlightController(SafetyLimits(max_control_rate_per_s=10_000.0))
 
     manager.update(world, 0)
+    controller.update(world, manager.demands, 1 / 60)
 
     assert world.get("BLUE-01").controls.aileron == pytest.approx(1.0)
     assert world.get("BLUE-01").controls.throttle == pytest.approx(0.0)

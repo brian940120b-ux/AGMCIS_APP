@@ -24,3 +24,13 @@ rl_agent:
   # Populated in PHASE 11+. Present so the schema is stable from PHASE 0.
   model_path: null
   deterministic_inference: true
+
+# Safety layer (PHASE 4). Enforced by the flight controller on every command,
+# whoever issued it — rule agent, RL policy or API call.
+safety:
+  max_control_rate_per_s: 4.0    # how fast a normalised surface may slew
+  max_load_factor: 9.0           # structural g limit; pitch demand is eased back
+  min_altitude_m: 100.0          # descent demand is blocked inside the buffer
+  max_altitude_m: 19000.0
+  altitude_buffer_m: 500.0       # soft band where protection ramps in
+  reject_on_invalid_state: true  # refuse to command an aircraft in a broken state

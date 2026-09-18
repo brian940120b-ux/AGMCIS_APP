@@ -22,6 +22,7 @@ from agents.base_agent import Action, BaseAgent, ContactView, Decision, Observat
 from core.event_bus import EventBus, EventType
 from core.logging_config import get_logger
 from core.world_state import EntityState, EntityStatus, WorldState
+from simulation.aircraft import ControlInputs
 
 log = get_logger("agent_manager")
 
@@ -83,6 +84,9 @@ class AgentManager:
         self.decision_interval_ticks = max(1, round(tick_rate_hz / max(decision_rate_hz, 1e-6)))
 
         self._agents: dict[str, BaseAgent] = {}
+        # Standing control demand per entity. The flight controller consumes
+        # this every physics tick; the agent refreshes it far more slowly.
+        self._demands: dict[str, ControlInputs] = {}
         self._decisions: list[Decision] = []
         self._decision_log_size = decision_log_size
         self._last_decision_tick: dict[str, int] = {}
@@ -97,13 +101,20 @@ class AgentManager:
     def clear(self) -> None:
         self._agents.clear()
         self._decisions.clear()
+        self._demands.clear()
         self._last_decision_tick.clear()
 
     def reset(self) -> None:
         for agent in self._agents.values():
             agent.reset()
         self._decisions.clear()
+        self._demands.clear()
         self._last_decision_tick.clear()
+
+    @property
+    def demands(self) -> dict[str, ControlInputs]:
+        """The latest command each agent asked for, before the safety layer."""
+        return self._demands
 
     @property
     def agents(self) -> list[BaseAgent]:
@@ -155,13 +166,14 @@ class AgentManager:
         self._record(decision, action, tick)
 
     def _apply(self, entity: EntityState, action: Action) -> None:
-        """Write the commanded controls onto the entity.
+        """Record what the agent asked for.
 
-        This is the only place an agent's output reaches the world, and it
-        touches controls only — never position, velocity or attitude. PHASE 4
-        inserts the action validator immediately before this step.
+        The manager deliberately does **not** write to the entity. Since PHASE 4
+        the flight controller is the only thing that touches entity controls, so
+        every command goes through validation, envelope protection and rate
+        limiting on its way to the physics.
         """
-        entity.controls = action.controls.clamped()
+        self._demands[entity.id] = action.controls
 
     def _record(self, decision: Decision, action: Action, tick: int) -> None:
         self._decisions.append(decision)

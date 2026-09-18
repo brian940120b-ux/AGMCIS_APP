@@ -38,6 +38,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     registry.set_state("simulation", SubsystemState.ONLINE, "Fixed-timestep engine ready")
     registry.set_state("physics", SubsystemState.ONLINE, "Newton-Euler 6DOF, RK4 at the fixed timestep")
     registry.set_state("agents", SubsystemState.ONLINE, "Rule-based pilots deciding at the configured rate")
+    registry.set_state(
+        "controllers",
+        SubsystemState.ONLINE,
+        "Validation, envelope protection and actuator rate limiting",
+    )
 
     log = get_logger("startup")
     log.info(

@@ -4,13 +4,12 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 3 complete.** Fictional units now fly themselves.
-> Rule-based pilot agents follow patrol routes, hold formation on a leader and
-> avoid collisions, deciding at 10 Hz on top of the 60 Hz deterministic 6DOF
-> physics. Every decision is recorded with the reason codes and measured values
-> behind it. Sensors, communications, WebSocket, replay, scoring and training are
-> **not implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED` rather
-> than faking it.
+> **Current status: PHASE 4 complete.** Fictional units fly themselves under
+> rule-based pilots, and every command they issue now passes through a safety
+> layer — validation, envelope protection and actuator rate limiting — before it
+> reaches the physics. Sensors, communications, WebSocket, replay, scoring and
+> training are **not implemented yet**; the dashboard reports each as
+> `NOT_IMPLEMENTED` rather than faking it.
 
 ---
 
@@ -250,6 +249,7 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/agents` | Every agent with its latest decision |
 | `GET` | `/api/agents/{id}` | One agent and its recent decisions |
 | `GET` | `/api/decisions` | Decision log with reason codes and evidence |
+| `GET` | `/api/controller` | Safety layer: commands applied, rejected, corrected |
 
 Replay, training and the `/ws/simulation` WebSocket arrive in their respective
 phases and are documented as they land.
@@ -307,6 +307,30 @@ confidence and reason codes (`WAYPOINT_ACTIVE`, `FORMATION_SEPARATION_HIGH`,
 the condition it names was computed and met, so `GET /api/decisions` can always
 be checked against the numbers that produced it. Nothing in that feed is
 generated for display.
+
+### Safety layer
+
+Nothing writes an aircraft's controls except the flight controller. That single
+door is what makes the guarantees checkable. Every command — from a rule agent,
+an RL policy or an API call — takes the same path:
+
+```
+Agent Action → Action Validation → Envelope Protection → Command Mapper → Physics
+```
+
+| Stage | What it enforces |
+|---|---|
+| Validation | Rejects a command when the aircraft state is non-finite; clamps NaN/Inf or out-of-range channels to neutral or to their bounds |
+| Envelope protection | Eases back pitch demand above the structural g limit; blocks descent near the altitude floor and climb near the ceiling |
+| Command mapper | Limits how fast a surface may slew, so a noisy policy cannot chatter the controls between ticks |
+
+Corrections are counted and reported, never applied silently — `GET
+/api/controller` and the dashboard's Safety Layer panel show exactly what the
+layer did. Limits live in `configs/agents.yaml` under `safety`.
+
+The controller runs every physics tick while agents decide at 10 Hz, so a
+surface moves smoothly between two commands instead of stepping once per
+decision.
 
 ### Performance
 
@@ -373,7 +397,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `201 passed`.
+**Success looks like:** `235 passed`.
 
 ### End-to-end dashboard test
 
@@ -448,8 +472,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 1 | Simulation core: clock, world state, event bus, engine, scenarios | **Complete** |
 | 2 | 6DOF flight physics, fictional aircraft model | **Complete** |
 | 3 | Rule-based agent, guidance, decision records | **Complete** |
-| 4 | Flight controller, action validation, safety layer | Next |
-| 5 | Sensor model: partial observation, noise, delay, dropout | Planned |
+| 4 | Flight controller, action validation, safety layer | **Complete** |
+| 5 | Sensor model: partial observation, noise, delay, dropout | Next |
 | 6 | Communication model: latency, loss, blackout | Planned |
 | 7 | WebSocket telemetry | Planned |
 | 8 | 3D Command Center (Three.js) | Planned |

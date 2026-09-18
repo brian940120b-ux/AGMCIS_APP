@@ -1,16 +1,15 @@
-"""Guidance and stabilisation loops (PHASE 3).
+"""Autopilot: guidance and stabilisation loops (PHASE 3, moved here in PHASE 4).
 
-Turns a target (heading, altitude, speed) into the control demands the 6DOF
-model consumes. Deliberately simple and transparent: cascaded proportional loops
-with explicit limits, so every command can be traced back to a measured error.
+Turns a target (heading, altitude, speed) into control demands. Deliberately
+simple and transparent: cascaded proportional loops with explicit limits, so
+every command traces back to a measured error.
 
-    heading error -> bank command -> aileron
-    altitude error -> pitch command -> elevator
-    speed error -> throttle
+    heading error   -> bank command  -> aileron
+    altitude error  -> pitch command -> elevator
+    speed error     -> throttle
 
-This lives in the agents package for now because the rule agent is its only
-caller. PHASE 4 lifts it into ``controllers/autopilot.py`` behind the action
-validator; the maths does not change, only who owns it.
+It produces *demands*. Whether those demands reach the aircraft is the flight
+controller's decision, after the safety layer has checked them.
 """
 
 from __future__ import annotations

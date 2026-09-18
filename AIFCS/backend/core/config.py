@@ -144,6 +144,25 @@ class RuleAgentSettings(BaseModel):
         return v
 
 
+class SafetySettings(BaseModel):
+    """Guard-rails enforced by the flight controller (PHASE 4)."""
+
+    max_control_rate_per_s: float = Field(default=4.0, gt=0)
+    max_load_factor: float = Field(default=9.0, gt=0)
+    min_altitude_m: float = Field(default=100.0, ge=0)
+    max_altitude_m: float = Field(default=19_000.0, gt=0)
+    altitude_buffer_m: float = Field(default=500.0, ge=0)
+    reject_on_invalid_state: bool = True
+
+    @field_validator("max_altitude_m")
+    @classmethod
+    def _band_is_ordered(cls, v: float, info: Any) -> float:
+        floor = info.data.get("min_altitude_m")
+        if floor is not None and v <= floor:
+            raise ValueError("max_altitude_m must be above min_altitude_m")
+        return v
+
+
 class AgentSettings(BaseModel):
     default_type: str = "rule"
     decision_rate_hz: float = Field(default=10.0, gt=0)
@@ -206,6 +225,7 @@ class Settings(BaseModel):
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     agents: AgentSettings = Field(default_factory=AgentSettings)
+    safety: SafetySettings = Field(default_factory=SafetySettings)
     scenarios: ScenarioSettings = Field(default_factory=ScenarioSettings)
     training: TrainingSettings = Field(default_factory=TrainingSettings)
 
@@ -263,6 +283,7 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
         telemetry=TelemetrySettings(**sim_doc.get("telemetry", {})),
         logging=LoggingSettings(**sim_doc.get("logging", {})),
         agents=AgentSettings(**agents_section),
+        safety=SafetySettings(**agents_doc.get("safety", {})),
         scenarios=ScenarioSettings(**scenarios_doc.get("scenarios", {})),
         training=TrainingSettings(**training_section),
     )
