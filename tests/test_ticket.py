@@ -412,17 +412,34 @@ def test_the_app_scheme_is_the_one_the_share_link_proved():
     assert "bingx://" not in app, "那個猜錯的 scheme 不准回來"
 
 
-def test_the_web_link_admits_it_points_at_the_wrong_product():
-    """那條分享連結是**永續**頁的,標準合約的網址還沒有樣本。
+def test_the_link_says_it_does_not_carry_the_product():
+    """**連結只帶幣種,不帶產品別。**
 
-    一條指向錯產品的連結,如果不說,比沒有連結危險。
+    2026-09-18:我看到網址路徑裡的 /perpetual/ 就說它是永續頁 ——
+    判斷錯了。那是 BingX 分享功能的格式,不是產品別;執政官那條
+    就是從標準合約頁分享出來的。拿字串的長相去推斷它的語意,又一次。
+
+    真正要緊的是:App 連結的參數只有 coinName / valuationCoinName /
+    marginCoinName,**沒有任何一個說產品別**。
     """
-    from portfolio.ticket import BINGX_LINK_VERIFIED, bingx_links
+    from portfolio.ticket import bingx_links
 
-    web = [x for x in bingx_links("BTCUSDT") if x[1].startswith("https://")]
-    assert web and "perpetual" in web[0][1]
-    assert "永續" in web[0][2] and "標準合約" in web[0][2]
-    assert BINGX_LINK_VERIFIED is False
+    app = [x for x in bingx_links("BTCUSDT")
+           if x[1].startswith("bingbon://")][0]
+    assert "productType" not in app[1] and "contractType" not in app[1]
+    assert "不帶產品別" in app[2]
+
+
+def test_every_ticket_warns_to_check_the_product_tab_first():
+    """**指令單的數量是照標準合約算的,下到永續上就是一張算錯的單** ——
+    而它會成交。
+
+    同一個幣在兩個產品上的規格、槓桿上限、費率都不一樣,而連結不會
+    幫你選。所以每一張單都要提醒。
+    """
+    warned = [w for w in a_ticket().warnings if "U 本位標準合約" in w]
+    assert warned, "每張單都要有這個提醒"
+    assert "會成交" in warned[0], "要說出後果,不是只說「請注意」"
 
 
 def test_an_unsplittable_symbol_does_not_produce_a_link_to_another_coin():

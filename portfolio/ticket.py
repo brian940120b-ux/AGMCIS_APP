@@ -76,10 +76,21 @@ DEFAULT_BAND_PCT = 1.0
 # **scheme 是 `bingbon://`** —— BingX 的前身是 Bingbon,而 App 的
 # URL scheme 沒有跟著改名。這種事情猜不到,只能拿一條真的連結來看。
 #
-# ⚠️ **那條分享連結是「永續」頁面的**(網址路徑是 /perpetual/)。
-# 標準合約的路徑我還沒有樣本 —— 需要執政官從**標準合約**頁面再分享
-# 一條。在那之前 web 連結會開到永續頁,而那是錯的產品,
-# 所以下面把這件事標出來,不假裝它是對的。
+# ⚠️ **我看到路徑裡的 /perpetual/ 就說它是永續頁 —— 那是我判斷錯了。**
+# 執政官澄清:那條連結**就是從標準合約頁面分享出來的**。
+# `/perpetual/` 是 BingX 分享功能的網址格式,不是產品別。
+# 拿一個字串的長相去推斷它的語意,又一次。
+#
+# ═══ 而真正要緊的是這個 ═══
+# App 連結的參數只有三個:coinName / valuationCoinName / marginCoinName。
+# **沒有任何一個欄位說這是標準合約還是永續。**
+#
+# 所以連結能做的只有「把 App 開到這個幣」——**選哪個產品是 App 決定的,
+# 不是連結決定的**。而同一個幣在永續與標準合約上的合約規格、槓桿
+# 上限、費率都不一樣:指令單的數量是照標準合約算的,下到永續上
+# 就是一張算錯的單,而它會成交。
+#
+# 所以每張單都要提醒:按之前先確認分頁是「U 本位標準合約」。
 #
 # ref= 那個推薦碼刻意不帶:那是執政官自己的分享碼,對他自己沒有作用,
 # 而我不想把一個看不懂的追蹤參數寫死在程式裡。
@@ -92,8 +103,18 @@ _TEMPLATE = _os.environ.get("BINGX_LINK_TEMPLATE", "").strip()
 APP_LINK = ("bingbon://trade/detail?coinName={base}"
             "&valuationCoinName={quote}&marginCoinName=USDT")
 
-#: 網頁。⚠️ 這是**永續**的路徑 —— 標準合約的還沒有樣本。
+#: 網頁。路徑裡的 `perpetual` 是 BingX 分享功能的格式,**不是產品別** ——
+#: 執政官那條就是從標準合約頁分享出來的。
 WEB_LINK = "https://bingx.com/perpetual/{base}-{quote}"
+
+#: 按單之前一定要自己確認的那一件事。
+#:
+#: 連結不帶產品別,而同一個幣在永續與標準合約上的規格、槓桿上限、
+#: 費率都不一樣。**指令單的數量是照標準合約算的,下到永續上就是
+#: 一張算錯的單 —— 而它會成交。**
+PRODUCT_WARNING = ("⚠️ 連結不會幫你選產品 —— 按之前先確認分頁是"
+                   "「U 本位標準合約」。同一個幣在永續上的規格不一樣,"
+                   "這張單的數量下到永續就是算錯的,而它會成交。")
 
 #: 標準合約的連結有沒有被證實過。**沒有,而面板要說實話。**
 BINGX_LINK_VERIFIED = bool(_TEMPLATE)
@@ -120,9 +141,9 @@ def bingx_links(symbol: str) -> list:
                  _TEMPLATE.format(symbol=symbol, base=base, quote=quote), "")]
     return [
         ("開 App", APP_LINK.format(base=base, quote=quote),
-         "bingbon:// —— 2026-09-18 由分享連結證實"),
+         "連結只帶幣種,**不帶產品別**"),
         ("開網頁", WEB_LINK.format(base=base, quote=quote),
-         "⚠️ 這是**永續**頁,不是標準合約 —— 標準合約的網址還沒有樣本"),
+         "同上"),
     ]
 
 
@@ -392,7 +413,7 @@ def build(symbol: str, action: str, quantity: float, price: float,
     notional = quantity * price
     margin = notional / leverage if leverage else None
 
-    checks, warnings = [], []
+    checks, warnings = [], [PRODUCT_WARNING]
 
     # 閘一:停損要在強平之前。**擺在強平後面的停損等於沒有停損。**
     if liq is not None:
