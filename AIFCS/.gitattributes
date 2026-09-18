@@ -1,0 +1,14 @@
+# Line endings are not cosmetic here: cmd.exe needs CRLF in .bat files, and
+# bash refuses a .sh script whose shebang line ends in CR. Pin both so a
+# Windows checkout cannot break either family.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.sh  text eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

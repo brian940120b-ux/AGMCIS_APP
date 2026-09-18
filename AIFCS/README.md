@@ -118,10 +118,17 @@ AIFCS/
 
 **Prerequisites:** Python 3.11+, Node.js 20+, and (optionally) Docker.
 
-> **Windows:** run every command below in **Git Bash** (installed with
-> [Git for Windows](https://git-scm.com/download/win)), not CMD or PowerShell.
-> The scripts detect the Windows layout automatically — `python` instead of
-> `python3`, and `.venv/Scripts/` instead of `.venv/bin/`.
+> **Windows — use the native launcher.** Double-click **`scripts\start.bat`**.
+> It needs nothing but Python and Node.js: it creates the virtual environment,
+> installs both dependency sets on the first run, starts the backend and the
+> dashboard, and opens your browser. Press `Ctrl + C` in its window to stop.
+> If something is left holding a port, run `scripts\stop.bat`.
+> The `.sh` scripts below are for macOS and Linux; they also work on Windows
+> through [Git Bash](https://git-scm.com/download/win) if you prefer a shell.
+>
+> The Windows launcher is **not yet verified on a real Windows machine** — it
+> was written against the documented behaviour but never executed there. If it
+> fails, the error text is what to send back.
 
 ### Step 1 — Open a terminal and go to the project
 
@@ -565,16 +572,25 @@ The backend is not running. Start it in a second terminal with
 Run `chmod +x scripts/*.sh` once, then retry.
 
 **Windows: `python3: command not found` or `bash: ./scripts/start.sh: No such file`.**
-You are probably in CMD or PowerShell. Open **Git Bash** instead (right-click in
-the project folder → "Open Git Bash here").
+You are running a `.sh` script from CMD or PowerShell. Use `scripts\start.bat`
+instead, or open **Git Bash** (right-click in the project folder → "Open Git
+Bash here").
+
+**Windows: `start.bat` says Python is missing, but Python is installed.**
+Windows ships a placeholder `python` command that opens the Microsoft Store.
+`start.bat` ignores it on purpose, because it is not a real interpreter. Install
+Python from [python.org](https://www.python.org/downloads/windows/) with **"Add
+python.exe to PATH"** ticked, then close and reopen the window.
 
 **Port 8000 or 5173 already in use.**
-`start.sh` detects this and names the fix:
+On macOS and Linux, `start.sh` detects this and names the fix:
 `AIFCS_BACKEND_PORT=8001 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh`
+On Windows, run `scripts\stop.bat` to clear whatever is holding the ports.
 
 **The dashboard is still running after I closed the terminal.**
-Press `Ctrl + C` in the terminal running `start.sh` rather than closing the
-window — the script stops both servers and releases the ports on interrupt.
+Press `Ctrl + C` in the terminal running the launcher rather than closing the
+window — it stops both servers and releases the ports on interrupt. On Windows,
+`scripts\stop.bat` clears anything that survived.
 
 **`No virtualenv found. Run: scripts/setup.sh`.**
 `.venv` is missing — run the setup script first.
