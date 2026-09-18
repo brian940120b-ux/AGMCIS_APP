@@ -67,6 +67,26 @@ try {
   const shown = await page.locator('span.tabular-nums').first().innerText()
   assert(shown !== '00:00.0', `UI clock should be advancing, showed ${shown}`)
   assert(await page.getByText('BLUE-01').first().isVisible(), 'BLUE-01 should be plotted')
+
+  // PHASE 3: agents must be deciding, and the feed must show real reason codes.
+  const agents = await (await fetch(`${API_URL}/api/agents`)).json()
+  assert(agents.agent_count === 4, `expected 4 agents, got ${agents.agent_count}`)
+  assert(agents.total_decisions > 0, 'agents should have decided by now')
+
+  const decisions = await (await fetch(`${API_URL}/api/decisions?limit=5`)).json()
+  assert(decisions.decisions.length > 0, 'the decision log should not be empty')
+  assert(
+    decisions.decisions.every((d) => d.reason_codes.length > 0),
+    'every decision must carry at least one reason code',
+  )
+  console.log(
+    `AGENTS -> ${agents.agent_count} agents, ${agents.total_decisions} decisions, ` +
+      `latest: ${decisions.decisions.at(-1).entity_id} ${decisions.decisions.at(-1).behaviour}`,
+  )
+  assert(
+    await page.getByText('AI Decision Feed').first().isVisible(),
+    'the decision feed panel should be visible',
+  )
   await shot(page, '10-running')
 
   // --- PAUSE: the world must genuinely freeze ---

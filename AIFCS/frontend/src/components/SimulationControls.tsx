@@ -43,6 +43,18 @@ export function SimulationControls() {
         <div className="flex items-center gap-3 text-[10px] text-ink-faint">
           <span>tick {clock?.tick ?? 0}</span>
           <span>{clock?.tick_rate_hz ?? 60} Hz</span>
+          {/* Achieved speed. A high multiplier the host cannot sustain shows
+              up here as a factor below the requested one. */}
+          {clock && clock.realtime_factor > 0 && (
+            <span
+              title="Achieved simulation seconds per real second"
+              className={
+                clock.realtime_factor < clock.speed * 0.9 ? 'text-amber-hud' : 'text-ink-faint'
+              }
+            >
+              {clock.realtime_factor.toFixed(1)}x actual
+            </span>
+          )}
           <span className={running ? 'text-green-hud' : paused ? 'text-amber-hud' : 'text-ink-faint'}>
             {state}
           </span>

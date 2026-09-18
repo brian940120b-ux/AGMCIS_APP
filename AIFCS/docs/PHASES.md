@@ -54,13 +54,45 @@ convention published aerodynamic coefficients assume, which turned static
 stability into divergence — the aircraft tumbled. The model now runs in FRD/NED
 and converts at the ENU boundary.
 
-## PHASE 3 — Rule agent — **Next**
+## PHASE 3 — Rule agent — **Complete**
 
-`BaseAgent` with `observe / think / act / update / reset`. `RuleAgent` performing
-waypoint navigation and formation keeping. Every decision is recorded with reason
-codes derived from actual state — never invented text.
+`BaseAgent` with the `observe → think → act` cycle plus `update` and `reset`;
+`RuleAgent` doing waypoint navigation, patrol routes, formation keeping and
+collision avoidance; cascaded guidance loops with an altitude integrator;
+`AgentManager` scheduling decisions on a tick-based interval; scenario support
+for routes and formation assignments; the agents and decisions API; and the
+dashboard decision feed.
 
-## PHASE 4 — Flight controller and safety layer
+**Verified:** agents decide exactly 10 times per simulation second at 10 Hz; the
+schedule is tick-based and repeats across runs; the lead tracks its route and
+reaches the first waypoint at the algebraically correct time; altitude hold
+settles within a metre; the wingman closes to within 20 m of station; a failing
+agent is logged and skipped rather than stopping the simulation; out-of-range
+commands are clamped before reaching the entity; an agent cannot write to the
+truth state or reach it through its observation; and agent-driven runs remain
+deterministic. 49 new tests, 201 backend tests total.
+
+**Two bugs worth recording:**
+
+*Formation partners fought each other.* The collision radius (400 m) was larger
+than the commanded formation separation (424 m), so each aircraft treated its own
+wingman as a conflict and turned away — which dragged the lead off its route.
+The collision radius must sit well inside the formation spacing, and the config
+now rejects a setting where it does not.
+
+*The heading loop hunted.* The outer loop had no derivative term, so a large
+heading error commanded a steep bank, the aircraft overshot, and the cycle
+repeated with the sign flipped. Damping on the turn rate fixed it. The same
+absence of integral action in the altitude loop left a constant 62 m droop,
+because a proportional loop must hold an error to command the trim attitude; a
+bounded integrator removed it.
+
+**Performance:** replacing NumPy's generic `cross`, `clip` and `norm` on
+3-element vectors with explicit scalar arithmetic more than doubled throughput,
+from 425 to ~920 ticks/s (7x to 15x real time). Those calls were spending more
+time in axis-normalisation machinery than in arithmetic.
+
+## PHASE 4 — Flight controller and safety layer — **Next**
 
 Abstract action space (`aileron`, `elevator`, `rudder`, `throttle`).
 `ActionValidator` rejecting NaN/Inf/out-of-range/excessive-rate actions, then

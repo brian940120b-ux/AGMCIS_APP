@@ -24,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from agents.agent_manager import AgentManager
+from agents.factory import build_agents
 from core.clock import ClockState, SimulationClock
 from core.config import Settings, get_settings
 from core.event_bus import EventBus, EventType
@@ -58,6 +60,12 @@ class SimulationEngine:
             speed=self.settings.simulation.default_speed,
         )
 
+        self.agents = AgentManager(
+            event_bus=self.events,
+            tick_rate_hz=self.settings.simulation.tick_rate_hz,
+            decision_rate_hz=self.settings.agents.decision_rate_hz,
+        )
+
         self.scenario: Scenario | None = None
         self.world = WorldState()
         self.seed: int = self.settings.simulation.seed
@@ -90,6 +98,10 @@ class SimulationEngine:
             }
         )
 
+        self.agents.clear()
+        for agent in build_agents(scenario, self.settings):
+            self.agents.register(agent)
+
         self.clock.reset()
         self.clock.speed = self.settings.simulation.default_speed
         self._end_reason = None
@@ -101,6 +113,7 @@ class SimulationEngine:
                 "event": "SCENARIO_LOADED",
                 "scenario": scenario.name,
                 "entities": len(scenario.entities),
+                "agents": self.agents.count,
                 "seed": self.seed,
             },
         )
@@ -123,6 +136,11 @@ class SimulationEngine:
         integrate, enforce world bounds, then publish.
         """
         dt = self.clock.dt
+
+        # Agents run first: a decision made this tick is flown this tick.
+        # They write only to entity controls, never to the truth state.
+        self.agents.update(self.world, self.clock.tick_count)
+
         self.integrator.integrate(self.world, dt)
 
         bounds = self.settings.world.bounds.model_dump()
@@ -289,6 +307,7 @@ class SimulationEngine:
             )
         self.clock.reset()
         self.rng = np.random.default_rng(self.seed)
+        self.agents.reset()
         self._end_reason = None
         self.events.clear_history()
         self.events.emit(EventType.SIMULATION_RESET, message="simulation reset")
@@ -326,4 +345,7 @@ class SimulationEngine:
             "end_reason": self._end_reason,
             "state_hash": self.world.state_hash,
             "events_published": self.events.published_count,
+            "agent_count": self.agents.count,
+            "decision_count": self.agents.decision_count,
+            "decision_rate_hz": self.agents.decision_rate_hz,
         }

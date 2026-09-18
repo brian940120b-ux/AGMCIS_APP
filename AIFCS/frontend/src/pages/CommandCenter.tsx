@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Activity, Cpu, LayoutGrid, Radio } from 'lucide-react'
+import { DecisionFeed } from '@/components/DecisionFeed'
 import { EntityList } from '@/components/EntityList'
 import { EventFeed } from '@/components/EventFeed'
 import { IntelPanel } from '@/components/IntelPanel'
@@ -81,7 +82,11 @@ export function CommandCenter() {
 
         <div className="flex min-h-0 flex-col gap-3">
           <IntelPanel />
-          <div className="min-h-0 flex-1">
+          {/* The decision feed carries more per entry, so it gets the larger share. */}
+          <div className="min-h-0 flex-[3]">
+            <DecisionFeed />
+          </div>
+          <div className="min-h-0 flex-[2]">
             <EventFeed />
           </div>
         </div>
@@ -101,6 +106,7 @@ export function CommandCenter() {
         {tab === 'units' && (
           <>
             <EntityList />
+            <DecisionFeed />
             <EventFeed />
           </>
         )}

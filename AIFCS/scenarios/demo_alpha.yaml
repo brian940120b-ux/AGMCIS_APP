@@ -10,8 +10,10 @@
 scenario:
   name: demo_alpha
   description: >
-    Four fictional flight units on converging transit tracks. Used to verify
-    the simulation loop, formation behaviour and the replay pipeline.
+    Four fictional flight units flying patrol routes in two-ship formations.
+    BLUE-01 and RED-01 are leads flying a racetrack; BLUE-02 and RED-02 hold
+    station on them. Used to verify the simulation loop, agent decisions,
+    formation behaviour and the replay pipeline.
   version: "1.0"
   duration: 300
   seed: 20260918
@@ -31,15 +33,26 @@ entities:
     orientation: [0.0, 0.0, 1.5708]      # yaw = +90 deg (east)
     controls:
       throttle: 0.26                     # trimmed for level flight at 220 m/s
+    agent: rule
+    # A wide racetrack, flown anticlockwise and repeated.
+    waypoints:
+      - [20000.0, 0.0, 6000.0]
+      - [20000.0, 25000.0, 6500.0]
+      - [-20000.0, 25000.0, 6500.0]
+      - [-20000.0, 0.0, 6000.0]
 
   - id: BLUE-02
     type: fictional_aircraft
     team: BLUE
-    position: [-20300.0, -300.0, 6000.0]
+    position: [-20600.0, -600.0, 6000.0]
     velocity: [220.0, 0.0, 0.0]
     orientation: [0.0, 0.0, 1.5708]
     controls:
       throttle: 0.26
+    agent: rule
+    formation:
+      leader: BLUE-01
+      offset: [-600.0, -600.0, 0.0]      # abeam and behind the lead (~850 m)
 
   # RED flight: heading west at a different altitude.
   - id: RED-01
@@ -50,12 +63,22 @@ entities:
     orientation: [0.0, 0.0, -1.5708]     # yaw = -90 deg (west)
     controls:
       throttle: 0.26                     # same trim as BLUE: level at 220 m/s
+    agent: rule
+    waypoints:
+      - [-20000.0, 2000.0, 7000.0]
+      - [-20000.0, -20000.0, 7500.0]
+      - [20000.0, -20000.0, 7500.0]
+      - [20000.0, 2000.0, 7000.0]
 
   - id: RED-02
     type: fictional_aircraft
     team: RED
-    position: [20300.0, 2300.0, 7000.0]
+    position: [20600.0, 2600.0, 7000.0]
     velocity: [-220.0, 0.0, 0.0]
     orientation: [0.0, 0.0, -1.5708]
     controls:
       throttle: 0.26
+    agent: rule
+    formation:
+      leader: RED-01
+      offset: [600.0, 600.0, 0.0]

@@ -8,6 +8,8 @@
 import type {
   ComputeInfo,
   ConfigSummary,
+  AgentDecision,
+  AgentsResponse,
   Entity,
   HealthResponse,
   ScenariosResponse,
@@ -69,4 +71,9 @@ export const api = {
   entities: () => request<{ count: number; entities: Entity[] }>('/api/entities'),
   events: (limit = 40) => request<{ count: number; events: SimEvent[] }>(`/api/events?limit=${limit}`),
   scenarios: () => request<ScenariosResponse>('/api/scenarios'),
+
+  // Agents (PHASE 3).
+  agents: () => request<AgentsResponse>('/api/agents'),
+  decisions: (limit = 40) =>
+    request<{ count: number; decisions: AgentDecision[] }>(`/api/decisions?limit=${limit}`),
 }

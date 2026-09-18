@@ -4,13 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 2 complete.** The simulation engine runs a fixed 60 Hz
-> deterministic clock with **Newton-Euler 6DOF flight physics** — gravity, thrust,
-> lift, drag, side force, control moments and rotary damping, integrated with RK4
-> and a quaternion attitude. Full transport control (start / pause / resume / step /
-> speed / reset) works from the dashboard. Agents, sensors, communications,
-> WebSocket, replay, scoring and training are **not implemented yet**; the dashboard
-> reports each as `NOT_IMPLEMENTED` rather than faking it.
+> **Current status: PHASE 3 complete.** Fictional units now fly themselves.
+> Rule-based pilot agents follow patrol routes, hold formation on a leader and
+> avoid collisions, deciding at 10 Hz on top of the 60 Hz deterministic 6DOF
+> physics. Every decision is recorded with the reason codes and measured values
+> behind it. Sensors, communications, WebSocket, replay, scoring and training are
+> **not implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED` rather
+> than faking it.
 
 ---
 
@@ -247,6 +247,9 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/entities` | Every fictional unit with derived altitude/speed/heading |
 | `GET` | `/api/events` | Recent system events |
 | `GET` | `/api/scenarios` | Available and loaded scenarios |
+| `GET` | `/api/agents` | Every agent with its latest decision |
+| `GET` | `/api/agents/{id}` | One agent and its recent decisions |
+| `GET` | `/api/decisions` | Decision log with reason codes and evidence |
 
 Replay, training and the `/ws/simulation` WebSocket arrive in their respective
 phases and are documented as they land.
@@ -276,6 +279,49 @@ All airframe parameters are fictional and live in
 `backend/simulation/aircraft.py`. They are sized so the platform is stable and
 flyable: full elevator commands roughly 19° angle of attack, full aileron rolls
 at about 200°/s, and `demo_alpha` is trimmed to fly level hands-off at 220 m/s.
+
+### Agents
+
+Each unit can be flown by a rule-based pilot. An agent runs a fixed cycle —
+`observe → think → act` — and picks a behaviour by priority:
+
+| Priority | Behaviour | Trigger |
+|---|---|---|
+| 1 | `AVOID` | Another unit inside the collision radius |
+| 2 | `FORMATION` | A leader is assigned; hold station on it |
+| 3 | `PATROL` | A multi-waypoint route is assigned |
+| 4 | `NAVIGATE` | A single waypoint is assigned |
+| 5 | `HOLD` | Nothing assigned; maintain the current track |
+
+Agents decide at `agents.decision_rate_hz` (10 Hz), independently of the 60 Hz
+physics. The interval is counted in **ticks**, never wall time, so the decision
+schedule is part of the deterministic run.
+
+An agent receives an `Observation` and returns an `Action`. It never holds a
+reference to the truth state, and the manager writes only to the entity's
+control demands — never to position, velocity or attitude.
+
+**Explainability.** Every decision is stored with its observation summary,
+confidence and reason codes (`WAYPOINT_ACTIVE`, `FORMATION_SEPARATION_HIGH`,
+`COLLISION_RISK`, `ALTITUDE_BELOW_TARGET` …). A reason code is emitted only when
+the condition it names was computed and met, so `GET /api/decisions` can always
+be checked against the numbers that produced it. Nothing in that feed is
+generated for display.
+
+### Performance
+
+Measured on the development machine with `demo_alpha` (4 aircraft, 6DOF + RK4 +
+agents):
+
+| Metric | Value |
+|---|---|
+| Throughput | ~920 ticks/s |
+| Real-time factor | ~15x |
+
+The dashboard shows the **achieved** factor next to the tick counter, and turns
+it amber when the host cannot sustain the requested speed. Selecting 50x on a
+machine that can only manage 15x runs at 15x and says so — the result is
+identical either way, because speed changes pacing and never the timestep.
 
 ### Scenarios
 
@@ -327,7 +373,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `152 passed`.
+**Success looks like:** `201 passed`.
 
 ### End-to-end dashboard test
 
@@ -401,8 +447,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 0 | Project setup, config, logging, health API, dashboard shell, Docker | **Complete** |
 | 1 | Simulation core: clock, world state, event bus, engine, scenarios | **Complete** |
 | 2 | 6DOF flight physics, fictional aircraft model | **Complete** |
-| 3 | Rule-based agent | Next |
-| 4 | Flight controller, action validation, safety layer | Planned |
+| 3 | Rule-based agent, guidance, decision records | **Complete** |
+| 4 | Flight controller, action validation, safety layer | Next |
 | 5 | Sensor model: partial observation, noise, delay, dropout | Planned |
 | 6 | Communication model: latency, loss, blackout | Planned |
 | 7 | WebSocket telemetry | Planned |

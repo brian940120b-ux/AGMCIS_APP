@@ -31,7 +31,10 @@
 | `core/integrator.py` | Swappable physics backend protocol | 1 |
 | `simulation/sensors.py` | Truth → Observation degradation | 5 |
 | `simulation/communications.py` | Latency, loss, blackout | 6 |
-| `agents/*` | Rule, behaviour tree, RL and commander agents | 3, 14–15 |
+| `agents/base_agent.py` | Agent contract: Observation, Decision, Action | 3 |
+| `agents/rule_agent.py` | Deterministic pilot: routes, formation, avoidance | 3 |
+| `agents/guidance.py` | Cascaded guidance loops (moves to controllers in PHASE 4) | 3 |
+| `agents/agent_manager.py` | Decision scheduling and action application | 3 |
 | `controllers/*` | Action validation, command mapping, autopilot | 4 |
 | `scoring/*` | Independent score engine and metrics | 9 |
 | `replay/*` | Recorder, player, timeline | 9 |

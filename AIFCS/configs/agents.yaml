@@ -9,10 +9,16 @@ agents:
   strict_action_validation: true
 
 rule_agent:
-  # Abstract behaviour tuning for the rule-based pilot (added in PHASE 3).
-  waypoint_capture_radius_m: 500.0
-  formation_spacing_m: 300.0
-  max_bank_deg: 60.0
+  # Abstract behaviour tuning for the rule-based pilot (PHASE 3).
+  waypoint_capture_radius_m: 800.0        # how close counts as reaching a waypoint
+  formation_spacing_m: 850.0              # nominal wingman separation
+  formation_station_tolerance_m: 150.0    # inside this, the wingman is "in station"
+  # Must stay well below formation_spacing_m: a wingman deliberately holding
+  # station is not a conflict, and if this radius overlaps the formation
+  # position both aircraft turn away from their own partner.
+  collision_radius_m: 200.0               # closer than this triggers AVOID
+  cruise_speed_mps: 220.0                 # trimmed cruise for the demo airframe
+  max_bank_deg: 60.0                      # bank limit used by the guidance loop
 
 rl_agent:
   # Populated in PHASE 11+. Present so the schema is stable from PHASE 0.

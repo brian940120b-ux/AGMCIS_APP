@@ -36,6 +36,13 @@ class ScenarioEntity:
     fuel: float = 1.0
     controls: ControlInputs = field(default_factory=ControlInputs)
 
+    # Agent assignment (PHASE 3). "rule" flies it, "none" leaves it unpiloted.
+    agent: str | None = None
+    waypoints: list[list[float]] = field(default_factory=list)
+    route_loop: bool = True
+    formation_leader: str | None = None
+    formation_offset: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+
     def to_entity_state(self) -> EntityState:
         return EntityState(
             id=self.id,
@@ -93,6 +100,9 @@ class Scenario:
                     "position": e.position,
                     "velocity": e.velocity,
                     "controls": e.controls.to_dict(),
+                    "agent": e.agent,
+                    "waypoints": e.waypoints,
+                    "formation_leader": e.formation_leader,
                 }
                 for e in self.entities
             ],
@@ -159,6 +169,31 @@ def parse_scenario(document: dict[str, Any]) -> Scenario:
         if not isinstance(raw_controls, dict):
             raise ScenarioError(f"entity {entity_id}: controls must be a mapping")
 
+        agent_type = raw.get("agent")
+        if agent_type is not None and agent_type not in {"rule", "none"}:
+            raise ScenarioError(
+                f"entity {entity_id}: unknown agent type {agent_type!r}; expected 'rule' or 'none'"
+            )
+
+        raw_waypoints = raw.get("waypoints", []) or []
+        if not isinstance(raw_waypoints, list):
+            raise ScenarioError(f"entity {entity_id}: waypoints must be a list")
+        waypoints: list[list[float]] = []
+        for w_index, waypoint in enumerate(raw_waypoints):
+            if not isinstance(waypoint, list) or len(waypoint) != 3:
+                raise ScenarioError(f"entity {entity_id}: waypoint #{w_index} must be a list of 3 numbers")
+            waypoints.append([float(v) for v in waypoint])
+
+        raw_formation = raw.get("formation", {}) or {}
+        if not isinstance(raw_formation, dict):
+            raise ScenarioError(f"entity {entity_id}: formation must be a mapping")
+        formation_leader = raw_formation.get("leader")
+        formation_offset = raw_formation.get("offset", [0.0, 0.0, 0.0])
+        if formation_leader is not None and (
+            not isinstance(formation_offset, list) or len(formation_offset) != 3
+        ):
+            raise ScenarioError(f"entity {entity_id}: formation.offset must be a list of 3 numbers")
+
         entities.append(
             ScenarioEntity(
                 id=entity_id,
@@ -176,8 +211,23 @@ def parse_scenario(document: dict[str, Any]) -> Scenario:
                     rudder=float(raw_controls.get("rudder", 0.0)),
                     throttle=float(raw_controls.get("throttle", 0.0)),
                 ).clamped(),
+                agent=agent_type,
+                waypoints=waypoints,
+                route_loop=bool(raw.get("route_loop", True)),
+                formation_leader=formation_leader,
+                formation_offset=[float(v) for v in formation_offset],
             )
         )
+
+    declared_ids = {e.id for e in entities}
+    for declared in entities:
+        if declared.formation_leader and declared.formation_leader not in declared_ids:
+            raise ScenarioError(
+                f"entity {declared.id}: formation leader {declared.formation_leader!r} "
+                "is not declared in this scenario"
+            )
+        if declared.formation_leader == declared.id:
+            raise ScenarioError(f"entity {declared.id}: cannot be its own formation leader")
 
     seed = header.get("seed")
     return Scenario(

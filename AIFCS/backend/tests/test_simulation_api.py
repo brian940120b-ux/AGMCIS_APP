@@ -171,9 +171,10 @@ def test_simulation_subsystem_reports_online(client):
     states = {s["key"]: s["state"] for s in client.get("/api/system/status").json()["subsystems"]}
     assert states["simulation"] == "ONLINE"
     assert states["physics"] == "ONLINE"
+    assert states["agents"] == "ONLINE"
     # Still unbuilt — these must keep reporting honestly.
-    assert states["agents"] == "NOT_IMPLEMENTED"
     assert states["sensors"] == "NOT_IMPLEMENTED"
+    assert states["websocket"] == "NOT_IMPLEMENTED"
 
 
 def test_openapi_documents_the_simulation_endpoints(client):

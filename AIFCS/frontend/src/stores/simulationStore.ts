@@ -10,12 +10,14 @@
 
 import { create } from 'zustand'
 import { api, ApiError } from '@/api/client'
-import type { Entity, SimEvent, SimulationStatus } from '@/types/api'
+import type { AgentDecision, AgentsResponse, Entity, SimEvent, SimulationStatus } from '@/types/api'
 
 interface SimulationState {
   status: SimulationStatus | null
   entities: Entity[]
   events: SimEvent[]
+  agents: AgentsResponse | null
+  decisions: AgentDecision[]
   scenarios: string[]
   selectedScenario: string | null
   busy: boolean
@@ -54,6 +56,8 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     status: null,
     entities: [],
     events: [],
+    agents: null,
+    decisions: [],
     scenarios: [],
     selectedScenario: null,
     busy: false,
@@ -61,12 +65,21 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
 
     refresh: async () => {
       try {
-        const [status, entities, events] = await Promise.all([
+        const [status, entities, events, agents, decisions] = await Promise.all([
           api.simulationStatus(),
           api.entities(),
           api.events(40),
+          api.agents(),
+          api.decisions(40),
         ])
-        set({ status, entities: entities.entities, events: events.events, error: null })
+        set({
+          status,
+          entities: entities.entities,
+          events: events.events,
+          agents,
+          decisions: decisions.decisions,
+          error: null,
+        })
       } catch (cause) {
         set({ error: message(cause) })
       }

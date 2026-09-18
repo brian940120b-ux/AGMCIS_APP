@@ -164,3 +164,41 @@ export interface ScenariosResponse {
   available: string[]
   loaded: ScenarioSummary | null
 }
+
+// ---------------------------------------------------------------- PHASE 3
+
+export interface AgentDecision {
+  agent_id: string
+  entity_id: string
+  simulation_time: number
+  tick: number
+  behaviour: 'HOLD' | 'NAVIGATE' | 'PATROL' | 'FORMATION' | 'AVOID'
+  confidence: number
+  reason_codes: string[]
+  observation: {
+    altitude_m: number
+    speed_mps: number
+    heading_deg: number
+    contacts: number
+    nearest_contact_m: number | null
+    confidence: number
+  }
+  metrics: Record<string, unknown>
+}
+
+export interface AgentSummary {
+  agent_id: string
+  entity_id: string
+  team: EntityTeam
+  type: string
+  decision_count: number
+  last_decision: AgentDecision | null
+}
+
+export interface AgentsResponse {
+  agent_count: number
+  decision_rate_hz: number
+  decision_interval_ticks: number
+  total_decisions: number
+  agents: AgentSummary[]
+}

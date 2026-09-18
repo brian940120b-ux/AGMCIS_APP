@@ -122,10 +122,41 @@ class LoggingSettings(BaseModel):
         return upper
 
 
+class RuleAgentSettings(BaseModel):
+    """Behaviour tuning for the rule-based pilot (PHASE 3)."""
+
+    waypoint_capture_radius_m: float = Field(default=800.0, gt=0)
+    formation_spacing_m: float = Field(default=850.0, gt=0)
+    formation_station_tolerance_m: float = Field(default=150.0, gt=0)
+    collision_radius_m: float = Field(default=200.0, gt=0)
+    cruise_speed_mps: float = Field(default=220.0, gt=0)
+    max_bank_deg: float = Field(default=60.0, gt=0, le=89.0)
+
+    @field_validator("collision_radius_m")
+    @classmethod
+    def _collision_below_formation(cls, v: float, info: Any) -> float:
+        spacing = info.data.get("formation_spacing_m")
+        if spacing is not None and v >= spacing:
+            raise ValueError(
+                "collision_radius_m must be smaller than formation_spacing_m, "
+                "or formation partners trigger collision avoidance against each other"
+            )
+        return v
+
+
 class AgentSettings(BaseModel):
     default_type: str = "rule"
     decision_rate_hz: float = Field(default=10.0, gt=0)
     strict_action_validation: bool = True
+    rule_agent: RuleAgentSettings = Field(default_factory=RuleAgentSettings)
+
+    @field_validator("default_type")
+    @classmethod
+    def _known_agent_type(cls, v: str) -> str:
+        allowed = {"rule", "none"}
+        if v not in allowed:
+            raise ValueError(f"default_type must be one of {sorted(allowed)}")
+        return v
 
 
 class ScenarioSettings(BaseModel):
@@ -222,12 +253,16 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
     if isinstance(reward_section, dict) and "weights" in reward_section:
         training_section["reward_weights"] = reward_section["weights"]
 
+    agents_section = dict(agents_doc.get("agents", {}))
+    if "rule_agent" in agents_doc:
+        agents_section["rule_agent"] = agents_doc["rule_agent"]
+
     return Settings(
         simulation=SimulationSettings(**sim_doc.get("simulation", {})),
         world=WorldSettings(**sim_doc.get("world", {})),
         telemetry=TelemetrySettings(**sim_doc.get("telemetry", {})),
         logging=LoggingSettings(**sim_doc.get("logging", {})),
-        agents=AgentSettings(**agents_doc.get("agents", {})),
+        agents=AgentSettings(**agents_section),
         scenarios=ScenarioSettings(**scenarios_doc.get("scenarios", {})),
         training=TrainingSettings(**training_section),
     )

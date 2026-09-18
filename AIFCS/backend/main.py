@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.agents import router as agents_router
 from api.health import router as health_router
 from api.simulation import router as simulation_router
 from core.config import APP_TITLE, Settings, get_settings
@@ -32,10 +33,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         directory=settings.logging.directory,
         project_root=settings.project_root,
     )
-    # Subsystems that genuinely run as of PHASE 2.
+    # Subsystems that genuinely run as of PHASE 3.
     registry = get_status_registry()
     registry.set_state("simulation", SubsystemState.ONLINE, "Fixed-timestep engine ready")
     registry.set_state("physics", SubsystemState.ONLINE, "Newton-Euler 6DOF, RK4 at the fixed timestep")
+    registry.set_state("agents", SubsystemState.ONLINE, "Rule-based pilots deciding at the configured rate")
 
     log = get_logger("startup")
     log.info(
@@ -80,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router, prefix="/api")
     app.include_router(simulation_router, prefix="/api")
+    app.include_router(agents_router, prefix="/api")
 
     @app.get("/", tags=["meta"])
     def root() -> dict[str, str]:

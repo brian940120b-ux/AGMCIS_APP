@@ -35,6 +35,8 @@ integration error alone, and it is fully deterministic.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from core.world_state import EntityState, EntityStatus, WorldState
@@ -46,6 +48,29 @@ MIN_AIRSPEED_MPS = 1.0
 
 # ENU <-> NED: swap east/north and flip the vertical axis. Self-inverse.
 ENU_NED = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+
+
+# NumPy's generic implementations of cross, clip and norm carry enough
+# per-call overhead that on 3-element vectors they dominate the tick. These
+# helpers do the same arithmetic explicitly; the physics is unchanged.
+
+
+def _norm3(v: np.ndarray) -> float:
+    return math.sqrt(float(v[0]) * float(v[0]) + float(v[1]) * float(v[1]) + float(v[2]) * float(v[2]))
+
+
+def _cross3(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return np.array(
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    )
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return low if value < low else high if value > high else value
 
 
 def enu_to_ned(vector: np.ndarray) -> np.ndarray:
@@ -60,7 +85,7 @@ def ned_to_enu(vector: np.ndarray) -> np.ndarray:
 
 
 def quat_normalize(q: np.ndarray) -> np.ndarray:
-    norm = float(np.linalg.norm(q))
+    norm = math.sqrt(float(q[0]) ** 2 + float(q[1]) ** 2 + float(q[2]) ** 2 + float(q[3]) ** 2)
     if norm < 1e-12:
         return np.array([1.0, 0.0, 0.0, 0.0])
     return q / norm
@@ -87,10 +112,10 @@ def euler_from_quat(q: np.ndarray) -> np.ndarray:
     """Roll, pitch, yaw (radians) from a quaternion (w, x, y, z)."""
     w, x, y, z = q
 
-    roll = np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
     # Clamp guards against a domain error when the argument drifts past 1.
-    pitch = np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0))
-    yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    pitch = math.asin(_clamp(2.0 * (w * y - z * x), -1.0, 1.0))
+    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
     return np.array([roll, pitch, yaw])
 
@@ -131,13 +156,13 @@ def aerodynamic_angles(velocity_body: np.ndarray) -> tuple[float, float, float]:
     is positive) and ``beta = asin(v / V)`` (relative wind from the right is
     positive).
     """
-    u, v, w = velocity_body
-    airspeed = float(np.linalg.norm(velocity_body))
+    u, v, w = float(velocity_body[0]), float(velocity_body[1]), float(velocity_body[2])
+    airspeed = _norm3(velocity_body)
     if airspeed < MIN_AIRSPEED_MPS:
         return airspeed, 0.0, 0.0
 
-    alpha = float(np.arctan2(w, u))
-    beta = float(np.arcsin(np.clip(v / airspeed, -1.0, 1.0)))
+    alpha = math.atan2(w, u)
+    beta = math.asin(_clamp(v / airspeed, -1.0, 1.0))
     return airspeed, alpha, beta
 
 
@@ -165,7 +190,7 @@ def _forces_and_moments(
 
         # Lift coefficient saturates, which models stall instead of letting
         # lift grow without bound at extreme angles of attack.
-        cl = float(np.clip(params.cl_0 + params.cl_alpha * alpha, -params.cl_max, params.cl_max))
+        cl = _clamp(params.cl_0 + params.cl_alpha * alpha, -params.cl_max, params.cl_max)
         cd = params.cd_0 + params.induced_drag_k * cl * cl
 
         lift = q_s * cl
@@ -173,7 +198,7 @@ def _forces_and_moments(
         side = q_s * params.cy_beta * beta
 
         # Stability-axis lift and drag resolved into body axes.
-        ca, sa = np.cos(alpha), np.sin(alpha)
+        ca, sa = math.cos(alpha), math.sin(alpha)
         force_body += np.array(
             [
                 -drag * ca + lift * sa,
@@ -184,7 +209,7 @@ def _forces_and_moments(
 
         # Non-dimensional rates; the 2V normalisation is the standard form.
         span, chord = params.wing_span_m, params.mean_chord_m
-        p, qq, r = omega_body
+        p, qq, r = float(omega_body[0]), float(omega_body[1]), float(omega_body[2])
         p_hat = p * span / (2.0 * airspeed)
         q_hat = qq * chord / (2.0 * airspeed)
         r_hat = r * span / (2.0 * airspeed)
@@ -245,7 +270,7 @@ def state_derivative(
     # Euler's rotational equation with a diagonal inertia tensor:
     # I * omega_dot = M - omega x (I * omega)
     inertia = params.inertia
-    omega_dot = (moment_body - np.cross(omega_body, inertia * omega_body)) / inertia
+    omega_dot = (moment_body - _cross3(omega_body, inertia * omega_body)) / inertia
 
     derivative = np.empty(13)
     derivative[0:3] = velocity_enu
