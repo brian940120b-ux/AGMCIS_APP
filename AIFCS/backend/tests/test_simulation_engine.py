@@ -33,8 +33,11 @@ def test_step_advances_exactly_one_timestep(engine):
     assert engine.world.simulation_time == pytest.approx(engine.clock.dt)
 
 
-def test_motion_matches_the_closed_form_solution(engine):
-    """Constant velocity for 10 s must land exactly where algebra says."""
+def test_kinematic_motion_matches_the_closed_form_solution(settings):
+    """With the kinematic integrator, 10 s of constant velocity is exact algebra."""
+    engine = SimulationEngine(settings=settings, integrator=KinematicIntegrator())
+    engine.load_scenario("demo_alpha")
+
     start_x = engine.world.get("BLUE-01").position[0]
     velocity_x = engine.world.get("BLUE-01").velocity[0]
 
@@ -42,6 +45,23 @@ def test_motion_matches_the_closed_form_solution(engine):
 
     assert engine.world.simulation_time == pytest.approx(10.0)
     assert engine.world.get("BLUE-01").position[0] == pytest.approx(start_x + velocity_x * 10.0)
+
+
+def test_default_integrator_is_6dof(engine):
+    """PHASE 2 makes Newton-Euler dynamics the default physics backend."""
+    assert engine.integrator.name == "simple_6dof"
+    assert engine.status()["integrator"] == "simple_6dof"
+
+
+def test_trimmed_scenario_units_hold_their_altitude(engine):
+    """demo_alpha is trimmed: the units should still be flying after a minute."""
+    start = {e.id: e.altitude for e in engine.world.entities.values()}
+
+    engine.step(60 * 60)
+
+    for entity in engine.world.entities.values():
+        assert entity.status is EntityStatus.ACTIVE
+        assert abs(entity.altitude - start[entity.id]) < 200.0, f"{entity.id} did not hold altitude"
 
 
 def test_step_requires_a_loaded_scenario(settings):
@@ -226,7 +246,12 @@ def test_integrator_is_swappable(settings):
 
     assert frozen.world.get("BLUE-01").position.tolist() == before.tolist()
     assert frozen.status()["integrator"] == "null"
-    assert SimulationEngine(settings=settings).integrator.name == KinematicIntegrator.name
+
+    # And the kinematic backend from PHASE 1 still works when selected.
+    kinematic = SimulationEngine(settings=settings, integrator=KinematicIntegrator())
+    kinematic.load_scenario("demo_alpha")
+    kinematic.step(60)
+    assert kinematic.status()["integrator"] == "kinematic"
 
 
 def test_inactive_entities_are_not_integrated(settings):

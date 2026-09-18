@@ -167,12 +167,13 @@ def test_scenarios_endpoint_lists_demo_alpha(started):
 
 
 def test_simulation_subsystem_reports_online(client):
-    """PHASE 1 makes the engine real, so the status panel must say so."""
+    """PHASE 1 made the engine real and PHASE 2 the physics, so both say ONLINE."""
     states = {s["key"]: s["state"] for s in client.get("/api/system/status").json()["subsystems"]}
     assert states["simulation"] == "ONLINE"
-    # Physics is only kinematic until PHASE 2 — it must not claim to be complete.
-    assert states["physics"] == "WARNING"
+    assert states["physics"] == "ONLINE"
+    # Still unbuilt — these must keep reporting honestly.
     assert states["agents"] == "NOT_IMPLEMENTED"
+    assert states["sensors"] == "NOT_IMPLEMENTED"
 
 
 def test_openapi_documents_the_simulation_endpoints(client):

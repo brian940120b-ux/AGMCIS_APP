@@ -32,10 +32,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         directory=settings.logging.directory,
         project_root=settings.project_root,
     )
-    # Subsystems that genuinely run as of PHASE 1.
+    # Subsystems that genuinely run as of PHASE 2.
     registry = get_status_registry()
     registry.set_state("simulation", SubsystemState.ONLINE, "Fixed-timestep engine ready")
-    registry.set_state("physics", SubsystemState.WARNING, "Kinematic integrator only — 6DOF lands in PHASE 2")
+    registry.set_state("physics", SubsystemState.ONLINE, "Newton-Euler 6DOF, RK4 at the fixed timestep")
 
     log = get_logger("startup")
     log.info(

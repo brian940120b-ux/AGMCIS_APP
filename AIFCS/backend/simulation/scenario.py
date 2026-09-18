@@ -18,6 +18,7 @@ import numpy as np
 import yaml
 
 from core.world_state import EntityState, Environment, Team, WorldState
+from simulation.aircraft import FICTIONAL_AIRCRAFT, ControlInputs
 
 
 @dataclass
@@ -33,6 +34,7 @@ class ScenarioEntity:
     health: float = 1.0
     energy: float = 1.0
     fuel: float = 1.0
+    controls: ControlInputs = field(default_factory=ControlInputs)
 
     def to_entity_state(self) -> EntityState:
         return EntityState(
@@ -44,6 +46,7 @@ class ScenarioEntity:
             health=self.health,
             energy=self.energy,
             fuel=self.fuel,
+            controls=self.controls,
             metadata={"type": self.type},
         )
 
@@ -89,6 +92,7 @@ class Scenario:
                     "type": e.type,
                     "position": e.position,
                     "velocity": e.velocity,
+                    "controls": e.controls.to_dict(),
                 }
                 for e in self.entities
             ],
@@ -144,17 +148,34 @@ def parse_scenario(document: dict[str, Any]) -> Scenario:
             if value is not None and (not isinstance(value, list) or len(value) != 3):
                 raise ScenarioError(f"entity {entity_id}: {key} must be a list of 3 numbers")
 
+        aircraft_type = str(raw.get("type", "fictional_aircraft"))
+        if aircraft_type not in FICTIONAL_AIRCRAFT:
+            raise ScenarioError(
+                f"entity {entity_id}: unknown aircraft type {aircraft_type!r}; "
+                f"available: {sorted(FICTIONAL_AIRCRAFT)}"
+            )
+
+        raw_controls = raw.get("controls", {}) or {}
+        if not isinstance(raw_controls, dict):
+            raise ScenarioError(f"entity {entity_id}: controls must be a mapping")
+
         entities.append(
             ScenarioEntity(
                 id=entity_id,
                 team=team,
-                type=str(raw.get("type", "fictional_aircraft")),
+                type=aircraft_type,
                 position=[float(v) for v in raw.get("position", [0.0, 0.0, 5000.0])],
                 velocity=[float(v) for v in raw.get("velocity", [0.0, 0.0, 0.0])],
                 orientation=[float(v) for v in raw.get("orientation", [0.0, 0.0, 0.0])],
                 health=float(raw.get("health", 1.0)),
                 energy=float(raw.get("energy", 1.0)),
                 fuel=float(raw.get("fuel", 1.0)),
+                controls=ControlInputs(
+                    aileron=float(raw_controls.get("aileron", 0.0)),
+                    elevator=float(raw_controls.get("elevator", 0.0)),
+                    rudder=float(raw_controls.get("rudder", 0.0)),
+                    throttle=float(raw_controls.get("throttle", 0.0)),
+                ).clamped(),
             )
         )
 

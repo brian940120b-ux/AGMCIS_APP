@@ -1,4 +1,4 @@
-"""Health and system-status endpoints (PHASE 0)."""
+"""Health and system-status endpoints."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def system_status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     registry = get_status_registry()
     return {
         "operational": registry.operational,
-        "phase": "PHASE 1",
+        "phase": "PHASE 2",
         "config_hash": settings.config_hash,
         "subsystems": registry.to_list(),
     }

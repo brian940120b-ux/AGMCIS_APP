@@ -27,9 +27,10 @@ import numpy as np
 from core.clock import ClockState, SimulationClock
 from core.config import Settings, get_settings
 from core.event_bus import EventBus, EventType
-from core.integrator import Integrator, KinematicIntegrator, clamp_to_bounds
+from core.integrator import Integrator, clamp_to_bounds
 from core.logging_config import get_logger
 from core.world_state import EntityStatus, WorldState
+from simulation.physics import Simple6DOFModel
 from simulation.scenario import Scenario, find_scenario
 
 log = get_logger("simulation_engine")
@@ -50,7 +51,7 @@ class SimulationEngine:
     ) -> None:
         self.settings = settings or get_settings()
         self.events = event_bus or EventBus()
-        self.integrator: Integrator = integrator or KinematicIntegrator()
+        self.integrator: Integrator = integrator or Simple6DOFModel()
 
         self.clock = SimulationClock(
             tick_rate_hz=self.settings.simulation.tick_rate_hz,

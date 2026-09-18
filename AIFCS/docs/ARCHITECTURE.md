@@ -25,8 +25,10 @@
 | `core/world_state.py` | Authoritative truth state | 1 |
 | `core/event_bus.py` | Publish/subscribe system events | 1 |
 | `core/simulation_engine.py` | Tick loop, lifecycle, speed control | 1 |
-| `simulation/aircraft.py` | `AircraftModel` interface + fictional platforms | 2 |
-| `simulation/physics.py` | Newton–Euler 6DOF integration | 2 |
+| `simulation/aircraft.py` | Fictional airframe parameters and control demands | 2 |
+| `simulation/physics.py` | Newton-Euler 6DOF, quaternion attitude, RK4 | 2 |
+| `simulation/scenario.py` | Scenario loading and validation | 1 |
+| `core/integrator.py` | Swappable physics backend protocol | 1 |
 | `simulation/sensors.py` | Truth → Observation degradation | 5 |
 | `simulation/communications.py` | Latency, loss, blackout | 6 |
 | `agents/*` | Rule, behaviour tree, RL and commander agents | 3, 14–15 |

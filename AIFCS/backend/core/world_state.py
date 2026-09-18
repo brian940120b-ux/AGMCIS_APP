@@ -18,6 +18,8 @@ from typing import Any
 
 import numpy as np
 
+from simulation.aircraft import ControlInputs
+
 
 class Team(StrEnum):
     BLUE = "BLUE"
@@ -30,6 +32,14 @@ class EntityStatus(StrEnum):
     INACTIVE = "INACTIVE"
     OUT_OF_BOUNDS = "OUT_OF_BOUNDS"
     DISABLED = "DISABLED"
+
+
+def _vec4(values: Any) -> np.ndarray:
+    """Coerce input into a float64 4-vector (quaternion), rejecting NaN and Inf."""
+    array = np.asarray(values, dtype=np.float64).reshape(4)
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"quaternion must be finite, got {values!r}")
+    return array
 
 
 def _vec3(values: Any) -> np.ndarray:
@@ -45,7 +55,9 @@ class EntityState:
     """State of one fictional flight unit.
 
     Position is metres in a local tangent plane: +X east, +Y north, +Z up.
-    Orientation is (roll, pitch, yaw) in radians.
+    Orientation is (roll, pitch, yaw) in radians, derived from the attitude
+    quaternion, which is what the 6DOF model actually integrates (PHASE 2).
+    Angular velocity is in body axes (p, q, r).
     """
 
     id: str
@@ -54,6 +66,9 @@ class EntityState:
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))
     orientation: np.ndarray = field(default_factory=lambda: np.zeros(3))
     angular_velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    # Identity rotation by default; rebuilt from `orientation` in __post_init__.
+    attitude_quaternion: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0]))
+    controls: ControlInputs = field(default_factory=ControlInputs)
 
     health: float = 1.0
     energy: float = 1.0
@@ -75,6 +90,15 @@ class EntityState:
         self.velocity = _vec3(self.velocity)
         self.orientation = _vec3(self.orientation)
         self.angular_velocity = _vec3(self.angular_velocity)
+        self.attitude_quaternion = _vec4(self.attitude_quaternion)
+
+        # Keep the quaternion and the Euler angles consistent. An identity
+        # quaternion alongside a non-zero orientation means the caller supplied
+        # Euler angles, so the quaternion is rebuilt from them.
+        if np.allclose(self.attitude_quaternion, [1.0, 0.0, 0.0, 0.0]) and np.any(self.orientation):
+            from simulation.physics import quat_from_euler  # local: avoids a cycle
+
+            self.attitude_quaternion = quat_from_euler(*self.orientation)
 
     # ------------------------------------------------------------ properties
 
@@ -106,6 +130,8 @@ class EntityState:
             velocity=self.velocity.copy(),
             orientation=self.orientation.copy(),
             angular_velocity=self.angular_velocity.copy(),
+            attitude_quaternion=self.attitude_quaternion.copy(),
+            controls=self.controls,
             health=self.health,
             energy=self.energy,
             fuel=self.fuel,
@@ -123,6 +149,8 @@ class EntityState:
             "velocity": self.velocity.tolist(),
             "orientation": self.orientation.tolist(),
             "angular_velocity": self.angular_velocity.tolist(),
+            "attitude_quaternion": self.attitude_quaternion.tolist(),
+            "controls": self.controls.to_dict(),
             "altitude": self.altitude,
             "speed": self.speed,
             "heading_deg": self.heading_deg,
@@ -224,6 +252,7 @@ class WorldState:
                 [round(v, 9) for v in entity.velocity.tolist()],
                 [round(v, 9) for v in entity.orientation.tolist()],
                 [round(v, 9) for v in entity.angular_velocity.tolist()],
+                [round(v, 9) for v in entity.attitude_quaternion.tolist()],
                 round(entity.health, 9),
                 round(entity.energy, 9),
                 round(entity.fuel, 9),

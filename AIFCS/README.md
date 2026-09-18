@@ -4,13 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 1 complete.** The simulation engine runs: a fixed 60 Hz
-> deterministic clock, world state, event bus, scenario loading and full transport
-> control (start / pause / resume / step / speed / reset) from the dashboard.
-> Motion is currently **kinematic only** — 6DOF dynamics arrive in PHASE 2. Agents,
-> sensors, communications, WebSocket, replay, scoring and training are **not
-> implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED` or `WARNING`
-> rather than faking it.
+> **Current status: PHASE 2 complete.** The simulation engine runs a fixed 60 Hz
+> deterministic clock with **Newton-Euler 6DOF flight physics** — gravity, thrust,
+> lift, drag, side force, control moments and rotary damping, integrated with RK4
+> and a quaternion attitude. Full transport control (start / pause / resume / step /
+> speed / reset) works from the dashboard. Agents, sensors, communications,
+> WebSocket, replay, scoring and training are **not implemented yet**; the dashboard
+> reports each as `NOT_IMPLEMENTED` rather than faking it.
 
 ---
 
@@ -251,6 +251,32 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 Replay, training and the `/ws/simulation` WebSocket arrive in their respective
 phases and are documented as they land.
 
+### Flight model
+
+Motion comes from Newton-Euler rigid-body dynamics, not a kinematic
+approximation:
+
+| Aspect | Implementation |
+|---|---|
+| Forces | Gravity, thrust, lift, drag (parasite + induced), side force |
+| Moments | Control power, static stability, rotary damping, dihedral effect |
+| Attitude | Quaternion — valid through vertical manoeuvres, no gimbal lock |
+| Integration | Fixed-step RK4 at the simulation timestep |
+| Stall | Lift coefficient saturates at `cl_max` |
+
+The physics runs in the standard aerospace frames (body FRD, navigation NED) and
+converts at the boundary to the platform's ENU world frame, so published
+aerodynamic coefficient signs mean what they say.
+
+Control inputs are **demands**, not surface deflections: `elevator > 0` pitches
+the nose up, `aileron > 0` rolls right, `rudder > 0` yaws right, `throttle` runs
+0 to 1. An agent does not need to know a sign convention.
+
+All airframe parameters are fictional and live in
+`backend/simulation/aircraft.py`. They are sized so the platform is stable and
+flyable: full elevator commands roughly 19° angle of attack, full aileron rolls
+at about 200°/s, and `demo_alpha` is trimmed to fly level hands-off at 220 m/s.
+
 ### Scenarios
 
 Scenarios are YAML files in `scenarios/`. `demo_alpha` is the reference
@@ -301,7 +327,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `121 passed`.
+**Success looks like:** `152 passed`.
 
 ### End-to-end dashboard test
 
@@ -374,8 +400,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 |---|---|---|
 | 0 | Project setup, config, logging, health API, dashboard shell, Docker | **Complete** |
 | 1 | Simulation core: clock, world state, event bus, engine, scenarios | **Complete** |
-| 2 | Entity and simplified 6DOF aircraft model | Next |
-| 3 | Rule-based agent | Planned |
+| 2 | 6DOF flight physics, fictional aircraft model | **Complete** |
+| 3 | Rule-based agent | Next |
 | 4 | Flight controller, action validation, safety layer | Planned |
 | 5 | Sensor model: partial observation, noise, delay, dropout | Planned |
 | 6 | Communication model: latency, loss, blackout | Planned |

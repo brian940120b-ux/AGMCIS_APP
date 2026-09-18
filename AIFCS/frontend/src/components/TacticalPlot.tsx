@@ -82,7 +82,14 @@ export function TacticalPlot() {
         return Math.hypot(ox - cx, oy - cy) < LABEL_HEIGHT
       }).length
 
-    return { entity, cx, cy, vx, vy, labelOffset: crowding * LABEL_HEIGHT }
+    // Nose direction from yaw, drawn separately from the velocity leader: with
+    // real aerodynamics the two differ whenever the unit is sideslipping.
+    const yaw = entity.orientation[2]
+    const noseLength = VIEW * 0.035
+    const nx = cx + Math.sin(yaw) * noseLength
+    const ny = cy - Math.cos(yaw) * noseLength
+
+    return { entity, cx, cy, vx, vy, nx, ny, labelOffset: crowding * LABEL_HEIGHT }
   })
 
   return (
@@ -91,7 +98,7 @@ export function TacticalPlot() {
         <div>
           <h2 className="hud-label text-ink-dim">Tactical Plot</h2>
           <p className="text-[10px] text-ink-faint">
-            Top-down X/Y projection · 3D viewer arrives in PHASE 8
+            Top-down X/Y · thin line = nose, thick = velocity · 3D in PHASE 8
           </p>
         </div>
         <span className="text-[10px] text-ink-faint">
@@ -124,14 +131,15 @@ export function TacticalPlot() {
             <line x1={0} y1={VIEW / 2} x2={VIEW} y2={VIEW / 2} />
           </g>
 
-          {placed.map(({ entity, cx, cy, vx, vy, labelOffset }) => {
+          {placed.map(({ entity, cx, cy, vx, vy, nx, ny, labelOffset }) => {
             const color = TEAM_COLOR[entity.team]
             const inactive = entity.status !== 'ACTIVE'
             const labelY = cy - 10 + labelOffset
 
             return (
               <g key={entity.id} opacity={inactive ? 0.4 : 1}>
-                <line x1={cx} y1={cy} x2={vx} y2={vy} stroke={color} strokeWidth={2} opacity={0.6} />
+                <line x1={cx} y1={cy} x2={vx} y2={vy} stroke={color} strokeWidth={2} opacity={0.55} />
+                <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth={1} opacity={0.9} />
                 <circle cx={cx} cy={cy} r={16} fill="none" stroke={color} strokeWidth={1} opacity={0.35} />
                 <circle cx={cx} cy={cy} r={6} fill={color} />
                 {/* Leader line to the label, so stacked units stay readable. */}
@@ -142,7 +150,8 @@ export function TacticalPlot() {
                   {entity.id}
                 </text>
                 <text x={cx + 24} y={labelY + 20} fill="var(--color-ink-faint)" fontSize={15}>
-                  {Math.round(entity.altitude)}m · {Math.round(entity.speed)}m/s
+                  {Math.round(entity.altitude)}m · {Math.round(entity.speed)}m/s ·{' '}
+                  {(entity.orientation[1] * (180 / Math.PI)).toFixed(0)}°
                 </text>
               </g>
             )

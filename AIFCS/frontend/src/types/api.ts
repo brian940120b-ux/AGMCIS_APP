@@ -112,12 +112,22 @@ export interface SimulationStatus {
 export type EntityTeam = 'BLUE' | 'RED' | 'NEUTRAL'
 export type EntityStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_BOUNDS' | 'DISABLED'
 
+export interface ControlState {
+  aileron: number
+  elevator: number
+  rudder: number
+  throttle: number
+}
+
 export interface Entity {
   id: string
   team: EntityTeam
   position: [number, number, number]
   velocity: [number, number, number]
+  /** Roll, pitch, yaw in radians. */
   orientation: [number, number, number]
+  attitude_quaternion: [number, number, number, number]
+  controls: ControlState
   altitude: number
   speed: number
   heading_deg: number

@@ -31,8 +31,7 @@ def test_system_status_lists_subsystems(client):
     assert states["config"] == "ONLINE"
     assert states["logging"] == "ONLINE"
     assert states["simulation"] == "ONLINE"
-    # Partial: kinematic motion only until 6DOF dynamics land in PHASE 2.
-    assert states["physics"] == "WARNING"
+    assert states["physics"] == "ONLINE"
     # Not built yet — must be reported honestly, never as ONLINE.
     assert states["agents"] == "NOT_IMPLEMENTED"
     assert states["training"] == "NOT_IMPLEMENTED"

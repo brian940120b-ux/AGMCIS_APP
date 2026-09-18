@@ -29,6 +29,8 @@ entities:
     position: [-20000.0, 0.0, 6000.0]
     velocity: [220.0, 0.0, 0.0]
     orientation: [0.0, 0.0, 1.5708]      # yaw = +90 deg (east)
+    controls:
+      throttle: 0.26                     # trimmed for level flight at 220 m/s
 
   - id: BLUE-02
     type: fictional_aircraft
@@ -36,18 +38,24 @@ entities:
     position: [-20300.0, -300.0, 6000.0]
     velocity: [220.0, 0.0, 0.0]
     orientation: [0.0, 0.0, 1.5708]
+    controls:
+      throttle: 0.26
 
   # RED flight: heading west at a different altitude.
   - id: RED-01
     type: fictional_aircraft
     team: RED
     position: [20000.0, 2000.0, 7000.0]
-    velocity: [-200.0, 0.0, 0.0]
+    velocity: [-220.0, 0.0, 0.0]
     orientation: [0.0, 0.0, -1.5708]     # yaw = -90 deg (west)
+    controls:
+      throttle: 0.26                     # same trim as BLUE: level at 220 m/s
 
   - id: RED-02
     type: fictional_aircraft
     team: RED
     position: [20300.0, 2300.0, 7000.0]
-    velocity: [-200.0, 0.0, 0.0]
+    velocity: [-220.0, 0.0, 0.0]
     orientation: [0.0, 0.0, -1.5708]
+    controls:
+      throttle: 0.26

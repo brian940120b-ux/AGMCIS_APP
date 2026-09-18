@@ -31,14 +31,30 @@ trajectories. 121 backend tests plus two browser end-to-end suites.
 (constant velocity, no forces). Gravity, drag, lift and thrust are PHASE 2, which
 is why the dashboard reports the physics subsystem as `WARNING`, not `ONLINE`.
 
-## PHASE 2 — Aircraft model and 6DOF physics — **Next**
+## PHASE 2 — Aircraft model and 6DOF physics — **Complete**
 
-`AircraftModel` interface with `Simple6DOFModel` (Newton-Euler rigid body:
-gravity, drag, lift, thrust, mass), replacing `KinematicIntegrator` behind the
-existing `Integrator` protocol. `EntityState` already carries the required
-fields. Fictional platforms only.
+`Simple6DOFModel` replaces `KinematicIntegrator` behind the existing
+`Integrator` protocol, so the engine itself did not change. Newton-Euler rigid
+body with gravity, thrust, lift, drag, side force, control moments, static
+stability and rotary damping; quaternion attitude integrated with RK4;
+`ControlInputs` on every entity; fictional airframes in a catalogue scenarios
+select by name.
 
-## PHASE 3 — Rule agent
+**Verified:** free fall matches ½gt²; a vertical dive reaches a finite terminal
+speed; static stability drives the angle of attack to the predicted trim value
+(`cm_0 / -cm_alpha`); `demo_alpha` holds its altitude within 85 m over a minute
+hands-off; every control channel moves the aircraft the way its sign says;
+control authority is bounded (≈19° alpha, ≈200°/s roll); vertical flight does
+not hit gimbal lock; non-finite control input cannot poison the state; and the
+physics is bit-for-bit deterministic. 29 physics tests, 152 backend tests total.
+
+**A note on frames:** the first implementation used a body frame with +Y left
+and +Z up. That silently inverts every pitch and yaw moment relative to the
+convention published aerodynamic coefficients assume, which turned static
+stability into divergence — the aircraft tumbled. The model now runs in FRD/NED
+and converts at the ENU boundary.
+
+## PHASE 3 — Rule agent — **Next**
 
 `BaseAgent` with `observe / think / act / update / reset`. `RuleAgent` performing
 waypoint navigation and formation keeping. Every decision is recorded with reason
