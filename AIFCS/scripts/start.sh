@@ -15,6 +15,8 @@ set -uo pipefail
 set -m
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib.sh
+. "$ROOT/scripts/lib.sh"
 cd "$ROOT"
 
 BACKEND_PORT="${AIFCS_BACKEND_PORT:-8000}"
@@ -71,22 +73,18 @@ echo
 
 # --- 1. Prerequisites -------------------------------------------------------
 missing=""
-command -v python3 >/dev/null 2>&1 || missing="$missing Python3"
-command -v node    >/dev/null 2>&1 || missing="$missing Node.js"
-command -v npm     >/dev/null 2>&1 || missing="$missing npm"
+command -v node >/dev/null 2>&1 || missing="$missing Node.js"
+command -v npm  >/dev/null 2>&1 || missing="$missing npm"
+
+# Windows installs the interpreter as `python`, macOS/Linux as `python3`.
+PYTHON="$(find_python)" || missing="$missing Python$MIN_PYTHON+"
 
 if [ -n "$missing" ]; then
   fail "Missing:$missing / 缺少這些程式:$missing" \
        "Install them, then run this script again. / 安裝後再執行一次。"
 fi
 
-python_ok=$(python3 -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)' 2>/dev/null)
-if [ "$python_ok" != "1" ]; then
-  fail "Python 3.11 or newer is required (found $(python3 --version 2>&1))." \
-       "需要 Python 3.11 以上版本。"
-fi
-
-echo "    Python  $(python3 --version 2>&1 | cut -d' ' -f2)"
+echo "    Python  $("$PYTHON" --version 2>&1 | cut -d' ' -f2)  ($PYTHON)"
 echo "    Node    $(node --version)"
 
 # --- 2. Ports ---------------------------------------------------------------
@@ -100,14 +98,17 @@ if port_busy "$FRONTEND_PORT"; then
 fi
 
 # --- 3. Install anything missing -------------------------------------------
-if [ ! -x "$ROOT/.venv/bin/python" ]; then
+if ! venv_python >/dev/null 2>&1; then
   echo
   echo "==> First run: installing backend dependencies / 首次執行，安裝後端套件…"
-  python3 -m venv .venv || fail "Could not create the virtualenv." "無法建立虛擬環境。"
-  .venv/bin/python -m pip install --upgrade pip --quiet
-  .venv/bin/pip install -r requirements-dev.txt --quiet \
+  "$PYTHON" -m venv .venv || fail "Could not create the virtualenv." "無法建立虛擬環境。"
+  VENV_PY="$(venv_python)" || fail "The virtualenv has no interpreter." "虛擬環境建立失敗。"
+  "$VENV_PY" -m pip install --upgrade pip --quiet
+  "$VENV_PY" -m pip install -r requirements-dev.txt --quiet \
     || fail "Backend dependency install failed." "後端套件安裝失敗。"
 fi
+
+VENV_PY="$(venv_python)" || fail "No virtualenv interpreter found." "找不到虛擬環境。"
 
 if [ ! -d "$ROOT/frontend/node_modules" ]; then
   echo "==> First run: installing dashboard dependencies / 首次執行，安裝前端套件…"
@@ -120,7 +121,7 @@ mkdir -p "$LOG_DIR"
 # --- 4. Backend -------------------------------------------------------------
 echo
 echo "==> Starting simulation backend / 啟動模擬引擎…"
-(cd backend && exec "$ROOT/.venv/bin/python" -m uvicorn main:app \
+(cd backend && exec "$VENV_PY" -m uvicorn main:app \
   --host 127.0.0.1 --port "$BACKEND_PORT") > "$BACKEND_LOG" 2>&1 &
 backend_pid=$!
 

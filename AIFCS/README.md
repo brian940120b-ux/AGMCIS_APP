@@ -118,6 +118,11 @@ AIFCS/
 
 **Prerequisites:** Python 3.11+, Node.js 20+, and (optionally) Docker.
 
+> **Windows:** run every command below in **Git Bash** (installed with
+> [Git for Windows](https://git-scm.com/download/win)), not CMD or PowerShell.
+> The scripts detect the Windows layout automatically — `python` instead of
+> `python3`, and `.venv/Scripts/` instead of `.venv/bin/`.
+
 ### Step 1 — Open a terminal and go to the project
 
 ```bash
@@ -341,6 +346,10 @@ The backend is not running. Start it in a second terminal with
 
 **`./scripts/setup.sh: Permission denied`.**
 Run `chmod +x scripts/*.sh` once, then retry.
+
+**Windows: `python3: command not found` or `bash: ./scripts/start.sh: No such file`.**
+You are probably in CMD or PowerShell. Open **Git Bash** instead (right-click in
+the project folder → "Open Git Bash here").
 
 **Port 8000 or 5173 already in use.**
 `start.sh` detects this and names the fix:
