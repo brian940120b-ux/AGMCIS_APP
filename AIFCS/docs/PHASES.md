@@ -119,12 +119,55 @@ aircraft at zero pitch. That was wrong — this airframe has `cl_0 = 0`, so zero
 angle of attack means zero lift and zero load factor. Level flight *is* the trim
 attitude, around 1.27 degrees. The code was right and the test premise was not.
 
-## PHASE 5 — Sensor model — **Next**
+## PHASE 5 — Sensor model — **Complete**
 
-Separate `TruthState` and `Observation` types. Noise, delay, dropout, limited
-field of regard, confidence estimates. Agents may read only `Observation`.
+`SensorModel` sits between the truth state and every agent: detection envelope
+(range and field of regard), a latency buffer, dropout with track coasting and
+memory, range-dependent measurement noise, imperfect ownship estimation, and a
+derived confidence. `ContactView` gained `age_s`, `confidence` and `measured`.
 
-## PHASE 6 — Communication model
+The payoff of the PHASE 3 design showed up here: agents were written against
+`Observation` and **not one line of agent code changed** when perception became
+degraded. Only what fills the object changed.
+
+**Verified:** contacts beyond range or outside the field of regard are absent
+rather than flagged; measurements carry noise that grows with range; reports lag
+the truth by the configured latency; a dropped contact is coasted and then
+forgotten past track memory; a coasted track is dead-reckoned by the right
+amount; confidence falls with range and staleness and stays in [0, 1]; the same
+seed reproduces the same measurements and a different seed does not; disabling
+the sensor restores perfect information; an agent cannot reach the truth state
+through its observation; and the run stays deterministic. 24 new tests, 259
+total.
+
+**Three bugs worth recording:**
+
+*The wiring silently did not apply.* The edit inserting the sensor hook into the
+agent manager did not match, because an earlier `ruff format` had reformatted
+the target. Everything ran and looked fine — all four agents reported identical
+contact distances and a confidence of exactly 1.0, which is what gave it away.
+Identical values across differently-positioned observers cannot come from a
+noisy sensor.
+
+*The wingman went blind and gave up.* With a forward-only field of regard, the
+wingman overshot its station, the leader ended up 129 degrees off its nose, and
+the track was lost permanently — the agent correctly reported
+`LEADER_UNAVAILABLE` and fell back to `HOLD`, but the formation was finished.
+Two fixes: the formation speed loop gained a damping term on closing rate so the
+wingman stops flying past its station, and all-round coverage became the default
+since a narrow sensor only becomes survivable once the PHASE 6 datalink exists.
+
+*Dead reckoning used the wrong timestep.* A coasted track advanced by one
+physics tick per call, but `observe` runs at the decision rate, so the estimate
+crept forward six times too slowly. The track now stores its last measurement
+and derives the coasted estimate from elapsed time, which is independent of how
+often it is asked.
+
+**An emergent interaction:** with noisy perception the guidance loops react more
+sharply, and the PHASE 4 load-factor limiter now genuinely engages during turns.
+Two phases apart, behaving exactly as intended.
+
+## PHASE 6 — Communication model — **Next**
 
 Latency, packet loss, reordering, bandwidth limits and blackout windows, with
 `send_message` / `receive_message` / `broadcast` / `get_latency` / `get_packet_loss`.

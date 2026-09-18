@@ -29,7 +29,7 @@
 | `simulation/physics.py` | Newton-Euler 6DOF, quaternion attitude, RK4 | 2 |
 | `simulation/scenario.py` | Scenario loading and validation | 1 |
 | `core/integrator.py` | Swappable physics backend protocol | 1 |
-| `simulation/sensors.py` | Truth → Observation degradation | 5 |
+| `simulation/sensors.py` | Truth → Observation: range, noise, latency, dropout | 5 |
 | `simulation/communications.py` | Latency, loss, blackout | 6 |
 | `agents/base_agent.py` | Agent contract: Observation, Decision, Action | 3 |
 | `agents/rule_agent.py` | Deterministic pilot: routes, formation, avoidance | 3 |

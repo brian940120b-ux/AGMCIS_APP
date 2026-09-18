@@ -173,8 +173,8 @@ def test_simulation_subsystem_reports_online(client):
     assert states["physics"] == "ONLINE"
     assert states["agents"] == "ONLINE"
     assert states["controllers"] == "ONLINE"
+    assert states["sensors"] == "ONLINE"
     # Still unbuilt — these must keep reporting honestly.
-    assert states["sensors"] == "NOT_IMPLEMENTED"
     assert states["websocket"] == "NOT_IMPLEMENTED"
 
 

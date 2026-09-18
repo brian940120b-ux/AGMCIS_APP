@@ -216,3 +216,15 @@ export interface ControllerStatus {
     max_altitude_m: number
   }
 }
+
+// ---------------------------------------------------------------- PHASE 5
+
+export interface SensorStatus {
+  enabled: boolean
+  max_range_m: number
+  field_of_regard_deg: number
+  latency_s: number
+  dropout_probability: number
+  track_memory_s: number
+  tracked_contacts: Record<string, number>
+}

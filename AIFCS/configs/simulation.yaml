@@ -27,6 +27,24 @@ world:
   # Simplified constant-density atmosphere for MVP-01; replaced in later phases.
   air_density_kgpm3: 1.225
 
+sensors:
+  # Perception limits between the truth state and an agent (PHASE 5).
+  # An agent sees an estimate, never the world itself.
+  enabled: true
+  max_range_m: 80000.0          # beyond this a contact is simply not reported
+  field_of_regard_deg: 180.0    # half-angle from the nose; 180 = all-round.
+                                # Narrow it to study partial observability —
+                                # a forward-only sensor loses a leader the
+                                # moment the wingman overshoots it.
+  latency_s: 0.2                # contacts are reported where they were, not are
+  dropout_probability: 0.05     # chance a detection is missed each cycle
+  track_memory_s: 3.0           # how long a missed contact is coasted
+  position_noise_base_m: 20.0
+  position_noise_per_km_m: 2.0  # angular error projects further with range
+  velocity_noise_mps: 3.0
+  ownship_position_noise_m: 5.0 # an aircraft does not know its own state exactly
+  ownship_velocity_noise_mps: 0.5
+
 telemetry:
   # How often the WebSocket layer broadcasts world state (Hz). Independent of tick rate.
   broadcast_rate_hz: 20

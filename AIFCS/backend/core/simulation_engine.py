@@ -36,6 +36,7 @@ from core.logging_config import get_logger
 from core.world_state import EntityStatus, WorldState
 from simulation.physics import Simple6DOFModel
 from simulation.scenario import Scenario, find_scenario
+from simulation.sensors import SensorConfig, SensorModel
 
 log = get_logger("simulation_engine")
 
@@ -62,10 +63,17 @@ class SimulationEngine:
             speed=self.settings.simulation.default_speed,
         )
 
+        self.sensors = SensorModel(
+            config=self._sensor_config(),
+            seed=self.settings.simulation.seed,
+            tick_rate_hz=self.settings.simulation.tick_rate_hz,
+        )
+
         self.agents = AgentManager(
             event_bus=self.events,
             tick_rate_hz=self.settings.simulation.tick_rate_hz,
             decision_rate_hz=self.settings.agents.decision_rate_hz,
+            sensor_model=self.sensors,
         )
 
         self.controller = FlightController(
@@ -115,6 +123,8 @@ class SimulationEngine:
         for agent in build_agents(scenario, self.settings):
             self.agents.register(agent)
 
+        self.sensors.reset(seed=self.seed)
+
         # Actuators start where the scenario trimmed them, not at neutral.
         self.controller.reset()
         for entity in self.world.entities.values():
@@ -137,6 +147,22 @@ class SimulationEngine:
         )
         return scenario
 
+    def _sensor_config(self) -> SensorConfig:
+        sensors = self.settings.sensors
+        return SensorConfig(
+            enabled=sensors.enabled,
+            max_range_m=sensors.max_range_m,
+            field_of_regard_deg=sensors.field_of_regard_deg,
+            latency_s=sensors.latency_s,
+            dropout_probability=sensors.dropout_probability,
+            track_memory_s=sensors.track_memory_s,
+            position_noise_base_m=sensors.position_noise_base_m,
+            position_noise_per_km_m=sensors.position_noise_per_km_m,
+            velocity_noise_mps=sensors.velocity_noise_mps,
+            ownship_position_noise_m=sensors.ownship_position_noise_m,
+            ownship_velocity_noise_mps=sensors.ownship_velocity_noise_mps,
+        )
+
     def _resolve(self, relative: str) -> Path:
         path = Path(relative)
         return path if path.is_absolute() else self.settings.project_root / path
@@ -154,6 +180,10 @@ class SimulationEngine:
         integrate, enforce world bounds, then publish.
         """
         dt = self.clock.dt
+
+        # Sensors capture the current truth first; what an agent then sees is
+        # the delayed, noisy version of it.
+        self.sensors.record(self.world)
 
         # Agents decide at their own slower rate and leave a standing demand.
         self.agents.update(self.world, self.clock.tick_count)
@@ -354,6 +384,7 @@ class SimulationEngine:
         self.clock.reset()
         self.rng = np.random.default_rng(self.seed)
         self.agents.reset()
+        self.sensors.reset(seed=self.seed)
         self.controller.reset()
         for entity in self.world.entities.values():
             self.controller.seed(entity)
@@ -398,4 +429,5 @@ class SimulationEngine:
             "decision_count": self.agents.decision_count,
             "decision_rate_hz": self.agents.decision_rate_hz,
             "controller": self.controller.status(),
+            "sensors": self.sensors.status(),
         }

@@ -14,6 +14,7 @@ import type {
   AgentDecision,
   AgentsResponse,
   ControllerStatus,
+  SensorStatus,
   Entity,
   SimEvent,
   SimulationStatus,
@@ -26,6 +27,7 @@ interface SimulationState {
   agents: AgentsResponse | null
   decisions: AgentDecision[]
   controller: ControllerStatus | null
+  sensors: SensorStatus | null
   scenarios: string[]
   selectedScenario: string | null
   busy: boolean
@@ -67,6 +69,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     agents: null,
     decisions: [],
     controller: null,
+    sensors: null,
     scenarios: [],
     selectedScenario: null,
     busy: false,
@@ -74,14 +77,16 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
 
     refresh: async () => {
       try {
-        const [status, entities, events, agents, decisions, controller] = await Promise.all([
-          api.simulationStatus(),
-          api.entities(),
-          api.events(40),
-          api.agents(),
-          api.decisions(40),
-          api.controller(),
-        ])
+        const [status, entities, events, agents, decisions, controller, sensors] =
+          await Promise.all([
+            api.simulationStatus(),
+            api.entities(),
+            api.events(40),
+            api.agents(),
+            api.decisions(40),
+            api.controller(),
+            api.sensors(),
+          ])
         set({
           status,
           entities: entities.entities,
@@ -89,6 +94,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
           agents,
           decisions: decisions.decisions,
           controller,
+          sensors,
           error: null,
         })
       } catch (cause) {

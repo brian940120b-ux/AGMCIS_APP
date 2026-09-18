@@ -14,6 +14,7 @@ import type {
   Entity,
   HealthResponse,
   ScenariosResponse,
+  SensorStatus,
   SimEvent,
   SimulationStatus,
   SystemStatus,
@@ -76,6 +77,7 @@ export const api = {
   // Agents (PHASE 3).
   agents: () => request<AgentsResponse>('/api/agents'),
   controller: () => request<ControllerStatus>('/api/controller'),
+  sensors: () => request<SensorStatus>('/api/sensors'),
   decisions: (limit = 40) =>
     request<{ count: number; decisions: AgentDecision[] }>(`/api/decisions?limit=${limit}`),
 }

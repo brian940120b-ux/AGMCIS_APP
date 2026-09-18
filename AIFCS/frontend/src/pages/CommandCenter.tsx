@@ -4,6 +4,7 @@ import { DecisionFeed } from '@/components/DecisionFeed'
 import { EntityList } from '@/components/EntityList'
 import { EventFeed } from '@/components/EventFeed'
 import { IntelPanel } from '@/components/IntelPanel'
+import { PerceptionPanel } from '@/components/PerceptionPanel'
 import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
@@ -72,6 +73,7 @@ export function CommandCenter() {
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
           <SystemStatusPanel />
           <EntityList />
+          <PerceptionPanel />
           <SafetyPanel />
         </div>
 
@@ -107,6 +109,7 @@ export function CommandCenter() {
         {tab === 'status' && (
           <>
             <SystemStatusPanel />
+            <PerceptionPanel />
             <SafetyPanel />
           </>
         )}

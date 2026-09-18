@@ -43,6 +43,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         SubsystemState.ONLINE,
         "Validation, envelope protection and actuator rate limiting",
     )
+    registry.set_state(
+        "sensors",
+        SubsystemState.ONLINE,
+        "Range, field of regard, noise, latency and dropout applied",
+    )
 
     log = get_logger("startup")
     log.info(

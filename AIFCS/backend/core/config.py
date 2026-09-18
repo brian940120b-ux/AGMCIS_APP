@@ -99,6 +99,22 @@ class WorldSettings(BaseModel):
     air_density_kgpm3: float = Field(default=1.225, gt=0)
 
 
+class SensorSettings(BaseModel):
+    """Perception limits applied between truth and an agent (PHASE 5)."""
+
+    enabled: bool = True
+    max_range_m: float = Field(default=80_000.0, gt=0)
+    field_of_regard_deg: float = Field(default=180.0, gt=0, le=180.0)
+    latency_s: float = Field(default=0.2, ge=0.0, le=5.0)
+    dropout_probability: float = Field(default=0.05, ge=0.0, le=1.0)
+    track_memory_s: float = Field(default=3.0, ge=0.0)
+    position_noise_base_m: float = Field(default=20.0, ge=0.0)
+    position_noise_per_km_m: float = Field(default=2.0, ge=0.0)
+    velocity_noise_mps: float = Field(default=3.0, ge=0.0)
+    ownship_position_noise_m: float = Field(default=5.0, ge=0.0)
+    ownship_velocity_noise_mps: float = Field(default=0.5, ge=0.0)
+
+
 class TelemetrySettings(BaseModel):
     broadcast_rate_hz: float = Field(default=20.0, gt=0, le=240.0)
     max_entities_per_frame: int = Field(default=64, ge=1)
@@ -222,6 +238,7 @@ class Settings(BaseModel):
     version: str = APP_VERSION
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
     world: WorldSettings = Field(default_factory=WorldSettings)
+    sensors: SensorSettings = Field(default_factory=SensorSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     agents: AgentSettings = Field(default_factory=AgentSettings)
@@ -280,6 +297,7 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
     return Settings(
         simulation=SimulationSettings(**sim_doc.get("simulation", {})),
         world=WorldSettings(**sim_doc.get("world", {})),
+        sensors=SensorSettings(**sim_doc.get("sensors", {})),
         telemetry=TelemetrySettings(**sim_doc.get("telemetry", {})),
         logging=LoggingSettings(**sim_doc.get("logging", {})),
         agents=AgentSettings(**agents_section),

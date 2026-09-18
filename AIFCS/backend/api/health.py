@@ -41,7 +41,7 @@ def system_status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     registry = get_status_registry()
     return {
         "operational": registry.operational,
-        "phase": "PHASE 4",
+        "phase": "PHASE 5",
         "config_hash": settings.config_hash,
         "subsystems": registry.to_list(),
     }

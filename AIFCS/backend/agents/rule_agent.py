@@ -289,8 +289,14 @@ class RuleAgent(BaseAgent):
                 along_track = float(np.dot(station[:2], forward))
                 cross_track = float(np.dot(station[:2], right))
 
+                # Closing rate along the leader's track. Without this damping
+                # term the speed command is pure proportional, and the wingman
+                # arrives fast and flies straight past its station.
+                relative_velocity_2d = leader.relative_velocity[:2]
+                along_rate = float(np.dot(relative_velocity_2d, forward))
+
                 heading_correction = float(np.clip(cross_track * 0.06, -45.0, 45.0))
-                closure = float(np.clip(along_track * 0.10, -40.0, 40.0))
+                closure = float(np.clip(along_track * 0.10 + along_rate * 0.8, -40.0, 40.0))
 
                 return {
                     "heading": (leader_heading + heading_correction) % 360.0,

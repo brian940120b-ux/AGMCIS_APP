@@ -14,7 +14,7 @@ command.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -24,15 +24,19 @@ from core.logging_config import get_logger
 from core.world_state import EntityState, EntityStatus, WorldState
 from simulation.aircraft import ControlInputs
 
+if TYPE_CHECKING:
+    from simulation.sensors import SensorModel
+
 log = get_logger("agent_manager")
 
 
 def build_observation(agent: BaseAgent, entity: EntityState, world: WorldState) -> Observation:
-    """Construct an agent's view of the world.
+    """Undegraded view of the world, straight from truth.
 
-    PHASE 3 passes truth through undegraded. PHASE 5 replaces the body of this
-    function with the sensor model — noise, delay, dropout and a confidence
-    estimate — without any agent needing to change.
+    This is the PHASE 3 behaviour, kept for tests and for studies that want a
+    perfect-information baseline. A run with sensing enabled goes through
+    ``SensorModel.observe`` instead — that is the only difference, which is what
+    the Observation type was designed to make possible.
     """
     contacts: list[ContactView] = []
     for other in world.entities.values():
@@ -76,8 +80,12 @@ class AgentManager:
         tick_rate_hz: int = 60,
         decision_rate_hz: float = 10.0,
         decision_log_size: int = 500,
+        sensor_model: SensorModel | None = None,
     ) -> None:
         self.events = event_bus
+        # When present, agents perceive the world through it instead of reading
+        # truth. Nothing else about the agent path changes.
+        self.sensor_model = sensor_model
         self.tick_rate_hz = tick_rate_hz
         self.decision_rate_hz = decision_rate_hz
         # At least one tick: a decision rate above the tick rate cannot be met.
@@ -143,8 +151,18 @@ class AgentManager:
             decided += 1
         return decided
 
+    def _observe(self, agent: BaseAgent, entity: EntityState, world: WorldState) -> Observation:
+        """What the agent is allowed to know this cycle.
+
+        With a sensor model attached the agent receives an estimate; without
+        one it receives truth, which is the perfect-information baseline.
+        """
+        if self.sensor_model is not None:
+            return self.sensor_model.observe(agent.agent_id, entity, world)
+        return build_observation(agent, entity, world)
+
     def _run_agent(self, agent: BaseAgent, entity: EntityState, world: WorldState, tick: int) -> None:
-        observation = build_observation(agent, entity, world)
+        observation = self._observe(agent, entity, world)
 
         try:
             decision, action = agent.step(observation)

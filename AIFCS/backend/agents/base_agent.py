@@ -61,7 +61,13 @@ class ReasonCode(StrEnum):
 
 @dataclass(frozen=True)
 class ContactView:
-    """What one agent perceives of another entity."""
+    """What one agent perceives of another entity.
+
+    This is an **estimate**, not truth. From PHASE 5 the values carry sensor
+    noise, the position may be up to ``age_s`` seconds stale, and ``measured``
+    distinguishes a fresh detection from a track being coasted through a
+    dropout.
+    """
 
     entity_id: str
     team: Team
@@ -69,6 +75,12 @@ class ContactView:
     relative_velocity: np.ndarray
     distance_m: float
     is_friendly: bool
+    # Seconds since this contact was last actually measured. 0.0 when fresh.
+    age_s: float = 0.0
+    # Track quality, derived from range and staleness.
+    confidence: float = 1.0
+    # False when the track is being coasted rather than measured this cycle.
+    measured: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +89,9 @@ class ContactView:
             "relative_position": self.relative_position.tolist(),
             "distance_m": round(self.distance_m, 1),
             "is_friendly": self.is_friendly,
+            "age_s": round(self.age_s, 3),
+            "confidence": round(self.confidence, 3),
+            "measured": self.measured,
         }
 
 
@@ -103,7 +118,8 @@ class Observation:
     heading_deg: float
 
     contacts: list[ContactView] = field(default_factory=list)
-    # 1.0 while the observation is undegraded; the sensor model lowers it.
+    # Mean track quality across the contacts. 1.0 when nothing is being tracked
+    # or when the sensor model is disabled.
     confidence: float = 1.0
 
     @property
@@ -122,7 +138,9 @@ class Observation:
             "speed_mps": round(self.speed, 1),
             "heading_deg": round(self.heading_deg, 1),
             "contacts": len(self.contacts),
+            "measured_contacts": sum(1 for c in self.contacts if c.measured),
             "nearest_contact_m": round(nearest.distance_m, 1) if nearest else None,
+            "max_track_age_s": round(max((c.age_s for c in self.contacts), default=0.0), 2),
             "confidence": round(self.confidence, 3),
         }
 

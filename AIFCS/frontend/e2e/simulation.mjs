@@ -107,6 +107,27 @@ try {
     await page.getByText('Safety Layer').first().isVisible(),
     'the safety panel should be visible',
   )
+
+  // PHASE 5: agents must be perceiving an estimate, not the truth.
+  const sensors = await (await fetch(`${API_URL}/api/sensors`)).json()
+  assert(sensors.enabled, 'the sensor model should be active')
+  assert(
+    Object.keys(sensors.tracked_contacts).length > 0,
+    'units should be holding tracks by now',
+  )
+  const degraded = decisions.decisions.every((d) => d.observation.confidence <= 1.0)
+  assert(degraded, 'observation confidence must be a real number in [0, 1]')
+  const anyImperfect = decisions.decisions.some((d) => d.observation.confidence < 1.0)
+  assert(anyImperfect, 'a degraded observation cannot be perfectly confident')
+  console.log(
+    `SENSORS -> range ${(sensors.max_range_m / 1000).toFixed(0)} km, ` +
+      `latency ${sensors.latency_s}s, dropout ${sensors.dropout_probability}, ` +
+      `confidence ${decisions.decisions.at(-1).observation.confidence.toFixed(3)}`,
+  )
+  assert(
+    await page.getByText('Perception').first().isVisible(),
+    'the perception panel should be visible',
+  )
   await shot(page, '10-running')
 
   // --- PAUSE: the world must genuinely freeze ---
