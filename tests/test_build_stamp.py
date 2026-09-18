@@ -80,6 +80,8 @@ def test_the_dashboard_puts_the_stamp_where_it_is_seen_first():
 @pytest.mark.parametrize("must", [
     "指令單", "U 本位標準合約 · 手動送單", "還沒關掉的洞",
     "交易所帳戶 —— U 本位標準合約",
+    "幣種 —— 能不能做,以及現在該不該做",
+    "研究提案 —— 系統想改什麼",
 ])
 def test_the_new_system_actually_reaches_the_page(must):
     """這幾塊是 2026-09-13 換上去的。**渲染不出來就等於沒改。**"""
@@ -90,6 +92,12 @@ def test_the_new_system_actually_reaches_the_page(must):
 
 @pytest.mark.parametrize("gone", [
     "權益曲線", "相關性集中度</h2>", "事件日曆", "策略監控", "今日訂單",
+    # 2026-09-18:「決策變數」那張卡併進「幣種」了 —— 手機上原本有
+    # **兩張幣種表**,一張說「能不能做」、一張說「該不該做」,
+    # 同一批幣、兩個地方看,而它們排序還不一樣。
+    # 比的是 <h2> 不是那四個字:那句話本身還在(它是現在的決策規則),
+    # 消失的只有那張卡。
+    "<h2>決策變數</h2>",
 ])
 def test_the_things_the_consul_asked_to_remove_are_gone(gone):
     """2026-09-13 執政官:「我想專注在 U 本位標準合約,其他不要。」
@@ -109,3 +117,34 @@ def test_the_correlation_number_survived_the_cut():
     import scripts.dashboard as dash
 
     assert hasattr(dash, "gate_correlation")
+
+
+def test_the_page_has_no_card_that_is_not_the_current_system():
+    """**面板上每一張卡都要是現在這套系統的。**
+
+    2026-09-18 執政官:「確認現在面板所有資訊只有新的我們現在做的,
+    之前舊的一律不要看到。」
+
+    這條把那次清點釘住:多一張卡就要在這裡登記,而登記的時候
+    會被迫問一次「它屬於現在這套嗎」。**沒有這條,舊卡會慢慢長回來** ——
+    每一張都有它當時的理由,而沒有人會回頭全部看一遍。
+    """
+    import re
+
+    import scripts.dashboard as dash
+
+    expected = {
+        "指令單 —— 要你自己按的",
+        "交易所帳戶 —— U 本位標準合約",
+        "幣種 —— 能不能做,以及現在該不該做",
+        "部位大小的依據(紙上權益)",
+        "還沒關掉的洞",
+        "研究提案 —— 系統想改什麼",
+        "實盤資格契約",
+        "系統",
+    }
+    found = {re.sub(r"<[^>]+>", "", h).strip()
+             for h in re.findall(r"<h2>(.*?)</h2>", dash.render(), re.S)}
+    assert found == expected, (
+        f"多出來的:{sorted(found - expected)}\n"
+        f"不見了的:{sorted(expected - found)}")

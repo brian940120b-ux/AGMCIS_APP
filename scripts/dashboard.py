@@ -810,14 +810,38 @@ def block_screen() -> str:
                     pass                          # 查不到 -> 不知道
 
             known = BingXStandardUSDT().recognised(SYMBOLS)
+
+            # 訊號也一起算 —— 原本它自成一張「決策變數」卡,
+            # 於是手機上有**兩張幣種表**:一張說「能不能做」,
+            # 一張說「現在該不該做」。同一批幣、兩個地方看,
+            # 而它們排序還不一樣。併成一張。
+            from portfolio.paper import VOL_LOOKBACK
+            account = _json(DATA / "portfolio_account.json") or {}
+            held = account.get("positions") or {}
+            signal = {}
+            for sym in SYMBOLS:
+                c = closes(sym, 80)
+                if len(c) < VOL_LOOKBACK + 1:
+                    continue
+                # c[-1] 是今天還沒收完的那根。訊號只能用**已收盤**的 ——
+                # paper.plan() 用 dates[-2],這裡必須是同一把尺。
+                px = c[-2]
+                ma = sum(c[-(VOL_LOOKBACK + 1):-1]) / VOL_LOOKBACK
+                signal[sym] = (px, ma, (px - ma) / ma * 100, sym in held)
+
             return {"rows": evaluate(SYMBOLS, volumes, bars, known,
                                      MIN_QUOTE_VOLUME_USDT, MIN_DAILY_BARS,
-                                     status)}
+                                     status),
+                    "signal": signal}
         except Exception as e:                   # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
 
     got = _cached("screen", 300, _screen)
-    head = '<div class="card"><h2>幣種篩選 —— 這個合約能不能做</h2>'
+    head = ('<div class="card"><h2>幣種 —— 能不能做,以及現在該不該做</h2>'
+            '<p class="note">系統的決策變數只有一個:'
+            '<b>收盤價在不在 50 日均線之上</b>。在之上就持有、之下就空手,'
+            '再由波動目標把整體規模調到年化 27%。'
+            '「離均線」越接近 0,下一次換手越可能發生在那個幣上。</p>')
     if got.get("error"):
         return (head + '<p class="note">算不出來:'
                 f'{html.escape(str(got["error"]))}</p></div>')
@@ -828,15 +852,23 @@ def block_screen() -> str:
 
     mark = {PASS: '<span class="up">✓</span>',
             BLOCK: '<span class="down">✗</span>'}
+    signal = got.get("signal") or {}
     trs = []
     for c in rows:
         cells = "".join(f'<td>{mark.get(c.gates.get(g), "<span class=dim>?</span>")}</td>'
                         for g in GATES)
-        vol = (f'{c.quote_volume / 1e6:,.0f}M'
-               if c.quote_volume else '<span class="dim">?</span>')
+        sig = signal.get(c.symbol)
+        if sig is None:
+            gap_cell = '<td class="dim">?</td><td class="dim">—</td>'
+        else:
+            _, _, gap, held = sig
+            gap_cell = (
+                f'<td class="{tone(gap)}">{gap:+.2f}%</td>'
+                f'<td><span class="pill {"p-hold" if held else "p-off"}">'
+                f'{"持有" if held else "空手"}</span></td>')
         trs.append(
             f'<tr><td class="sym">{html.escape(c.app_symbol)}</td>'
-            f'<td>{vol}</td>{cells}'
+            f'{cells}{gap_cell}'
             f'<td class="{"up" if c.tradable else "down"}">'
             f'{html.escape(c.verdict)}</td></tr>')
 
@@ -848,7 +880,8 @@ def block_screen() -> str:
             + kv("**不知道**", f'{tally["unknown"]}')
             + '</div>'
             + '<div class="scroll"><table><thead><tr><th>商品</th>'
-            f'<th>24h額</th>{heads}<th>結論</th></tr></thead><tbody>'
+            f'{heads}<th>離均線</th><th>訊號</th><th>結論</th>'
+            '</tr></thead><tbody>'
             + "".join(trs) + '</tbody></table></div>'
             + '<div class="flag"><b>「不知道」不算通過。</b> '
               '一個因為沒問到而沒發現問題的檢查,如果回報通過,'
@@ -1016,48 +1049,6 @@ def block_gaps() -> str:
             '不在某份文件裡。</div></div>')
 
 
-def block_signals() -> str:
-    try:
-        from portfolio.paper import SYMBOLS, VOL_LOOKBACK
-    except Exception:
-        return ''
-    a = _json(DATA / "portfolio_account.json")
-    pos = a.get("positions") or {}
-    rows = []
-    for sym in SYMBOLS:
-        c = closes(sym, 80)
-        if len(c) < VOL_LOOKBACK + 1:
-            continue
-        # 2026-09-09 修:c[-1] 是今天還沒收完的那根 K 棒(累積式快取,
-        # 最新一筆會隨當天成交一直變動)。拿它當「收盤」、還混進 50 日
-        # 均線去算,跟 paper.py 真正的訊號(只用 dates[len(dates)-2],
-        # 見 plan() 的「訊號用最後一根完整日的收盤」)是兩把不同的尺,
-        # 均線數字會跟實際策略算出來的不一樣。改成跟訊號同一套:
-        # 只用最後一根**已收盤**的日線。
-        px, ma = c[-2], sum(c[-(VOL_LOOKBACK + 1):-1]) / VOL_LOOKBACK
-        rows.append((sym, px, ma, (px - ma) / ma * 100, sym in pos))
-    rows.sort(key=lambda x: -x[3])
-    out = []
-    for sym, px, ma, gap, held in rows:
-        col = "#33d19d" if gap >= 0 else "#f0654f"
-        out.append(
-            f'<tr><td class="sym">{html.escape(sym.replace("-USDT", ""))}'
-            f'<div class="bar"><i style="width:'
-            f'{min(abs(gap) / 30 * 100, 100):.0f}%;background:{col}"></i></div>'
-            f'</td><td>{px:,.6g}</td><td class="dim">{ma:,.6g}</td>'
-            f'<td class="{tone(gap)}">{gap:+.2f}%</td>'
-            f'<td><span class="pill {"p-hold" if held else "p-off"}">'
-            f'{"持有" if held else "空手"}</span></td></tr>')
-    return ('<div class="card"><h2>決策變數</h2>'
-            '<p class="note">系統的決策變數只有一個:'
-            '<b>收盤價在不在 50 日均線之上</b>。在之上就持有、之下就空手,'
-            '再由波動目標把整體規模調到年化 27%。'
-            '距離越接近 0,下一次換手越可能發生在那個幣上。</p>'
-            '<div class="scroll"><table><thead><tr><th>商品</th><th>收盤</th>'
-            '<th>50日均線</th><th>距離</th><th>狀態</th></tr></thead><tbody>'
-            + "".join(out) + '</tbody></table></div></div>')
-
-
 def block_contract() -> str:
     c = _json(DATA / "portfolio_contract.json")
     if not c:
@@ -1126,7 +1117,11 @@ def block_system() -> str:
                f'{html.escape(", ".join(bad))}</b>' if bad
                else '<b class="up">全部正常</b>')
             + f' · 日線資料最舊 {fh}</p>'
-            '<div class="flag ok">執行場所 <b>PAPER(模擬金)</b>。實盤三道鎖:'
+            '<div class="flag ok">執行場所 <b>PAPER(模擬金)</b>。<br>'
+            'U 本位標準合約<b>沒有下單 API</b>(2026-09-13 GET+POST 各問'
+            '一次,對照組證實)—— 所以送單是手動的,'
+            '<b>這不是設定,是這個產品的性質</b>。<br>'
+            '而任何**可能**送出訂單的程式路徑仍然被三道鎖擋著:'
             '① <code>LIVE_ENABLED=False</code> 是原始碼常數,不是設定選項 —— '
             '要開必須改碼、commit、部署;② 實盤資格契約八條;'
             '③ 人工簽署,永不自動化。</div></div>')
@@ -1148,7 +1143,7 @@ def render() -> str:
     #   指令單(要按)→ 交易所實際(真相)→ 訊號(為什麼)
     #   → 部位大小的依據(數量從哪來)
     desk = (block_tickets() + block_exchange() + block_screen()
-            + block_signals() + block_account())
+            + block_account())
     system = (block_gaps() + block_proposals()
               + block_contract() + block_system())
     return f"""<!doctype html><html lang="zh-Hant"><head>
