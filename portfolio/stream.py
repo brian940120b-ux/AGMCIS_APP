@@ -143,6 +143,24 @@ def prices(symbols: list[str] | None = None) -> dict[str, float]:
     return {s: out[s] for s in symbols if s in out} if symbols else out
 
 
+def ages(symbols: list[str] | None = None) -> dict[str, float]:
+    """每一檔距離上一次收到報價過了幾秒。**只回沒過期的**,與 prices() 一致。
+
+    ═══ 為什麼要有這個 ═══
+    2026-09-18 面板改吃串流之後,我在「行情幾秒前」那一格直接寫了
+    `0.0` —— 那是**斷言,不是量測**。而那張卡上正好有一句我自己寫的
+    「說得出年齡的才叫即時」。
+
+    逐筆推播不代表每一筆都剛剛到:冷門幣可能好幾秒沒有成交,
+    而那時候畫面上寫 0.0 秒就是在騙人。時間本來就記在 _PX 裡
+    (過期判斷靠的就是它),只是沒有人把它拿出來。
+    """
+    now = time.time()
+    with _LOCK:
+        out = {s: now - t for s, (_, t) in _PX.items() if now - t <= STALE_S}
+    return {s: out[s] for s in symbols if s in out} if symbols else out
+
+
 def state() -> dict:
     with _LOCK:
         s = dict(_STATE)

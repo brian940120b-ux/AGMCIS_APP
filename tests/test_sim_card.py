@@ -335,3 +335,43 @@ def test_the_research_runner_can_actually_build_the_long_short_rule():
     assert w_ls and all(v < 0 for v in w_ls.values()), \
         f"跌破均線,多空版該做空,拿到 {w_ls}"
     assert not w_ma, f"跌破均線,現任該空手,拿到 {w_ma}"
+
+
+# ══════════════════════════════════════════════════════════
+# 六、年齡要用量的,不是寫的
+# ══════════════════════════════════════════════════════════
+def test_the_stream_reports_a_measured_age_not_a_hard_coded_zero():
+    """2026-09-18:面板改吃串流之後,我在「行情幾秒前」直接寫了 0.0。
+
+    **那是斷言,不是量測** —— 而那張卡上正好有一句我自己寫的
+    「說得出年齡的才叫即時」。
+
+    逐筆推播不代表每一筆都剛剛到:冷門幣可能好幾秒沒有成交,
+    那時候畫面上寫 0.0 秒就是在騙人。時間本來就記在 _PX 裡
+    (過期判斷靠的就是它),只是沒有人把它拿出來。
+    """
+    import time as _t
+
+    from portfolio import stream
+    with stream._LOCK:
+        stream._PX["BTC-USDT"] = (77989.8, _t.time() - 2.5)
+    got = stream.ages(["BTC-USDT"])
+    assert 2.4 < got["BTC-USDT"] < 3.0, got
+
+    src = Path(dash.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def sim_marks("):src.index("def sim_snapshot(")]
+    assert "0.0, \"串流\"" not in body, "串流的年齡又被寫死成 0 了"
+    assert "from portfolio.stream import ages" in body
+
+
+def test_stale_symbols_are_excluded_from_ages_exactly_as_from_prices():
+    """兩邊的過期判斷必須一致 —— 否則會出現「有價格但沒年齡」或反過來,
+    而那種不一致最後都會變成畫面上一個說不清楚的空格。"""
+    import time as _t
+
+    from portfolio import stream
+    with stream._LOCK:
+        stream._PX["FRESH-USDT"] = (1.0, _t.time() - 1.0)
+        stream._PX["STALE-USDT"] = (1.0, _t.time() - stream.STALE_S - 5)
+    assert set(stream.prices()) == set(stream.ages())
+    assert "STALE-USDT" not in stream.ages()

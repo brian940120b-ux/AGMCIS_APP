@@ -880,7 +880,16 @@ def sim_marks() -> tuple:
     except Exception:                                # noqa: BLE001
         px = {}
     if px and len(px) == len(want):
-        return a, {s: float(v) for s, v in px.items()}, [], 0.0, "串流"
+        # 年齡要**量**,不要寫 0.0。逐筆推播不代表每一筆都剛剛到:
+        # 冷門幣可能好幾秒沒成交,那時候寫 0.0 就是在騙人 ——
+        # 而這張卡上正好有一句「說得出年齡的才叫即時」。
+        try:
+            from portfolio.stream import ages as _ages
+            got_ages = _ages(want) or {}
+        except Exception:                            # noqa: BLE001
+            got_ages = {}
+        age = max(got_ages.values()) if got_ages else None
+        return a, {s: float(v) for s, v in px.items()}, [], age, "串流"
 
     # ── 二、REST 退路 ─────────────────────────────
     got = all_prices()
