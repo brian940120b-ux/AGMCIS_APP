@@ -848,7 +848,20 @@ def all_prices() -> dict:
 
 
 def sim_marks() -> tuple:
-    """模擬帳戶要的那幾檔的現價。回 (帳戶, {代號: 價格}, 問不到的, 最舊幾秒)。"""
+    """模擬帳戶要的那幾檔的現價。
+    回 (帳戶, {代號: 價格}, 問不到的, 最舊幾秒, 來源)。
+
+    ═══ 兩層,順序不可顛倒(2026-09-18)═══
+    一、**WebSocket 串流** —— 交易所逐筆推播(實測約 10 筆/秒)。
+        真正的即時。portfolio/stream.py 2026-09-08 就寫好了,
+        連 /api/stream 這個 SSE 端點都在,**而這張卡沒有用它**。
+        又是一次「寫好了但沒接上」。
+    二、REST 一次拿全部 —— 只在串流還沒連上或斷線時用。
+
+    `portfolio.live.prices()` 已經是這兩層,而且斷線時**不會拿最後
+    一次的價格假裝是即時的**(超過 20 秒沒更新就當那一檔過期)。
+    一條靜止不動卻標著「即時」的價格,比沒有價格危險。
+    """
     import time as _t
     from portfolio.account import Account
     a = Account.load()
@@ -857,21 +870,42 @@ def sim_marks() -> tuple:
     want = sorted({s for s, pos in a.positions.items()
                    if abs(pos.position_amt) > 1e-12}
                   | set(a.bench_start or {}))
+    if not want:
+        return a, {}, [], None, "無持倉"
+
+    # ── 一、串流 ──────────────────────────────────
+    try:
+        from portfolio.live import prices as stream_prices
+        px = stream_prices(want) or {}
+    except Exception:                                # noqa: BLE001
+        px = {}
+    if px and len(px) == len(want):
+        return a, {s: float(v) for s, v in px.items()}, [], 0.0, "串流"
+
+    # ── 二、REST 退路 ─────────────────────────────
     got = all_prices()
     if got.get("error"):
-        return a, {}, want, None
-    px = got["px"]
-    marks, missing, ages = {}, [], []
+        # 串流拿到一部分、REST 又掛了 —— 有多少報多少,
+        # 缺的列出來。**半套的數字要說它是半套的。**
+        miss = [s for s in want if s not in px]
+        return (a, {s: float(v) for s, v in px.items()}, miss, None,
+                f"REST 失敗({got['error']})")
+    rest = got["px"]
+    marks, missing, ages = dict(px), [], []
     now_ms = _t.time() * 1000
     for sym in want:
-        hit = px.get(sym)
+        if sym in marks:
+            continue
+        hit = rest.get(sym)
         if hit is None:
             missing.append(sym)
             continue
         marks[sym] = hit[0]
         if hit[1]:
             ages.append((now_ms - hit[1]) / 1000.0)
-    return a, marks, missing, (max(ages) if ages else None)
+    src = "串流+REST" if px else "REST"
+    return (a, {s: float(v) for s, v in marks.items()}, missing,
+            (max(ages) if ages else 0.0), src)
 
 
 def sim_snapshot() -> dict:
@@ -885,12 +919,36 @@ def sim_snapshot() -> dict:
     def _compute():
         try:
             from portfolio.scorecard import live, score
-            a, marks, _, age = sim_marks()
+            a, marks, _, age, src = sim_marks()
             lv = live(a, marks)
-            return {"live": lv, "card": score(), "age_s": age}
+            return {"live": lv, "card": score(), "age_s": age,
+                    "source": src}
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
-    return _cached("sim", 15, _compute)
+    # 1 秒。串流是逐筆推的,快取放 15 秒等於把即時壓回 15 秒一跳。
+    return _cached("sim", 1, _compute)
+
+
+def sim_payload() -> dict:
+    """SSE 與 /api/sim 共用的那一包。**只有這一份。**
+
+    各組各的話,推播看到的數字與輪詢看到的會慢慢分開 ——
+    而那正是執政官說的「數字對不上」。
+    """
+    try:
+        got = sim_snapshot()
+        if got.get("error"):
+            return {"error": got["error"]}
+        lv = got["live"]
+        return {"at": lv.at, "age_s": got.get("age_s"),
+                "source": got.get("source"),
+                "equity": lv.equity, "return_pct": lv.return_pct,
+                "excess_pct": lv.excess_pct,
+                "unrealized": lv.unrealized_pnl,
+                "realized": lv.realized_pnl,
+                "rows": _sim_rows(lv)}
+    except Exception as e:                           # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _n(v, spec: str = ",.2f") -> str:
@@ -953,7 +1011,7 @@ def block_sim() -> str:
         f'<div class="v {tone(lv.realized_pnl)}" id="s-rea">'
         f'{lv.realized_pnl:+,.2f}</div></div>')
     out = [head, note,
-           '<div class="sect-h">此刻 · <span id="s-at">每 5 秒自己更新'
+           '<div class="sect-h">此刻 · <span id="s-at">連線中…'
            '</span></div>',
            # 5 秒一輪,一輪 1 次請求(all_prices 一次拿回全部幣種),
            # = 12 次/分,而全系統預算是 120 次/分。原本每個幣各打一次
@@ -1717,31 +1775,57 @@ function simNum(v, dp, sign){{
   return (v < 0 ? '-' : '') + t;
 }}
 
+function simApply(d){{
+  var at = document.getElementById('s-at');
+  if(d.error){{
+    if(at) at.textContent = '更新失敗:' + d.error;
+    return;
+  }}
+  simPut('s-eq',  simNum(d.equity, 2, false));
+  simPut('s-ret', simNum(d.return_pct, 2, true) + '%', d.return_pct);
+  simPut('s-exc', simNum(d.excess_pct, 2, true) + '%', d.excess_pct);
+  simPut('s-unr', simNum(d.unrealized, 2, true), d.unrealized);
+  simPut('s-rea', simNum(d.realized, 2, true), d.realized);
+  var body = document.getElementById('s-legs');
+  if(body && d.rows) body.innerHTML = d.rows;
+  /* 說得出**來源**與**年齡**的才叫即時。
+     「每 N 秒更新」只是我們問的頻率;那筆價格本身有多舊是另一回事,
+     而後者才是真正的尺度。說不出年齡的「即時」是沒有證據的話。 */
+  if(at){{
+    var src = d.source || '?';
+    var age = (d.age_s === null || d.age_s === undefined)
+      ? '' : ' · 行情 ' + d.age_s.toFixed(1) + ' 秒前';
+    at.textContent = src + age;
+  }}
+}}
+
+/* ── 一、SSE:伺服器自己推,瀏覽器不問 ────────────────────
+   交易所 WebSocket 逐筆 -> 伺服器 -> 這裡,每秒一次。
+   (逐筆約 10 筆/秒,再快人眼讀不了,而且數字會抖到看不清) */
+var SIMES = null;
+function simStream(){{
+  try{{
+    SIMES = new EventSource('/api/simstream?key=' + encodeURIComponent(KEY));
+  }} catch(e){{ simPoll(); return; }}
+  SIMES.onmessage = function(ev){{
+    try{{ simApply(JSON.parse(ev.data)); }} catch(e){{}}
+  }};
+  SIMES.onerror = function(){{
+    /* SSE 斷了就退回輪詢,並且**講出來** —— 一個安靜退化成
+       「每 5 秒」的即時面板,跟一個壞掉的即時面板長得一樣。 */
+    if(SIMES){{ SIMES.close(); SIMES = null; }}
+    var at = document.getElementById('s-at');
+    if(at) at.textContent = '推播斷線,改用每 5 秒輪詢';
+    simPoll();
+  }};
+}}
+
+/* ── 二、輪詢退路 ─────────────────────────────────── */
+var SIMTIMER = null;
 function simTick(){{
   fetch('/api/sim?key=' + encodeURIComponent(KEY), {{cache:'no-store'}})
     .then(function(r){{ return r.json(); }})
-    .then(function(d){{
-      var at = document.getElementById('s-at');
-      if(d.error){{
-        if(at) at.textContent = '更新失敗:' + d.error;
-        return;
-      }}
-      simPut('s-eq',  simNum(d.equity, 2, false));
-      simPut('s-ret', simNum(d.return_pct, 2, true) + '%', d.return_pct);
-      simPut('s-exc', simNum(d.excess_pct, 2, true) + '%', d.excess_pct);
-      simPut('s-unr', simNum(d.unrealized, 2, true), d.unrealized);
-      simPut('s-rea', simNum(d.realized, 2, true), d.realized);
-      var body = document.getElementById('s-legs');
-      if(body && d.rows) body.innerHTML = d.rows;
-      /* 印真正的行情年齡 —— 「每 5 秒更新」只是我們問的頻率,
-         交易所那筆價格本身有多舊是另一回事,而那才是「即時」的
-         真正尺度。說不出年齡的「即時」是一句沒有證據的話。 */
-      if(at){{
-        at.textContent = (d.age_s === null || d.age_s === undefined)
-          ? '剛剛更新 · 每 5 秒'
-          : '行情 ' + d.age_s.toFixed(1) + ' 秒前 · 每 5 秒更新';
-      }}
-    }})
+    .then(simApply)
     .catch(function(){{
       var at = document.getElementById('s-at');
       /* 連不上要說連不上 —— 不說的話畫面上會是一組凍住的數字,
@@ -1749,7 +1833,16 @@ function simTick(){{
       if(at) at.textContent = '連不上,數字是舊的';
     }});
 }}
-if(document.getElementById('s-eq')) setInterval(simTick, 5000);
+function simPoll(){{
+  if(SIMTIMER) return;
+  simTick();
+  SIMTIMER = setInterval(simTick, 5000);
+}}
+
+if(document.getElementById('s-eq')){{
+  simTick();                       /* 先給一次,不要等第一個推播 */
+  if(window.EventSource) simStream(); else simPoll();
+}}
 
 var KSTATE = {{}};   // sid -> {{iv, timer}}
 
@@ -1984,25 +2077,34 @@ class Handler(BaseHTTPRequestHandler):
         # 2026-09-18 執政官:「我想看到即時的盈虧數字變化。」
         # 回的是 block_sim() **同一個** sim_snapshot(),所以頁面上
         # 剛渲染出來的數字與這裡輪詢回來的永遠是同一套算法。
-        if u.path.startswith("/api/sim"):
+        # SSE:交易所推 -> 這裡 -> 瀏覽器。**瀏覽器不問,伺服器自己送。**
+        # 2026-09-18 執政官:「可以做到真正的即時嗎?」
+        # 可以 —— 而且需要的東西 2026-09-08 就寫好了(portfolio/stream.py
+        # 的 WebSocket + /api/stream 的 SSE),只是這張卡沒有接上。
+        # 每秒推一次:交易所逐筆約 10 筆/秒,再快人眼讀不了,
+        # 而且數字會抖到看不清。
+        if u.path.startswith("/api/simstream"):
+            import time as _t
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
             try:
-                got = sim_snapshot()
-                if got.get("error"):
-                    payload = {"error": got["error"]}
-                else:
-                    lv = got["live"]
-                    payload = {
-                        "at": lv.at, "age_s": got.get("age_s"),
-                        "equity": lv.equity,
-                        "return_pct": lv.return_pct,
-                        "excess_pct": lv.excess_pct,
-                        "unrealized": lv.unrealized_pnl,
-                        "realized": lv.realized_pnl,
-                        "rows": _sim_rows(lv),
-                    }
-            except Exception as e:                   # noqa: BLE001
-                payload = {"error": f"{type(e).__name__}: {e}"}
-            self._send(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                while True:
+                    line = ("data: " + json.dumps(sim_payload(),
+                                                  ensure_ascii=False) + "\n\n")
+                    self.wfile.write(line.encode("utf-8"))
+                    self.wfile.flush()
+                    _t.sleep(1.0)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass                                 # 使用者關了頁面
+            return
+
+        if u.path.startswith("/api/sim"):
+            self._send(json.dumps(sim_payload(),
+                                  ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
 

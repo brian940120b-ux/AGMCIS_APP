@@ -173,12 +173,17 @@ def test_an_empty_account_says_flat_is_a_position():
 # 四、輪詢回來的跟畫面上的是同一套
 # ══════════════════════════════════════════════════════════
 def test_the_poll_and_the_page_share_one_snapshot_function():
-    """/api/sim 回的必須是 block_sim() 用的同一個 sim_snapshot() ——
-    各算各的話,畫面上的數字與輪詢回來的會慢慢分開。"""
+    """推播、輪詢、頁面初次渲染 —— 三個都必須走同一個 sim_snapshot()。
+
+    各算各的話,三處的數字會慢慢分開,而那正是執政官說的
+    「數字對不上」。中間隔了一層 sim_payload(),但它自己也只呼叫
+    sim_snapshot(),所以這裡檢查那條鏈是完整的。
+    """
     src = Path(dash.__file__).read_text(encoding="utf-8")
-    api = src[src.index('if u.path.startswith("/api/sim")'):][:900]
-    assert "sim_snapshot()" in api
-    assert "sim_snapshot()" in src[src.index("def block_sim("):][:1200]
+    payload = src[src.index("def sim_payload("):src.index("def _n(")]
+    assert "sim_snapshot()" in payload, "sim_payload 該走 sim_snapshot"
+    assert "sim_snapshot()" in src[src.index("def block_sim("):][:1200], \
+        "頁面初次渲染也要走同一份"
 
 
 def test_the_page_says_so_when_the_poll_cannot_reach_the_server():
@@ -187,8 +192,32 @@ def test_the_page_says_so_when_the_poll_cannot_reach_the_server():
     assert "連不上,數字是舊的" in page
 
 
-def test_the_poll_interval_is_declared_on_screen():
-    assert "每 5 秒" in render_with(acct(), {})
+def test_the_page_uses_server_push_before_polling():
+    """**真正的即時是交易所推,不是瀏覽器問。**
+
+    portfolio/stream.py(BingX WebSocket,逐筆約 10 筆/秒)
+    2026-09-08 就寫好了,連 SSE 端點都在 —— 而這張卡一直在輪詢。
+    又是一次「寫好了但沒接上」。
+    """
+    page = dash.render()
+    assert "new EventSource('/api/simstream" in page
+    assert "if(window.EventSource) simStream(); else simPoll();" in page
+
+
+def test_a_dropped_stream_falls_back_and_says_so():
+    """安靜退化成「每 5 秒」的即時面板,跟壞掉的即時面板長得一樣。"""
+    page = dash.render()
+    assert "推播斷線,改用每 5 秒輪詢" in page
+    assert "setInterval(simTick, 5000)" in page
+
+
+def test_the_stream_and_the_poll_send_the_same_payload():
+    """各組各的話,推播看到的數字與輪詢看到的會慢慢分開 ——
+    而那正是執政官說的「數字對不上」。"""
+    src = Path(dash.__file__).read_text(encoding="utf-8")
+    api = src[src.index('if u.path.startswith("/api/simstream")'):]
+    api = api[:api.index("try:\n            body = render()")]
+    assert api.count("sim_payload()") == 2, "SSE 與輪詢要共用同一份"
 
 
 def test_the_prices_come_from_one_bulk_call_not_one_per_symbol():
@@ -215,14 +244,31 @@ def test_a_changed_response_shape_is_reported_not_papered_over():
     assert "data 不是陣列" in body
 
 
-def test_the_screen_shows_how_old_the_quote_actually_is():
-    """「每 5 秒更新」只是我們問的頻率;交易所那筆價格本身有多舊是
-    另一回事,而那才是「即時」的真正尺度。
+def test_the_screen_shows_the_source_and_the_age_of_the_quote():
+    """說得出**來源**與**年齡**的才叫即時。
 
-    說不出年齡的「即時」是一句沒有證據的話。
+    「每 N 秒更新」只是我們問的頻率;那筆價格本身有多舊是另一回事,
+    而後者才是真正的尺度。說不出年齡的「即時」是沒有證據的話。
     """
     page = dash.render()
     assert "行情 ' + d.age_s.toFixed(1) + ' 秒前" in page
+    assert "d.source" in page
+
+
+def test_the_stream_is_preferred_over_rest_for_prices():
+    """兩層,順序不可顛倒:WebSocket 串流優先,REST 只是退路。"""
+    src = Path(dash.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def sim_marks("):src.index("def sim_snapshot(")]
+    assert body.index("from portfolio.live import prices") < \
+        body.index("all_prices()"), "串流要排在 REST 前面"
+
+
+def test_a_partial_price_set_is_reported_as_partial():
+    """串流拿到一部分、REST 又掛了 —— 有多少報多少,缺的列出來。
+    **半套的數字要說它是半套的。**"""
+    src = Path(dash.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def sim_marks("):src.index("def sim_snapshot(")]
+    assert "REST 失敗" in body
 
 
 def test_the_emitted_javascript_has_a_valid_thousands_separator():
