@@ -769,6 +769,97 @@ def block_exchange() -> str:
     return out + '</div>'
 
 
+def block_score() -> str:
+    """成績單 —— **這套現在到底好不好。**
+
+    2026-09-18 執政官:「我想和之前一樣能讓系統自行去交易模擬,
+    現在這個的績效到底好不好?」
+
+    這張卡最重要的功能是**能夠說「還不知道」**。
+    一個跑了十天的模擬做成績效卡,會是一個綠色的 +3%,而那個數字
+    不是問題的答案 —— 判斷有沒有資格回答的邏輯在
+    `portfolio/scorecard.py`,這裡只負責把它印出來。
+    """
+    def _compute():
+        try:
+            from portfolio.scorecard import score
+            return {"s": score()}
+        except Exception as e:                       # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("score", 120, _compute)
+    head = '<div class="card"><h2>成績單 —— 這套到底好不好</h2>'
+    if got.get("error"):
+        return (head + '<div class="flag warn">算不出來:'
+                + html.escape(got["error"]) + '</div></div>')
+
+    s = got["s"]
+    from portfolio.scorecard import BAD, BLOCKED, GOOD, UNKNOWN
+
+    tone_of = {GOOD: "ok", BAD: "warn", BLOCKED: "warn", UNKNOWN: ""}
+    cls = tone_of.get(s.verdict, "")
+    out = [head,
+           f'<div class="flag {cls}"><b>{html.escape(s.verdict)}</b><br>'
+           + "<br>".join(_md_bold(b) for b in s.because) + '</div>']
+
+    # ── 實跑的數字。**放在裁決下面,不是上面。** ──────────
+    # 數字放最上面,人會先讀數字再讀裁決,而裁決講的正是
+    # 「這些數字現在還不能當答案」。
+    cells = []
+    if s.return_pct is not None:
+        cells.append(kv("模擬報酬", f"{s.return_pct:+.2f}%",
+                        tone(s.return_pct)))
+    if s.benchmark_pct is not None:
+        cells.append(kv("等權買入持有", f"{s.benchmark_pct:+.2f}%",
+                        tone(s.benchmark_pct)))
+    if s.excess_pct is not None:
+        cells.append(kv("贏基準", f"{s.excess_pct:+.2f}%",
+                        tone(s.excess_pct)))
+    if s.equity is not None:
+        cells.append(kv("權益", f"{s.equity:,.2f}"))
+    if s.max_dd_pct is not None:
+        cells.append(kv("最大回撤", f"{s.max_dd_pct:.1f}%",
+                        "down" if s.max_dd_pct > 15.0 else ""))
+    cells.append(kv("走完的進出", f"{s.round_trips} 次"))
+    cells.append(kv("記帳天數", f"{s.days} 天"))
+    if s.stale_days is not None:
+        cells.append(kv("模擬在跑", "是" if s.running else "**停了**",
+                        "up" if s.running else "down"))
+    out.append(f'<div class="grid">{"".join(cells)}</div>')
+
+    if s.first_day and s.last_day:
+        out.append(f'<p class="note">記帳期間 {html.escape(s.first_day)} ~ '
+                   f'{html.escape(s.last_day)}</p>')
+
+    # ── 回測:目前唯一有統計意義的證據 ──────────────────
+    if s.backtest:
+        train, test, test_dd, as_of = s.backtest
+        f = lambda v: "—" if v is None else f"{float(v):.2f}"
+        out.append(
+            '<div class="flag"><b>目前唯一有統計意義的證據是回測,'
+            '不是上面那幾個數字。</b><br>'
+            f'現任策略 訓練段 Calmar <b>{f(train)}</b> · '
+            f'驗證段 Calmar <b>{f(test)}</b>'
+            + (f' · 驗證段回撤 <b>{float(test_dd):.1f}%</b>'
+               if test_dd is not None else '')
+            + f'(研究迴路 {html.escape(str(as_of))} 記的)<br>'
+            '**看驗證段那個。** 訓練段是挑出這組參數的那一段,'
+            '它一定好看 —— 挑的時候就是照著它挑的。'
+            '驗證段是這組參數沒看過的資料,只有它算數。</div>')
+    else:
+        out.append('<div class="flag warn">還沒有回測證據 —— '
+                   '`data/proposals.json` 裡沒有現任的訓練/驗證數字。'
+                   '跑一次 <code>python scripts/research.py</code>。</div>')
+    return "".join(out) + '</div>'
+
+
+def _md_bold(text: str) -> str:
+    """把 **粗體** 轉成 <b>,其餘一律跳脫。"""
+    parts = str(text).split("**")
+    return "".join(html.escape(x) if i % 2 == 0 else f"<b>{html.escape(x)}</b>"
+                   for i, x in enumerate(parts))
+
+
 def block_screen() -> str:
     """幣種篩選 —— **為什麼這個幣在裡面 / 不在裡面。**
 
@@ -1125,7 +1216,8 @@ def render() -> str:
     # 2026-09-18:只留 U 本位標準合約的東西。
     # 紙上帳本縮成指令單裡的一行(它決定數量,但它是永續的成本模型);
     # 實盤資格縮成「還沒關掉的洞」的一行。
-    desk = block_tickets() + block_exchange() + block_screen()
+    desk = (block_tickets() + block_exchange() + block_score()
+            + block_screen())
     system = block_gaps() + block_proposals() + block_system()
     return f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
