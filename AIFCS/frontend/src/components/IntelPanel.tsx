@@ -24,7 +24,7 @@ export function IntelPanel() {
   const health = useSystemStore((s) => s.health)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex shrink-0 flex-col gap-3">
       <Panel title="Runtime Configuration" subtitle="configs/*.yaml">
         {config ? (
           <div className="divide-y divide-edge/50">

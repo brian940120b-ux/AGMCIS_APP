@@ -1,5 +1,6 @@
 /**
- * AIFCS dashboard end-to-end smoke test.
+ * AIFCS dashboard end-to-end smoke test (shell, status and error handling).
+ * Simulation control is covered separately by e2e/simulation.mjs.
  *
  * Requires the backend (:8000) and the dev server (:5173) to be running:
  *   Terminal 1:  ./scripts/dev_backend.sh
@@ -57,12 +58,17 @@ try {
   await page.getByRole('button', { name: /ENTER COMMAND CENTER/i }).click()
   await page.getByText('COMMAND CENTER').first().waitFor()
   assert(
-    await page.getByText('NOT IMPLEMENTED').first().isVisible(),
-    'the 3D viewer declares itself NOT IMPLEMENTED',
+    await page.getByText('Tactical Plot').first().isVisible(),
+    'the tactical plot panel is present',
   )
   assert(
     await page.getByText('60 Hz').first().isVisible(),
     'runtime configuration shows the real tick rate',
+  )
+  // Subsystems that are still unbuilt must keep saying so.
+  assert(
+    await page.getByText('NOT_IMPLEMENTED').first().isVisible(),
+    'unbuilt subsystems still report NOT_IMPLEMENTED',
   )
   await shot(page, '02-command-center')
 

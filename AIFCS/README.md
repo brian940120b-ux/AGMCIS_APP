@@ -4,10 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 0 complete.** The backend, dashboard, configuration system,
-> logging, health API, Docker setup and test suite run. Simulation, physics, agents,
-> sensors, WebSocket, replay, scoring and training are **not implemented yet** — the
-> dashboard reports each one as `NOT_IMPLEMENTED` rather than faking it.
+> **Current status: PHASE 1 complete.** The simulation engine runs: a fixed 60 Hz
+> deterministic clock, world state, event bus, scenario loading and full transport
+> control (start / pause / resume / step / speed / reset) from the dashboard.
+> Motion is currently **kinematic only** — 6DOF dynamics arrive in PHASE 2. Agents,
+> sensors, communications, WebSocket, replay, scoring and training are **not
+> implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED` or `WARNING`
+> rather than faking it.
 
 ---
 
@@ -200,10 +203,29 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/system/status` | State of every subsystem |
 | `GET` | `/api/system/compute` | CPU/GPU device detection |
 | `GET` | `/api/config` | Resolved runtime configuration |
+| `GET` | `/api/simulation/status` | Clock, scenario, seed, entity count, state hash |
+| `POST` | `/api/simulation/start` | Load a scenario and run the engine loop |
+| `POST` | `/api/simulation/pause` | Stop the simulation clock |
+| `POST` | `/api/simulation/resume` | Continue from the paused tick |
+| `POST` | `/api/simulation/stop` | Halt the loop, keeping the world |
+| `POST` | `/api/simulation/reset` | Rebuild the world from the scenario |
+| `POST` | `/api/simulation/step` | Advance an exact number of ticks |
+| `POST` | `/api/simulation/speed` | Change wall-clock pacing (never the timestep) |
+| `GET` | `/api/world/state` | Full truth state |
+| `GET` | `/api/entities` | Every fictional unit with derived altitude/speed/heading |
+| `GET` | `/api/events` | Recent system events |
+| `GET` | `/api/scenarios` | Available and loaded scenarios |
 
-Endpoints for simulation control, entities, scenarios, replay, training and the
-`/ws/simulation` WebSocket arrive in their respective phases and are documented
-as they land.
+Replay, training and the `/ws/simulation` WebSocket arrive in their respective
+phases and are documented as they land.
+
+### Scenarios
+
+Scenarios are YAML files in `scenarios/`. `demo_alpha` is the reference
+scenario: four fictional units (`BLUE-01`, `BLUE-02`, `RED-01`, `RED-02`) on
+converging transit tracks. Add a scenario by dropping a new `.yaml` file beside
+it — it is validated on load, and a malformed file is rejected with a clear
+error rather than silently producing a wrong run.
 
 ---
 
@@ -226,6 +248,11 @@ Point the backend at a different directory with `AIFCS_CONFIG_DIR=/path/to/confi
 version and `config_hash` make a run reproducible. The config hash is shown in
 the dashboard footer and returned by `/api/health`.
 
+The guarantee is enforced by tests: the same seed produces an identical
+`state_hash`, stepping 600 x 1 tick equals 1 x 600 ticks, and running at 0.25x
+produces exactly the same trajectory as 50x. **Speed changes pacing, never the
+timestep** — that is what makes a fast run and a slow run comparable.
+
 ---
 
 ## Testing
@@ -242,7 +269,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `31 passed`.
+**Success looks like:** `121 passed`.
 
 ### End-to-end dashboard test
 
@@ -251,11 +278,13 @@ This one drives a real browser, so both servers must already be running.
 ```bash
 cd frontend
 npx playwright install chromium   # first time only
-npm run test:e2e
+npm run test:e2e        # dashboard shell, status panel, error handling
+npm run test:e2e:sim    # start / pause / step / reset drive the real engine
 ```
 
 **Success looks like:**
 `E2E PASSED — dashboard renders live backend data on desktop and mobile.`
+`SIMULATION E2E PASSED — start, pause, step and reset all drive the real engine.`
 
 It checks that the boot screen lists real subsystems, that the Command Center
 shows live configuration, that the mobile tab layout works, and that a stopped
@@ -304,8 +333,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Project setup, config, logging, health API, dashboard shell, Docker | **Complete** |
-| 1 | Simulation core: clock, world state, event bus, engine loop | Next |
-| 2 | Entity and simplified 6DOF aircraft model | Planned |
+| 1 | Simulation core: clock, world state, event bus, engine, scenarios | **Complete** |
+| 2 | Entity and simplified 6DOF aircraft model | Next |
 | 3 | Rule-based agent | Planned |
 | 4 | Flight controller, action validation, safety layer | Planned |
 | 5 | Sensor model: partial observation, noise, delay, dropout | Planned |

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint src --max-warnings 0",
-    "test:e2e": "node e2e/smoke.mjs"
+    "test:e2e": "node e2e/smoke.mjs",
+    "test:e2e:sim": "node e2e/simulation.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

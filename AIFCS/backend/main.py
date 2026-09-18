@@ -15,17 +15,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.health import router as health_router
+from api.simulation import router as simulation_router
 from core.config import APP_TITLE, Settings, get_settings
 from core.logging_config import configure_logging, get_logger
-from core.system_status import SystemStatusRegistry, build_default_registry
-
-# Single registry instance shared by the app and the status endpoint.
-_status_registry: SystemStatusRegistry = build_default_registry()
-
-
-def get_status_registry() -> SystemStatusRegistry:
-    """Accessor used by API routers (keeps module imports acyclic)."""
-    return _status_registry
+from core.runtime import get_engine, get_status_registry
+from core.system_status import SubsystemState
 
 
 @asynccontextmanager
@@ -38,6 +32,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         directory=settings.logging.directory,
         project_root=settings.project_root,
     )
+    # Subsystems that genuinely run as of PHASE 1.
+    registry = get_status_registry()
+    registry.set_state("simulation", SubsystemState.ONLINE, "Fixed-timestep engine ready")
+    registry.set_state("physics", SubsystemState.WARNING, "Kinematic integrator only — 6DOF lands in PHASE 2")
+
     log = get_logger("startup")
     log.info(
         "AIFCS backend online",
@@ -50,6 +49,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         },
     )
     yield
+    # Stop the simulation loop cleanly so no task outlives the process.
+    await get_engine().stop()
     get_logger("shutdown").info("AIFCS backend offline", extra={"event": "APP_STOPPED"})
 
 
@@ -78,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health_router, prefix="/api")
+    app.include_router(simulation_router, prefix="/api")
 
     @app.get("/", tags=["meta"])
     def root() -> dict[str, str]:

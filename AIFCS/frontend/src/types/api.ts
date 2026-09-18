@@ -77,3 +77,80 @@ export interface ConfigSummary {
   agents: { default_type: string; decision_rate_hz: number; strict_action_validation: boolean }
   scenarios: { directory: string; default_scenario: string; strict_validation: boolean }
 }
+
+// ---------------------------------------------------------------- PHASE 1
+
+export type ClockState = 'STOPPED' | 'RUNNING' | 'PAUSED'
+
+export interface ClockSnapshot {
+  state: ClockState
+  tick: number
+  tick_rate_hz: number
+  dt: number
+  simulation_time: number
+  real_time_s: number
+  speed: number
+  realtime_factor: number
+}
+
+export interface SimulationStatus {
+  scenario: string | null
+  scenario_loaded: boolean
+  clock: ClockSnapshot
+  seed: number
+  deterministic: boolean
+  integrator: string
+  config_hash: string
+  entity_count: number
+  active_entities: number
+  duration_s: number | null
+  end_reason: string | null
+  state_hash: string
+  events_published: number
+}
+
+export type EntityTeam = 'BLUE' | 'RED' | 'NEUTRAL'
+export type EntityStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_BOUNDS' | 'DISABLED'
+
+export interface Entity {
+  id: string
+  team: EntityTeam
+  position: [number, number, number]
+  velocity: [number, number, number]
+  orientation: [number, number, number]
+  altitude: number
+  speed: number
+  heading_deg: number
+  health: number
+  energy: number
+  fuel: number
+  status: EntityStatus
+  metadata: Record<string, unknown>
+}
+
+export interface SimEvent {
+  type: string
+  simulation_time: number
+  tick: number
+  entity_id: string | null
+  agent_id: string | null
+  message: string
+  data: Record<string, unknown>
+  wall_time: number
+}
+
+export interface ScenarioSummary {
+  name: string
+  description: string
+  version: string
+  duration_s: number
+  seed: number | null
+  entity_count: number
+}
+
+export interface ScenariosResponse {
+  directory: string
+  default: string
+  available: string[]
+  loaded: ScenarioSummary | null
+}

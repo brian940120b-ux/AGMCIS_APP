@@ -12,21 +12,31 @@ hash, structured JSON logging, health/status/compute/config API, subsystem
 registry, Docker setup, dev scripts, README, 22 backend tests plus an end-to-end
 browser check.
 
-## PHASE 1 — Simulation core
+## PHASE 1 — Simulation core — **Complete**
 
-`SimulationClock` (fixed timestep, simulation vs. real vs. render time),
-`WorldState`, `EventBus`, `SimulationEngine` with start / pause / resume / reset /
-step / speed control. Deterministic mode with a seeded RNG.
+`SimulationClock` keeping simulation, real and render time separate;
+`WorldState` + `EntityState` as the authoritative truth; `EventBus`;
+`SimulationEngine` with start / pause / resume / stop / step / speed / reset;
+scenario loading and validation with the `demo_alpha` reference scenario; a
+swappable `Integrator` interface; the simulation control API; and dashboard
+transport controls with a live tactical plot.
 
-**Done when:** the engine ticks at a fixed rate, pause truly stops simulation time,
-and two runs with the same seed produce identical state.
+**Verified:** the engine ticks at a fixed 60 Hz with a real-time factor of 1.00;
+pause genuinely freezes the clock; `step` advances an exact tick count; reset
+restores the initial `state_hash`; the same seed reproduces an identical state;
+600 x 1 tick equals 1 x 600 ticks; and 0.25x and 50x produce identical
+trajectories. 121 backend tests plus two browser end-to-end suites.
 
-## PHASE 2 — Entity and aircraft model
+**Deliberately not done here:** motion is the `KinematicIntegrator`
+(constant velocity, no forces). Gravity, drag, lift and thrust are PHASE 2, which
+is why the dashboard reports the physics subsystem as `WARNING`, not `ONLINE`.
 
-`EntityState` (position, velocity, orientation, angular velocity, health, energy,
-fuel, sensor/comm state). `AircraftModel` interface with `Simple6DOFModel`
-(Newton–Euler rigid body: gravity, drag, lift, thrust, mass). Fictional platforms
-only.
+## PHASE 2 — Aircraft model and 6DOF physics — **Next**
+
+`AircraftModel` interface with `Simple6DOFModel` (Newton-Euler rigid body:
+gravity, drag, lift, thrust, mass), replacing `KinematicIntegrator` behind the
+existing `Integrator` protocol. `EntityState` already carries the required
+fields. Fictional platforms only.
 
 ## PHASE 3 — Rule agent
 

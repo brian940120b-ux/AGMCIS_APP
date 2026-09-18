@@ -1,0 +1,53 @@
+# DEMO_ALPHA — the reference scenario for AIFCS.
+#
+# Everything here is FICTIONAL and abstract: the units are simulation objects
+# named BLUE-01 … RED-02, with no relationship to any real aircraft, and the
+# situation is a neutral transit exercise used to exercise the pipeline
+# (flight, perception, communication, formation, events, scoring, replay).
+#
+# Coordinates are metres in a local tangent plane: +X east, +Y north, +Z up.
+
+scenario:
+  name: demo_alpha
+  description: >
+    Four fictional flight units on converging transit tracks. Used to verify
+    the simulation loop, formation behaviour and the replay pipeline.
+  version: "1.0"
+  duration: 300
+  seed: 20260918
+
+environment:
+  gravity_mps2: 9.80665
+  air_density_kgpm3: 1.225
+  wind: [0.0, 0.0, 0.0]
+
+entities:
+  # BLUE flight: heading east, in loose formation.
+  - id: BLUE-01
+    type: fictional_aircraft
+    team: BLUE
+    position: [-20000.0, 0.0, 6000.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]      # yaw = +90 deg (east)
+
+  - id: BLUE-02
+    type: fictional_aircraft
+    team: BLUE
+    position: [-20300.0, -300.0, 6000.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]
+
+  # RED flight: heading west at a different altitude.
+  - id: RED-01
+    type: fictional_aircraft
+    team: RED
+    position: [20000.0, 2000.0, 7000.0]
+    velocity: [-200.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]     # yaw = -90 deg (west)
+
+  - id: RED-02
+    type: fictional_aircraft
+    team: RED
+    position: [20300.0, 2300.0, 7000.0]
+    velocity: [-200.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]

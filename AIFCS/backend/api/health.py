@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 
 from core.compute import detect_compute
 from core.config import Settings, get_settings
+from core.runtime import get_status_registry
 
 router = APIRouter(tags=["health"])
 
@@ -37,12 +38,10 @@ def system_status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     Subsystems that have not been built yet report NOT_IMPLEMENTED — this
     endpoint never reports a capability the backend does not have.
     """
-    from main import get_status_registry  # local import avoids a circular import
-
     registry = get_status_registry()
     return {
         "operational": registry.operational,
-        "phase": "PHASE 0",
+        "phase": "PHASE 1",
         "config_hash": settings.config_hash,
         "subsystems": registry.to_list(),
     }

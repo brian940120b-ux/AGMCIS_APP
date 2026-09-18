@@ -1,0 +1,328 @@
+"""Simulation engine (PHASE 1).
+
+Owns the tick loop and is the single authority over the truth state.
+
+Two ways to drive it, sharing exactly one code path (``_tick``):
+
+* ``step(n)`` — advance n ticks immediately. Deterministic, used by tests,
+  training rollouts and single-step debugging.
+* ``start()`` — run an asyncio task that calls ``_tick`` paced by the clock, so
+  the dashboard sees the world evolve in real time.
+
+Because both go through ``_tick``, a run stepped 600 times produces exactly the
+same state as a run that ticked for 10 real seconds at 60 Hz.
+
+The React layer never drives this loop; it only observes the result.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from core.clock import ClockState, SimulationClock
+from core.config import Settings, get_settings
+from core.event_bus import EventBus, EventType
+from core.integrator import Integrator, KinematicIntegrator, clamp_to_bounds
+from core.logging_config import get_logger
+from core.world_state import EntityStatus, WorldState
+from simulation.scenario import Scenario, find_scenario
+
+log = get_logger("simulation_engine")
+
+
+class SimulationError(RuntimeError):
+    """Raised when an operation is invalid for the engine's current state."""
+
+
+class SimulationEngine:
+    """Fixed-timestep, deterministic simulation engine."""
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        event_bus: EventBus | None = None,
+        integrator: Integrator | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.events = event_bus or EventBus()
+        self.integrator: Integrator = integrator or KinematicIntegrator()
+
+        self.clock = SimulationClock(
+            tick_rate_hz=self.settings.simulation.tick_rate_hz,
+            speed=self.settings.simulation.default_speed,
+        )
+
+        self.scenario: Scenario | None = None
+        self.world = WorldState()
+        self.seed: int = self.settings.simulation.seed
+        self.rng: np.random.Generator = np.random.default_rng(self.seed)
+
+        self._task: asyncio.Task[None] | None = None
+        self._lock = asyncio.Lock()
+        self._end_reason: str | None = None
+
+    # ------------------------------------------------------------- scenarios
+
+    def load_scenario(self, name: str | None = None, seed: int | None = None) -> Scenario:
+        """Load a scenario and build its initial world. Stops any running loop."""
+        scenario_name = name or self.settings.scenarios.default_scenario
+        directory = self._resolve(self.settings.scenarios.directory)
+
+        scenario = find_scenario(directory, scenario_name)
+        self.scenario = scenario
+
+        # Precedence: explicit argument > scenario file > global config.
+        self.seed = seed if seed is not None else (scenario.seed or self.settings.simulation.seed)
+        self.rng = np.random.default_rng(self.seed)
+
+        self.world = scenario.build_world()
+        self.world.global_status.update(
+            {
+                "seed": self.seed,
+                "config_hash": self.settings.config_hash,
+                "integrator": self.integrator.name,
+            }
+        )
+
+        self.clock.reset()
+        self.clock.speed = self.settings.simulation.default_speed
+        self._end_reason = None
+        self.events.clear_history()
+
+        log.info(
+            "scenario loaded",
+            extra={
+                "event": "SCENARIO_LOADED",
+                "scenario": scenario.name,
+                "entities": len(scenario.entities),
+                "seed": self.seed,
+            },
+        )
+        return scenario
+
+    def _resolve(self, relative: str) -> Path:
+        path = Path(relative)
+        return path if path.is_absolute() else self.settings.project_root / path
+
+    def _require_scenario(self) -> None:
+        if self.scenario is None:
+            raise SimulationError("no scenario loaded — call load_scenario() first")
+
+    # ------------------------------------------------------------ the tick
+
+    def _tick(self) -> None:
+        """Advance the world by exactly one fixed timestep.
+
+        The single mutation point for the truth state. Order matters:
+        integrate, enforce world bounds, then publish.
+        """
+        dt = self.clock.dt
+        self.integrator.integrate(self.world, dt)
+
+        bounds = self.settings.world.bounds.model_dump()
+        for entity in self.world.entities.values():
+            if entity.status is EntityStatus.ACTIVE and clamp_to_bounds(entity, bounds):
+                self.events.emit(
+                    EventType.ENTITY_OUT_OF_BOUNDS,
+                    simulation_time=self.clock.simulation_time,
+                    tick=self.clock.tick_count,
+                    entity_id=entity.id,
+                    message=f"{entity.id} reached the simulation boundary",
+                    data={"position": entity.position.tolist()},
+                )
+
+        simulation_time = self.clock.advance()
+        self.world.simulation_time = simulation_time
+        self.world.tick = self.clock.tick_count
+
+        self.events.emit(
+            EventType.SIMULATION_TICK,
+            simulation_time=simulation_time,
+            tick=self.clock.tick_count,
+        )
+
+    def _duration_reached(self) -> bool:
+        limit = self.scenario.duration_s if self.scenario else self.settings.simulation.max_duration_s
+        limit = min(limit, self.settings.simulation.max_duration_s)
+        return self.clock.simulation_time >= limit
+
+    # --------------------------------------------------------------- control
+
+    def step(self, ticks: int = 1) -> WorldState:
+        """Advance a fixed number of ticks immediately, ignoring wall time."""
+        self._require_scenario()
+        if ticks < 1:
+            raise SimulationError("ticks must be at least 1")
+        if self.clock.state is ClockState.RUNNING:
+            raise SimulationError("cannot single-step while running — pause first")
+
+        for _ in range(ticks):
+            if self._duration_reached():
+                self._finish("duration reached")
+                break
+            self._tick()
+        return self.world
+
+    async def start(self, scenario: str | None = None, seed: int | None = None) -> None:
+        """Load (if needed) and run the simulation loop in the background."""
+        async with self._lock:
+            if self._task is not None and not self._task.done():
+                raise SimulationError("simulation is already running")
+
+            if scenario is not None or self.scenario is None:
+                self.load_scenario(scenario, seed)
+            elif seed is not None:
+                self.seed = seed
+                self.rng = np.random.default_rng(seed)
+
+            self.clock.start()
+            self._end_reason = None
+            self._task = asyncio.create_task(self._run_loop())
+
+        self.events.emit(
+            EventType.SIMULATION_STARTED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            message=f"simulation started: {self.scenario.name if self.scenario else 'unknown'}",
+            data={"seed": self.seed, "speed": self.clock.speed},
+        )
+
+    async def _run_loop(self) -> None:
+        """Pace ticks against real time without letting drift accumulate."""
+        loop = asyncio.get_running_loop()
+        next_tick_at = loop.time()
+        try:
+            while self.clock.state is not ClockState.STOPPED:
+                if self.clock.state is ClockState.PAUSED:
+                    await asyncio.sleep(0.02)
+                    next_tick_at = loop.time()
+                    continue
+
+                if self._duration_reached():
+                    self._finish("duration reached")
+                    break
+
+                self._tick()
+
+                next_tick_at += self.clock.target_interval_s
+                delay = next_tick_at - loop.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                else:
+                    # Running behind: yield, and stop chasing a backlog we can
+                    # never catch up on (realtime_factor reports the shortfall).
+                    await asyncio.sleep(0)
+                    next_tick_at = loop.time()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("simulation loop failed", extra={"event": "SIMULATION_LOOP_ERROR"})
+            self.clock.stop()
+            self._end_reason = "error"
+            raise
+
+    def pause(self) -> None:
+        self._require_scenario()
+        if self.clock.state is not ClockState.RUNNING:
+            raise SimulationError(f"cannot pause while {self.clock.state.value}")
+        self.clock.pause()
+        self.events.emit(
+            EventType.SIMULATION_PAUSED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            message="simulation paused",
+        )
+
+    def resume(self) -> None:
+        self._require_scenario()
+        if self.clock.state is not ClockState.PAUSED:
+            raise SimulationError(f"cannot resume while {self.clock.state.value}")
+        self.clock.resume()
+        self.events.emit(
+            EventType.SIMULATION_RESUMED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            message="simulation resumed",
+        )
+
+    def set_speed(self, speed: float) -> None:
+        """Change the wall-clock pace. The timestep, and so the result, is unchanged."""
+        allowed = self.settings.simulation.allowed_speeds
+        if speed not in allowed:
+            raise SimulationError(f"speed {speed} not allowed; choose one of {allowed}")
+        self.clock.set_speed(speed)
+        self.events.emit(
+            EventType.SIMULATION_SPEED_CHANGED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            message=f"speed set to {speed}x",
+            data={"speed": speed},
+        )
+
+    async def stop(self) -> None:
+        """Stop the loop and cancel the background task."""
+        async with self._lock:
+            self.clock.stop()
+            task, self._task = self._task, None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def reset(self) -> None:
+        """Stop and rebuild the world from the scenario, with the same seed."""
+        await self.stop()
+        if self.scenario is not None:
+            self.world = self.scenario.build_world()
+            self.world.global_status.update(
+                {
+                    "seed": self.seed,
+                    "config_hash": self.settings.config_hash,
+                    "integrator": self.integrator.name,
+                }
+            )
+        self.clock.reset()
+        self.rng = np.random.default_rng(self.seed)
+        self._end_reason = None
+        self.events.clear_history()
+        self.events.emit(EventType.SIMULATION_RESET, message="simulation reset")
+
+    def _finish(self, reason: str) -> None:
+        self.clock.stop()
+        self._end_reason = reason
+        self.events.emit(
+            EventType.SIMULATION_ENDED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            message=f"simulation ended: {reason}",
+            data={"reason": reason},
+        )
+
+    # ---------------------------------------------------------------- status
+
+    @property
+    def is_running(self) -> bool:
+        return self.clock.state is ClockState.RUNNING
+
+    def status(self) -> dict[str, Any]:
+        """Full engine status for the API and the dashboard."""
+        return {
+            "scenario": self.scenario.name if self.scenario else None,
+            "scenario_loaded": self.scenario is not None,
+            "clock": self.clock.snapshot(),
+            "seed": self.seed,
+            "deterministic": self.settings.simulation.deterministic,
+            "integrator": self.integrator.name,
+            "config_hash": self.settings.config_hash,
+            "entity_count": len(self.world.entities),
+            "active_entities": len(self.world.active_entities),
+            "duration_s": self.scenario.duration_s if self.scenario else None,
+            "end_reason": self._end_reason,
+            "state_hash": self.world.state_hash,
+            "events_published": self.events.published_count,
+        }

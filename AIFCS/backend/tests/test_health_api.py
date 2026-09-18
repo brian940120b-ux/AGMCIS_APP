@@ -26,12 +26,15 @@ def test_system_status_lists_subsystems(client):
     assert body["operational"] is True
 
     states = {s["key"]: s["state"] for s in body["subsystems"]}
-    # Built in PHASE 0 — these genuinely run.
+    # These genuinely run as of PHASE 1.
     assert states["api"] == "ONLINE"
     assert states["config"] == "ONLINE"
     assert states["logging"] == "ONLINE"
+    assert states["simulation"] == "ONLINE"
+    # Partial: kinematic motion only until 6DOF dynamics land in PHASE 2.
+    assert states["physics"] == "WARNING"
     # Not built yet — must be reported honestly, never as ONLINE.
-    assert states["simulation"] == "NOT_IMPLEMENTED"
+    assert states["agents"] == "NOT_IMPLEMENTED"
     assert states["training"] == "NOT_IMPLEMENTED"
 
 
