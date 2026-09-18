@@ -1,0 +1,6 @@
+# AIFCS — Scenario catalogue defaults.
+scenarios:
+  directory: scenarios
+  default_scenario: demo_alpha
+  # Scenario files are validated against a schema before a run is accepted.
+  strict_validation: true

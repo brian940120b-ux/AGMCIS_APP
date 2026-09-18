@@ -1,0 +1,40 @@
+# AIFCS — Simulation configuration
+# All values describe a FICTIONAL, abstract simulation world.
+# They are research/teaching parameters, not real-world platform data.
+
+simulation:
+  # Fixed-timestep simulation clock. 60 Hz => dt = 1/60 s.
+  tick_rate_hz: 60
+  # Allowed wall-clock speed multipliers exposed by the API.
+  allowed_speeds: [0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0]
+  default_speed: 1.0
+  # Hard stop for a single run, in simulation seconds (safety valve).
+  max_duration_s: 3600.0
+  # Deterministic mode: fixed seed + fixed timestep => reproducible runs.
+  deterministic: true
+  seed: 20260918
+
+world:
+  # Abstract local-tangent-plane box, metres. Origin (0,0,0) is the scenario datum.
+  bounds:
+    x_min: -100000.0
+    x_max: 100000.0
+    y_min: -100000.0
+    y_max: 100000.0
+    altitude_min: 0.0
+    altitude_max: 20000.0
+  gravity_mps2: 9.80665
+  # Simplified constant-density atmosphere for MVP-01; replaced in later phases.
+  air_density_kgpm3: 1.225
+
+telemetry:
+  # How often the WebSocket layer broadcasts world state (Hz). Independent of tick rate.
+  broadcast_rate_hz: 20
+  # Maximum entities serialized per broadcast frame.
+  max_entities_per_frame: 64
+
+logging:
+  level: INFO
+  # Structured JSON logs (one object per line) for machine parsing.
+  json: true
+  directory: data/telemetry

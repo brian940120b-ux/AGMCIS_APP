@@ -1,0 +1,40 @@
+# AIFCS — local stack.
+#   docker compose up --build
+#   frontend: http://localhost:3000   backend: http://localhost:8000/docs
+#
+# The database is SQLite (a file inside the aifcs-data volume), so it needs no
+# service of its own. A dedicated database container arrives only if AIFCS moves
+# to PostgreSQL in a later phase.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: aifcs-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Configs and scenarios are editable without a rebuild.
+      - ./configs:/app/configs:ro
+      - ./scenarios:/app/scenarios:ro
+      - aifcs-data:/app/data
+      - aifcs-models:/app/models
+    environment:
+      AIFCS_CONFIG_DIR: /app/configs
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: aifcs-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  aifcs-data:
+  aifcs-models:

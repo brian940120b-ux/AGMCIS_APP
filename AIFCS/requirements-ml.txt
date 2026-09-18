@@ -1,0 +1,8 @@
+# Reinforcement-learning stack. Installed from PHASE 11 (Gymnasium) onward.
+# Kept separate so the simulator installs and runs without a multi-GB download.
+-r requirements.txt
+torch>=2.4
+gymnasium>=0.29
+stable-baselines3>=2.3
+pandas>=2.2
+tensorboard>=2.17

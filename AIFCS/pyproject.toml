@@ -1,0 +1,38 @@
+[project]
+name = "aifcs"
+version = "0.1.0"
+description = "AI Flight Command & Simulation Platform — fictional multi-agent flight simulation for AI research."
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["backend"]
+exclude = [".venv", "frontend", "data", "models"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",    # FastAPI Depends() in defaults is the documented idiom.
+    "RUF012",  # Mutable class attrs: Pydantic models handle this themselves.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/*" = ["E402"]  # conftest adjusts sys.path before importing app code.
+
+[tool.mypy]
+python_version = "3.11"
+files = ["backend"]
+mypy_path = "backend"
+explicit_package_bases = true
+namespace_packages = true
+exclude = ["\\.venv", "frontend"]
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+disallow_untyped_defs = false
+plugins = []
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false

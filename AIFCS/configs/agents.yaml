@@ -1,0 +1,20 @@
+# AIFCS — Agent configuration
+# Agents are abstract decision-making processes for simulation research.
+
+agents:
+  default_type: rule
+  # Decision rate is decoupled from the physics tick: agents think slower than they fly.
+  decision_rate_hz: 10
+  # Reject/clamp any action that fails validation instead of trusting the agent.
+  strict_action_validation: true
+
+rule_agent:
+  # Abstract behaviour tuning for the rule-based pilot (added in PHASE 3).
+  waypoint_capture_radius_m: 500.0
+  formation_spacing_m: 300.0
+  max_bank_deg: 60.0
+
+rl_agent:
+  # Populated in PHASE 11+. Present so the schema is stable from PHASE 0.
+  model_path: null
+  deterministic_inference: true

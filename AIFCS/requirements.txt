@@ -1,0 +1,9 @@
+# AIFCS core backend dependencies (PHASE 0+).
+# Install:  python -m venv .venv && .venv/bin/pip install -r requirements.txt
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+numpy>=1.26
+pyyaml>=6.0
+websockets>=13

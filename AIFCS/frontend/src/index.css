@@ -1,0 +1,110 @@
+@import 'tailwindcss';
+
+/*
+ * AIFCS visual language: dark tactical command center.
+ * Colour tokens live here so components never hard-code hex values.
+ */
+@theme {
+  --color-void: #04070d;
+  --color-deck: #080d17;
+  --color-panel: #0c1322;
+  --color-edge: #17233a;
+  --color-grid: #0f1a2c;
+
+  --color-cyan-hud: #38e1ff;
+  --color-blue-force: #4da3ff;
+  --color-red-force: #ff5a6e;
+  --color-amber-hud: #ffb454;
+  --color-green-hud: #3ddc97;
+  --color-violet-hud: #a78bfa;
+
+  --color-ink: #e8f1ff;
+  --color-ink-dim: #8ea3c4;
+  --color-ink-faint: #5a6f92;
+
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  /* Tactical grid backdrop. */
+  .bg-tactical-grid {
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--color-grid) 85%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--color-grid) 85%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-deck);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-edge);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-faint);
+  }
+}
+
+@layer components {
+  /* Panel chrome shared by every dashboard surface. */
+  .hud-panel {
+    background-color: color-mix(in srgb, var(--color-panel) 92%, transparent);
+    border: 1px solid var(--color-edge);
+    border-radius: 2px;
+    position: relative;
+  }
+
+  .hud-label {
+    font-size: 0.625rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+}
+
+/* Motion is decorative only and never drives simulation state. */
+@keyframes hud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-hud-pulse { animation: hud-pulse 2s ease-in-out infinite; }
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+.animate-scanline { animation: scanline 7s linear infinite; }
+
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-radar-sweep { animation: radar-sweep 4s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-hud-pulse,
+  .animate-scanline,
+  .animate-radar-sweep {
+    animation: none;
+  }
+}
