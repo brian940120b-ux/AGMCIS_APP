@@ -172,3 +172,119 @@ def test_the_page_withdraws_tickets_without_waiting_for_a_reload():
     assert "setInterval(tickExpiry, 1000)" in page
     assert ".ticket.gone .cp{pointer-events:none" in page, \
         "撤掉之後複製鈕還能按 —— 那等於沒撤"
+
+
+# ══════════════════════════════════════════════════════════
+# 四、指令單的欄位內容逐項對 · 2026-09-18
+# ══════════════════════════════════════════════════════════
+#
+# 執政官:「檢查訊號單資訊…有些資訊也不太對。
+#           做多出場價怎麼會比開倉價低?」
+#
+# 查下去,四個錯,而且三個是同一類:把一個**開倉**的假設套到別的
+# 情況上,或把一個**當時成立**的字串寫死。
+
+def a_close_ticket():
+    from portfolio.ticket import CLOSE
+    return build(symbol="AAVEUSDT", action=CLOSE, quantity=5.4,
+                 price=128.52, leverage=3.0, stop_pct=25.0,
+                 strategy="50MA", signal_day="2026-09-18",
+                 exit_price=112.40, exit_rule="跌破 50 日均線", now=NOW)
+
+
+def test_a_close_ticket_never_asks_for_margin_or_a_stop():
+    """**這是這張卡上最貴的一種錯。**
+
+    平倉單原本印的是 ④ 本金 231.34 / ⑤ 止損 160.65 / 槓桿 3 ——
+    那是**開倉**的欄位。照著按會開一個新倉,而不是把舊的平掉:
+    一張叫你平倉的單,把人帶去開倉。
+    """
+    t = a_close_ticket()
+    labels = " ".join(lab for lab, _, _ in t.fields())
+    assert "本金" not in labels
+    assert "止損" not in labels
+    assert "槓桿" not in labels
+    assert "保證金模式" not in labels
+    assert "數量" in labels, "平倉要知道平多少"
+
+
+def test_a_close_ticket_says_to_go_to_the_positions_list():
+    """平倉在 App 上是從持倉那一列進去的 —— 回開單畫面按會開新倉。"""
+    notes = " ".join(n for _, _, n in a_close_ticket().fields())
+    assert "持倉" in notes and "開新倉" in notes
+
+
+def test_after_closing_the_position_should_be_zero_not_the_size():
+    """原本印的是要平掉的數量(5.4)。而 5.4 在平倉**之後**出現在
+    畫面上,代表的是沒平乾淨 —— 剛好是相反的意思。"""
+    rows = a_close_ticket().verify_after()
+    assert rows[0][0] == "成交後持倉"
+    assert rows[0][1] == "0"
+    assert "沒平乾淨" in rows[0][2]
+
+
+def test_a_close_ticket_does_not_list_an_exit_line_to_watch():
+    """平倉單本身就是出場。再列一次「打算在哪裡結束」會讓人以為
+    平完之後還有一條線要顧。"""
+    rows = a_close_ticket().exit_plan()
+    assert rows[0][0] == "這張就是出場單"
+
+
+def test_the_exit_line_is_not_called_a_price_and_says_it_is_not_a_target():
+    """執政官:「做多出場價怎麼會比開倉價低?」
+
+    **值是對的,是標籤在騙人。** 這套策略做多的理由就是「價格在均線
+    之上」,所以那條均線**必然在進場價下面** —— 它是趨勢結束的位置,
+    不是獲利目標。叫它「出場價」又擺在止損旁邊,讀起來就是停利單,
+    而一個比進場價低的停利單當然看起來像壞掉了。
+    """
+    rows = a_ticket().exit_plan()
+    assert rows[0][0] == "出場線(會移動)"
+    assert "這不是停利" in rows[0][2]
+    assert "本來就在進場價下面" in rows[0][2]
+
+
+def test_the_evidence_line_names_the_strategys_own_line():
+    """原本寫死「50 日均線」—— 那是**第三次**同一個錯(出場價、
+    止損說明,現在是證據)。策略換成 100 日均線,這行會繼續說 50,
+    而旁邊的數字是另一條線的值:一句看起來有憑有據的假話。"""
+    t = build(symbol="X", action=OPEN_LONG, quantity=1.0, price=100.0,
+              leverage=3.0, stop_pct=25.0, strategy="s",
+              signal_day="2026-09-18", exit_price=90.0,
+              exit_rule="跌破 100 日均線", signal=(100.0, 90.0, 11.1),
+              now=NOW)
+    ev = dict(t.why())["證據"]
+    assert "100 日均線" in ev
+    assert "50 日均線" not in ev
+
+
+def test_no_ticket_card_prints_literal_markup():
+    """說明文字裡有 **粗體** 標記,而卡片原本對它們做 html.escape ——
+    所以螢幕上會出現字面的星號。
+
+    整頁掃描那條測試抓不到這個:離線環境沒有訊號就沒有指令單,
+    那張卡一行都不會被執行到。所以這裡直接渲染三種單各一張。
+    """
+    import re
+    from portfolio.ticket import CLOSE, OPEN_SHORT
+    for act in (OPEN_LONG, OPEN_SHORT, CLOSE):
+        t = build(symbol="AAVEUSDT", action=act, quantity=5.4,
+                  price=128.52, leverage=3.0, stop_pct=25.0,
+                  strategy="50MA", signal_day="2026-09-18",
+                  exit_price=112.40, exit_rule="跌破 50 日均線", now=NOW)
+        html_ = dash._ticket_card(t, now=NOW)
+        found = re.findall(r"[^<>]{0,40}\*\*[^<>]{0,40}", html_)
+        assert not found, f"{act} 卡上有字面星號:{found}"
+        assert "&lt;b&gt;" not in html_, f"{act} 卡上有字面 HTML 標籤"
+
+
+def test_a_shorts_stop_is_described_as_above_the_price():
+    """做空的止損在**上面**。寫死「下方」是假話 —— 而且是那種
+    讀起來很順、但會讓人把單子填反的假話。"""
+    from portfolio.ticket import OPEN_SHORT
+    t = build(symbol="X", action=OPEN_SHORT, quantity=1.0, price=100.0,
+              leverage=3.0, stop_pct=25.0, strategy="s",
+              signal_day="2026-09-18", exit_price=130.0,
+              exit_rule="站上 50 日均線", now=NOW)
+    text = " ".join(str(x) for r in t.exit_plan() for x in r)
+    assert "上方" in text

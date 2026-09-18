@@ -396,14 +396,17 @@ footer{color:var(--dim2);font-size:10.5px;text-align:center;padding:20px 0 6px;
 
 
 def _md_bold(text: str) -> str:
-    """把 **粗體** 轉成 <b>,其餘一律跳脫。
+    """把 **粗體** 轉成 <b>、`<br>` 留成換行,其餘一律跳脫。
 
     2026-09-18:幣種卡上印出了字面的 `**不知道**` —— 星號沒有人轉,
     就這樣進了 HTML。小,但它出現在**最需要被看見的那個字**上。
     """
     parts = str(text).split("**")
-    return "".join(html.escape(x) if i % 2 == 0 else f"<b>{html.escape(x)}</b>"
-                   for i, x in enumerate(parts))
+    out = "".join(html.escape(x) if i % 2 == 0 else f"<b>{html.escape(x)}</b>"
+                  for i, x in enumerate(parts))
+    # 換行是這些說明文字裡唯一還需要的標籤。白名單一個,其餘照跳脫 ——
+    # 開放整個 HTML 只為了換行,不划算。
+    return out.replace("&lt;br&gt;", "<br>")
 
 
 def kv(label: str, value: str, cls: str = "") -> str:
@@ -443,7 +446,7 @@ def _ticket_card(t, now=None) -> str:
     鏡像單與對齊單共用這一個 —— 兩邊各寫一份的話,遲早有一邊
     少印停損。而那是這張卡上唯一不能少的東西。
     """
-    warn = "".join(f'<div class="why">⚠️ {html.escape(w)}</div>'
+    warn = "".join(f'<div class="why">⚠️ {_md_bold(w)}</div>'
                    for w in t.warnings)
     liq = (f'{t.est_liq_price:,.6g}' if t.est_liq_price is not None else '—')
     margin = (f'{t.est_margin:,.2f}' if t.est_margin is not None else '—')
@@ -486,7 +489,10 @@ def _ticket_card(t, now=None) -> str:
             f'<button class="cp" data-v="{html.escape(value)}">'
             f'<b>{html.escape(value)}</b>'
             '<span class="cpi">複製</span></button>'
-            + (f'<div class="why">{html.escape(note)}</div>'
+            # 說明走 _md_bold,不是 html.escape —— 那些字串裡有
+            # **粗體** 標記,跳脫掉就會印出字面的星號(2026-09-18
+            # 在幣種卡上發生過一次,這裡是同一個錯的第二處)。
+            + (f'<div class="why">{_md_bold(note)}</div>'
                if note else '')
             + '</td></tr>'
             for label, value, note in t.fields())
@@ -494,7 +500,7 @@ def _ticket_card(t, now=None) -> str:
         + '<tr><td colspan="2" class="sect">填完之後畫面上應該是</td></tr>'
         + "".join(
             f'<tr><td>{html.escape(label)}</td><td>{html.escape(value)}'
-            + (f'<div class="why">{html.escape(note)}</div>' if note else '')
+            + (f'<div class="why">{_md_bold(note)}</div>' if note else '')
             + '</td></tr>'
             for label, value, note in t.verify_after())
         # ── 這一單打算在哪裡結束 ──────────────────────
@@ -503,8 +509,8 @@ def _ticket_card(t, now=None) -> str:
         # 機器死掉時的後備。兩個放一起才看得出哪一條會先到。
         + '<tr><td colspan="2" class="sect">打算在哪裡結束</td></tr>'
         + "".join(
-            f'<tr><td>{html.escape(label)}</td><td>{html.escape(value)}'
-            + (f'<div class="why">{html.escape(note)}</div>' if note else '')
+            f'<tr><td>{_md_bold(label)}</td><td>{html.escape(value)}'
+            + (f'<div class="why">{_md_bold(note)}</div>' if note else '')
             + '</td></tr>'
             for label, value, note in t.exit_plan())
         +
@@ -531,7 +537,7 @@ def _ticket_card(t, now=None) -> str:
         + '<div class="tlinks">' + "".join(
             f'<a class="tl" href="{html.escape(url)}">'
             f'{html.escape(label)}'
-            + (f'<span class="tl-n">{html.escape(note)}</span>'
+            + (f'<span class="tl-n">{_md_bold(note)}</span>'
                if note else '')
             + '</a>'
             for label, url, note in t.links())

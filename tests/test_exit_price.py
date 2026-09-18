@@ -137,9 +137,13 @@ def a_ticket(**kw):
 
 
 def test_the_ticket_shows_both_lines_and_which_arrives_first():
+    # 2026-09-18 改名:「出場價」→「出場線(會移動)」。
+    # 執政官問「做多出場價怎麼會比開倉價低」—— 值是對的,是標籤在騙人:
+    # 那不是停利價,是趨勢結束的位置,而它本來就在進場價下面。
     rows = a_ticket().exit_plan()
     labels = [r[0] for r in rows]
-    assert "出場價" in labels and "止損" in labels
+    assert "出場線(會移動)" in labels
+    assert "止損(填這個)" in labels
     assert "哪一條先到" in labels
     text = " ".join(str(x) for r in rows for x in r)
     assert "12.5%" in text and "25.0%" in text
@@ -173,7 +177,7 @@ def test_an_exit_on_the_wrong_side_of_the_price_is_called_out():
 
 def test_a_ticket_without_an_exit_says_so_instead_of_going_blank():
     rows = a_ticket(exit_price=None, exit_rule="這個計畫沒帶出場價").exit_plan()
-    assert rows[0][0] == "出場價" and rows[0][1] == "—"
+    assert rows[0][0] == "出場線" and rows[0][1] == "—"
     assert "沒帶出場價" in rows[0][2]
 
 

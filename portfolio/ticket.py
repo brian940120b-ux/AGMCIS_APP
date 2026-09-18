@@ -133,6 +133,11 @@ def split_symbol(symbol: str) -> tuple:
     return plain, "USDT"
 
 
+def _side_word(gap: float) -> str:
+    """價差在現價的哪一邊。做空的止損在**上面**,寫死「下方」是假話。"""
+    return "上方" if gap > 0 else "下方"
+
+
 def bingx_links(symbol: str) -> list:
     """開啟 BingX 的連結。回 [(標籤, 網址, 註記)]。"""
     base, quote = split_symbol(symbol)
@@ -312,6 +317,23 @@ class Ticket:
         「數量」與「交易總額」搬到 `verify_after()` —— 它們是
         **填完之後用來核對的**,不是拿來填的。
         """
+        # ── 平倉是**完全不同的一張單** ────────────────────
+        # 2026-09-18 執政官:「檢查訊號單資訊…有些資訊也不太對。」
+        # 查下去,平倉單原本印的是:
+        #   ④ 本金 231.34 / ⑤ 止損 160.65 / 槓桿 3
+        # 那是**開倉**的欄位。照著按會開一個新倉,而不是把舊的平掉 ——
+        # 一張叫你平倉的單,把人帶去開倉,這是這張卡上最貴的一種錯。
+        #
+        # 平倉在 App 上是從持倉那一列進去的:沒有本金、沒有槓桿、
+        # 沒有止損(倉都沒了,止損要保護什麼)。
+        if self.action == CLOSE:
+            return [
+                ("① 方向", "平倉", "從**持倉**那一列點平倉,"
+                                 "不是回開單畫面 —— 回去按會開新倉"),
+                ("② 數量", f"{self.quantity:.8g}",
+                 "幣數 —— 這是**全部平掉**的量"),
+            ]
+
         out = [
             ("① 保證金模式", self.margin_mode, "右上角切"),
             ("② 槓桿", f"{self.leverage:.10g}",
@@ -334,6 +356,13 @@ class Ticket:
         它們不是拿來填的,是拿來核對的 —— 對不上就代表某一格填錯了,
         而那比填漏一格更難發現:一張數量錯十倍的單會成交。
         """
+        if self.action == CLOSE:
+            # 平倉之後這一檔應該**消失**。原本這裡印的是要平掉的數量
+            # (5.4),而那個數字在平倉之後出現在畫面上代表**沒平乾淨**。
+            return [("成交後持倉", "0",
+                     f"這一檔應該完全消失。還看得到 {self.quantity:.8g} "
+                     "的話就是沒平乾淨,再平一次")]
+
         out = []
         if self.est_notional is not None:
             out.append(("交易總額", f"{self.est_notional:,.2f}",
@@ -373,18 +402,43 @@ class Ticket:
 
         所以這條線由系統盯著,到了會推一張平倉指令單。
         """
+        # 平倉單本身就是出場 —— 再列一次「打算在哪裡結束」是廢話,
+        # 而且會讓人以為平完之後還有一條線要顧。
+        if self.action == CLOSE:
+            return [("這張就是出場單", "—",
+                     f"{self.exit_rule or '策略的出場條件'}已經觸發,"
+                     "所以才有這張單。按完這一檔就結束了")]
+
         if self.exit_price is None:
-            return [("出場價", "—", self.exit_rule or "這個策略沒給出場價")]
+            return [("出場線", "—", self.exit_rule or "這個策略沒給出場價")]
 
         px = self.quoted_price
         exit_gap = (self.exit_price - px) / px * 100.0
         stop_gap = (self.stop_price - px) / px * 100.0
+        # ── 這一格為什麼叫「出場線」不叫「出場價」 ──────────
+        # 2026-09-18 執政官:「做多出場價怎麼會比開倉價低?」
+        #
+        # **值是對的,是我的標籤在騙人。** 這不是停利價。
+        # 這套策略做多的理由就是「價格在均線之上」,所以那條均線
+        # **必然在進場價下面** —— 它是趨勢結束的位置,不是獲利目標。
+        #
+        # 叫它「出場價」、又擺在止損旁邊,讀起來就是一個停利單,
+        # 而一個比進場價低的停利單當然看起來像壞掉了。
+        #
+        # 這套策略**沒有停利**:趨勢還在就一直抱著,賺多少由市場決定。
+        # 上限來自「什麼時候結束」,不是「賺到多少就走」。
         out = [
-            ("出場價", f"{self.exit_price:,.6g}",
-             f"{self.exit_rule} —— 離現價 {abs(exit_gap):.1f}%。"
-             "這條線每天會動,**不要填進 App**:系統盯著,到了推平倉單"),
-            ("止損", f"{self.stop_price:,.10g}",
-             f"離現價 {abs(stop_gap):.1f}% —— 後備,填進 App 的是這個"),
+            ("出場線(會移動)", f"{self.exit_price:,.6g}",
+             f"{self.exit_rule} —— 現價{_side_word(exit_gap)} "
+             f"{abs(exit_gap):.1f}%。"
+             "**這不是停利**:做多的理由就是價格在均線之上,"
+             "所以那條線本來就在進場價下面。均線往上走,它就跟著往上,"
+             "等於一條會自己收緊的移動出場。<br>"
+             "**不要填進 App** —— 它每天都在動,而且策略用收盤判定、"
+             "App 的止損是盤中觸價,填進去會被上下影線掃出場"),
+            ("止損(填這個)", f"{self.stop_price:,.10g}",
+             f"現價{_side_word(stop_gap)} {abs(stop_gap):.1f}%"
+             " —— 機器死掉時的後備"),
         ]
 
         # 方向對不對:做多的出場線該在現價**下面**。
@@ -419,8 +473,19 @@ class Ticket:
             out.append(("訊號", self.reason))
         if self.signal:
             px, ma, gap = self.signal
+            # ⚠️ 這裡原本寫死「50 日均線」。
+            #
+            # 那是**第三次**同一個錯:出場價寫死均線、止損說明寫死均線,
+            # 現在是證據。策略換成 100 日均線或突破族,這行會繼續說
+            # 「50 日均線」,而旁邊的數字是另一條線的值 —— 一句
+            # 看起來有憑有據的假話,比沒有證據糟得多。
+            #
+            # 這條線現在跟出場規則要(exit_rule),因為它們本來就是
+            # 同一條:進場條件與出場條件是一體兩面。
+            line = (self.exit_rule.replace("跌破 ", "").replace("突破 ", "")
+                    if self.exit_rule else "訊號線")
             out.append(("證據",
-                        f"收盤 {px:,.6g} vs 50 日均線 {ma:,.6g},"
+                        f"收盤 {px:,.6g} vs {line} {ma:,.6g},"
                         f"{'高出' if gap >= 0 else '低於'} {abs(gap):.2f}%"))
         if self.weight_from is not None and self.weight_to is not None:
             out.append(("配置", f"目標權重 {self.weight_from:.1%} → "
@@ -704,10 +769,21 @@ def _exit_of(plan: dict, symbol: str) -> dict:
 def _signal_of(plan: dict, symbol: str):
     """訊號當下的 (收盤, 均線, 距離%)。缺任何一個就回 None ——
     **理由可以少一行證據,但不能有一行是編的。**"""
-    mas = plan.get("mas") or {}
     prices = plan.get("prices") or {}
-    ma, px = mas.get(symbol), prices.get(symbol)
-    if not ma or not px:
+    px = prices.get(symbol)
+    if not px:
+        return None
+    # 先跟**策略**要那條線(exits 來自 rules.exit_level_of)。
+    # plan["mas"] 是用 cfg.vol_lookback 算的,現在剛好也是 50 ——
+    # 但那是巧合。策略換成 100 日均線,mas 不會跟著變,而證據那一行
+    # 會安安靜靜地拿另一條線的數字當證據。
+    got = (plan.get("exits") or {}).get(symbol)
+    ma = got[0] if got and got[0] is not None else None
+    if ma is None:
+        # 退回 mas,但**這件事要留在證據裡**:策略沒給線的時候,
+        # 拿一條剛好同長度的線來比,至少要說得出它是哪一條。
+        ma = (plan.get("mas") or {}).get(symbol)
+    if not ma:
         return None
     return (float(px), float(ma), (float(px) - float(ma)) / float(ma) * 100.0)
 
