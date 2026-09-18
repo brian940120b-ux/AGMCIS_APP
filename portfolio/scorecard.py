@@ -67,6 +67,10 @@ class Scorecard:
     excess_pct: float | None = None
     max_dd_pct: float | None = None
     round_trips: int = 0
+    #: 報酬拆成兩塊。**這個拆解就是「還不知道」那句話的證據** ——
+    #: 已實現是結果,未實現是還沒定案的東西。
+    realized_pnl: float | None = None
+    unrealized_pnl: float | None = None
 
     verdict: str = UNKNOWN
     because: list = field(default_factory=list)
@@ -183,7 +187,9 @@ def score(curve_path: Path | None = None,
         last_day=str(last.get("signal_day") or "")[:10],
         stale_days=stale, equity=eq, start_equity=start,
         return_pct=ret, benchmark_pct=bench, excess_pct=excess,
-        max_dd_pct=dd, round_trips=trips, backtest=bt)
+        max_dd_pct=dd, round_trips=trips, backtest=bt,
+        realized_pnl=last.get("realized_pnl"),
+        unrealized_pnl=last.get("unrealized_pnl"))
 
     # ── 一、模擬還在不在跑 ────────────────────────────
     # 停掉的模擬會安靜地一直報最後一天的數字,而那個數字看起來
@@ -209,10 +215,16 @@ def score(curve_path: Path | None = None,
                "沒走完的倉,損益是帳面的 —— 明天就可能變號。"
                "把浮盈算進成績的系統,會在每一次上漲時說自己很行。"]
         if ret is not None:
-            why.append(f"目前帳面 {float(ret):+.2f}%"
-                       + (f",基準 {float(bench):+.2f}%" if bench is not None
-                          else "")
-                       + " —— 記著,這還不是成績。")
+            line = (f"目前帳面 {float(ret):+.2f}%"
+                    + (f",基準 {float(bench):+.2f}%" if bench is not None
+                       else ""))
+            # 把帳面拆成已實現 / 未實現 —— 這個拆解**就是上面那句話的
+            # 證據**,不是多印一個數字:未實現是還沒定案的東西。
+            r, u = last.get("realized_pnl"), last.get("unrealized_pnl")
+            if r is not None and u is not None:
+                line += (f";其中已實現 {float(r):+,.2f}、"
+                         f"未實現 {float(u):+,.2f} USDT")
+            why.append(line + " —— 記著,這還不是成績。")
         why.append("而 " + str(MIN_ROUND_TRIPS) +
                    " 次也**不是「到了就可信」** —— 它只擋掉最離譜的說法。"
                    "回測用的是四百多天;實跑要一樣的信心,要一樣的時間。")

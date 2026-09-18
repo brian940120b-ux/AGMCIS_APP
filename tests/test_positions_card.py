@@ -140,3 +140,41 @@ def test_the_whole_page_has_no_literal_asterisks():
     found = re.findall(r"[^<>]{0,70}\*\*[^<>]{0,70}", page)
     assert not found, ("頁面上有沒被轉成粗體的字面星號:\n  "
                        + "\n  ".join(x.strip() for x in found))
+
+
+# ══════════════════════════════════════════════════════════
+# 五、兩張卡不准講同一件事
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-18 執政官:「成績單跟模擬持倉是不是重複了?」
+# 是 —— 權益兩張卡都印。分工重新切成:
+#   模擬持倉 = 現在抱著什麼(部位層)
+#   成績單   = 這套行不行(帳戶層)
+# 一個數字只出現在一個地方。兩個地方各印一次的話,哪天它們因為
+# 取數時點不同而對不起來,看的人只會困惑,不會知道該信哪一個。
+
+def _labels(html_text: str) -> set:
+    import re
+    return {re.sub(r"<[^>]+>", "", m)
+            for m in re.findall(r'<div class="l">(.*?)</div>', html_text)}
+
+
+def test_the_positions_card_does_not_repeat_account_level_numbers():
+    held = {"BTC-USDT": pos("BTC-USDT", 0.1, 70000.0)}
+    labels = _labels(seed(held, {"BTC-USDT": 76000.0}))
+    for owned_by_scorecard in ("權益", "已實現", "模擬報酬", "最大回撤"):
+        assert owned_by_scorecard not in labels, (
+            f"「{owned_by_scorecard}」是成績單的欄位,持倉卡不該再印一次")
+
+
+def test_the_positions_card_keeps_what_is_genuinely_about_holdings():
+    held = {"BTC-USDT": pos("BTC-USDT", 0.1, 70000.0)}
+    labels = _labels(seed(held, {"BTC-USDT": 76000.0}))
+    assert {"未實現合計", "持倉檔數"} <= labels
+
+
+def test_the_positions_card_points_at_the_scorecard_for_the_rest():
+    """拿掉數字之後要說它搬到哪去了 —— 不然看起來像壞掉。"""
+    html = seed({"BTC-USDT": pos("BTC-USDT", 0.1, 70000.0)},
+                {"BTC-USDT": 76000.0})
+    assert "成績單" in html and "現在抱著什麼" in html

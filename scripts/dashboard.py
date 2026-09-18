@@ -927,7 +927,9 @@ def block_positions() -> str:
     a, held, marks = got["a"], got["held"], got["marks"]
     note = ('<p class="note">這是<b>模擬帳戶</b>的倉,不是你的交易所帳戶。'
             '現價走永續公開行情(標準合約沒有公開行情端點),'
-            '兩者貼得很近但不是同一個數字 —— <b>只餵眼睛,不做對帳</b>。</p>')
+            '兩者貼得很近但不是同一個數字 —— <b>只餵眼睛,不做對帳</b>。'
+            '<br>權益、報酬、這套行不行 —— 那些在下面的<b>成績單</b>,'
+            '這張只回答「現在抱著什麼」。</p>')
 
     if not held:
         return (head + note + '<div class="flag">模擬帳戶目前<b>空手</b> —— '
@@ -960,13 +962,14 @@ def block_positions() -> str:
                          f'<div class="why">{roi:+.1f}% 本金</div></td>')
         rows.append("<tr>" + "".join(cells) + "</tr>")
 
+    # 2026-09-18 執政官:「成績單跟模擬持倉是不是重複了?」—— 是,
+    # 權益兩張卡都印。分工改成:**這張只回答「現在抱著什麼」**,
+    # 帳戶層的成績(權益、報酬、已實現、回撤)歸成績單。
+    # 一個數字只出現在一個地方:兩邊各印一次的話,哪天它們因為取數
+    # 時點不同而對不起來,看的人只會困惑,不會知道該信哪一個。
     tot = sum(held[s].unrealized(marks[s]) for s in held if s in marks)
-    cells = []
-    if eq is not None:
-        cells.append(kv("模擬權益", f"{eq:,.2f}"))
-    cells.append(kv("未實現", f"{tot:+,.2f}", tone(tot)))
-    cells.append(kv("已實現", f"{a.realized_pnl:+,.2f}", tone(a.realized_pnl)))
-    cells.append(kv("持倉檔數", f"{len(held)} 檔"))
+    cells = [kv("未實現合計", f"{tot:+,.2f}", tone(tot)),
+             kv("持倉檔數", f"{len(held)} 檔")]
     if eq:
         cells.append(kv("曝險", f"{a.exposure(marks) * 100:,.0f}%"))
 

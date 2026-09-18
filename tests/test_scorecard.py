@@ -206,3 +206,30 @@ def test_a_corrupt_line_does_not_take_the_whole_card_down(tmp_path):
     p.write_text("\n".join(json.dumps(r) for r in good[:-1])
                  + "\n{ 這行壞了\n" + json.dumps(good[-1]), encoding="utf-8")
     assert score(p, now=NOW).verdict == GOOD
+
+
+# ══════════════════════════════════════════════════════════
+# 五、帳面要拆成已實現 / 未實現
+# ══════════════════════════════════════════════════════════
+def test_the_paper_number_is_split_into_realised_and_unrealised(tmp_path):
+    """**這個拆解就是「還不知道」那句話的證據。**
+
+    「+0.42%,其中已實現 0.00、未實現 +41.85」—— 一行話就說完了
+    為什麼十天的帳面不能當成績:那筆錢還沒有真的變成錢。
+    """
+    rows = trips(MIN_ROUND_TRIPS - 1)
+    rows[-1].update(return_pct=0.42, benchmark_pct=0.30,
+                    realized_pnl=0.0, unrealized_pnl=41.85)
+    s = score(curve(tmp_path, rows), now=NOW)
+    assert s.realized_pnl == 0.0 and s.unrealized_pnl == 41.85
+    text = " ".join(s.because)
+    assert "已實現 +0.00" in text and "未實現 +41.85" in text
+
+
+def test_a_ledger_without_the_split_still_reports_the_rest(tmp_path):
+    """舊的曲線檔沒有這兩欄 —— 不能因此整張卡都不見。"""
+    rows = trips(MIN_ROUND_TRIPS - 1)
+    rows[-1].update(return_pct=0.42)
+    s = score(curve(tmp_path, rows), now=NOW)
+    assert s.realized_pnl is None
+    assert "+0.42%" in " ".join(s.because)

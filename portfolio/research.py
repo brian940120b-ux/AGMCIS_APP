@@ -384,9 +384,14 @@ def judge_challenger(incumbent: Variant, challenger: Variant, *,
 
     worst_dd = max(train.get("max_dd_pct", 99.0),
                    test.get("max_dd_pct", 99.0))
-    add("回撤在契約內", worst_dd <= max_dd_contract_pct,
+    dd_ok = worst_dd <= max_dd_contract_pct
+    # 2026-09-18:那句「超過契約,仍然不可交易」原本是**無條件**印的,
+    # 於是 12.7% vs 15% 這個明明通過的關卡,旁邊跟著一句說它沒過。
+    # 一行自相矛盾的證據比沒有證據糟:讀的人會開始不信任整張表。
+    add("回撤在契約內", dd_ok,
         f"最大回撤 {worst_dd:.1f}% vs 契約 {max_dd_contract_pct:g}%"
-        "(贏了現任但超過契約,仍然不可交易)")
+        + ("" if dd_ok else "(贏了現任也一樣不可交易 —— "
+                            "回撤契約不因為贏了而放寬)"))
 
     add(f"優勢 ≥ {MIN_CALMAR_EDGE:g} Calmar",
         edge is not None and edge >= MIN_CALMAR_EDGE,

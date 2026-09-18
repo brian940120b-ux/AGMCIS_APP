@@ -259,3 +259,36 @@ def test_the_trial_count_is_carried_on_the_proposal(tmp_path):
     store = tmp_path / "p.json"
     R.save([judged(trials=31)], store)
     assert R.load(store)[0].trials == 31
+
+
+# ══════════════════════════════════════════════════════════
+# 證據不能自相矛盾
+# ══════════════════════════════════════════════════════════
+def _detail(p, name):
+    return next(d for n, _, d in p.checks if n == name)
+
+
+def test_a_passing_drawdown_check_does_not_say_it_failed():
+    """2026-09-18 實跑抓到的:
+
+        ✓ 回撤在契約內
+            最大回撤 12.7% vs 契約 15%(贏了現任但超過契約,仍然不可交易)
+
+    那句「超過契約,仍然不可交易」原本是**無條件**印的,於是一個
+    明明通過的關卡,旁邊跟著一句說它沒過。
+
+    一行自相矛盾的證據比沒有證據糟 —— 讀的人會開始不信任整張表,
+    而這張表的全部用處就是可以被相信。
+    """
+    d = _detail(judged(train=m(1.80, dd=12.7), test=m(1.60, dd=8.8)),
+                "回撤在契約內")
+    assert "12.7%" in d
+    assert "不可交易" not in d, f"通過的關卡卻說不可交易:{d}"
+
+
+def test_a_failing_drawdown_check_still_explains_why_it_matters():
+    """沒過的時候那句話要在 —— 贏了現任也不能放寬契約。"""
+    d = _detail(judged(train=m(1.80, dd=22.0), test=m(1.60, dd=8.8)),
+                "回撤在契約內")
+    assert "22.0%" in d
+    assert "不可交易" in d and "不因為贏了而放寬" in d
