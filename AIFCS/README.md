@@ -135,6 +135,9 @@ dependencies, and installs frontend packages.
 
 **Success looks like:** the last lines print `Setup complete.`
 
+> You can skip this step entirely — `./scripts/start.sh` runs the same install
+> automatically the first time it cannot find the dependencies.
+
 <details>
 <summary>Manual setup (if you prefer to run each step yourself)</summary>
 
@@ -149,49 +152,73 @@ cd frontend && npm install && cd ..
 
 ## Running AIFCS
 
-You need **two terminals**: one for the backend, one for the dashboard.
+### The short way — one command
 
-### Terminal 1 — backend
+```bash
+cd AIFCS
+./scripts/start.sh
+```
+
+This checks your tools, installs anything missing on the first run, starts both
+the backend and the dashboard, and opens your browser.
+
+**Success looks like:**
+
+```
+================================================================
+  AIFCS is running.  AIFCS 已啟動。
+
+  Open this in your browser:
+      http://localhost:5173
+================================================================
+```
+
+Press `Ctrl + C` in that terminal to stop everything. It shuts down both
+servers and releases the ports.
+
+If a port is already taken, the script says so and tells you how to change it:
+
+```bash
+AIFCS_BACKEND_PORT=8001 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh
+```
+
+### The manual way — two terminals
+
+Use this when you want to watch the backend and dashboard logs separately.
+
+**Terminal 1 — backend**
 
 ```bash
 cd AIFCS
 ./scripts/dev_backend.sh
 ```
 
-**Success looks like:**
+Success looks like `Application startup complete.` Leave it running.
 
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000
-INFO:     Application startup complete.
-```
-
-Leave this terminal running.
-
-### Terminal 2 — dashboard
+**Terminal 2 — dashboard**
 
 ```bash
 cd AIFCS
 ./scripts/dev_frontend.sh
 ```
 
-**Success looks like:**
+Success looks like `Local: http://localhost:5173/`.
 
-```
-  VITE v6.x  ready in ### ms
-  ➜  Local:   http://localhost:5173/
-```
+### Using the Command Center
 
-### Step 3 — open the dashboard
+Open **http://localhost:5173**. The boot screen lists each subsystem, then
+**ENTER COMMAND CENTER** becomes clickable.
 
-Open **http://localhost:5173** in your browser.
+Inside, the transport controls drive the real engine:
 
-You should see the `AIFCS` boot screen listing each subsystem, then the
-**ENTER COMMAND CENTER** button becomes clickable. Click it to reach the
-Command Center.
-
-To stop either server, click its terminal and press `Ctrl + C`.
-
----
+| Control | What actually happens |
+|---|---|
+| **START** | Loads the scenario and runs the engine at 60 Hz |
+| **PAUSE** | Stops the simulation clock — the tick counter genuinely freezes |
+| **RESUME** | Continues from the exact tick where it paused |
+| **STEP 1s** | Advances exactly 60 ticks, for frame-by-frame inspection |
+| **RESET** | Rebuilds the world from the scenario, back to tick 0 |
+| **Speed** | Changes wall-clock pacing only — the result is identical at 1x and 50x |
 
 ## API
 
@@ -316,8 +343,12 @@ The backend is not running. Start it in a second terminal with
 Run `chmod +x scripts/*.sh` once, then retry.
 
 **Port 8000 or 5173 already in use.**
-Another program holds the port. Stop it, or change the port
-(`uvicorn main:app --port 8001`, and `server.port` in `frontend/vite.config.ts`).
+`start.sh` detects this and names the fix:
+`AIFCS_BACKEND_PORT=8001 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh`
+
+**The dashboard is still running after I closed the terminal.**
+Press `Ctrl + C` in the terminal running `start.sh` rather than closing the
+window — the script stops both servers and releases the ports on interrupt.
 
 **`No virtualenv found. Run: scripts/setup.sh`.**
 `.venv` is missing — run the setup script first.
