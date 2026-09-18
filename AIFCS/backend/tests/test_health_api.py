@@ -35,6 +35,7 @@ def test_system_status_lists_subsystems(client):
     assert states["agents"] == "ONLINE"
     assert states["controllers"] == "ONLINE"
     assert states["sensors"] == "ONLINE"
+    assert states["communications"] == "ONLINE"
     # Not built yet — must be reported honestly, never as ONLINE.
     assert states["training"] == "NOT_IMPLEMENTED"
 

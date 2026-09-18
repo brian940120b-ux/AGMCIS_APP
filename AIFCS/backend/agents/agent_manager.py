@@ -25,6 +25,7 @@ from core.world_state import EntityState, EntityStatus, WorldState
 from simulation.aircraft import ControlInputs
 
 if TYPE_CHECKING:
+    from simulation.datalink import DatalinkService
     from simulation.sensors import SensorModel
 
 log = get_logger("agent_manager")
@@ -81,11 +82,15 @@ class AgentManager:
         decision_rate_hz: float = 10.0,
         decision_log_size: int = 500,
         sensor_model: SensorModel | None = None,
+        datalink: DatalinkService | None = None,
     ) -> None:
         self.events = event_bus
         # When present, agents perceive the world through it instead of reading
         # truth. Nothing else about the agent path changes.
         self.sensor_model = sensor_model
+        # When present, teammates' shared position reports fill gaps the
+        # aircraft's own sensor cannot see.
+        self.datalink = datalink
         self.tick_rate_hz = tick_rate_hz
         self.decision_rate_hz = decision_rate_hz
         # At least one tick: a decision rate above the tick rate cannot be met.
@@ -154,12 +159,20 @@ class AgentManager:
     def _observe(self, agent: BaseAgent, entity: EntityState, world: WorldState) -> Observation:
         """What the agent is allowed to know this cycle.
 
-        With a sensor model attached the agent receives an estimate; without
-        one it receives truth, which is the perfect-information baseline.
+        Sensing comes first, then the datalink fills what the aircraft's own
+        sensor could not see. A measured contact always wins over a relayed
+        one for the same unit.
         """
         if self.sensor_model is not None:
-            return self.sensor_model.observe(agent.agent_id, entity, world)
-        return build_observation(agent, entity, world)
+            observation = self.sensor_model.observe(agent.agent_id, entity, world)
+        else:
+            observation = build_observation(agent, entity, world)
+
+        if self.datalink is not None:
+            self.datalink.collect(entity.id)
+            observation = self.datalink.merge(observation, entity)
+
+        return observation
 
     def _run_agent(self, agent: BaseAgent, entity: EntityState, world: WorldState, tick: int) -> None:
         observation = self._observe(agent, entity, world)

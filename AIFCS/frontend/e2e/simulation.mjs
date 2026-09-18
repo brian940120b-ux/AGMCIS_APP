@@ -128,6 +128,25 @@ try {
     await page.getByText('Perception').first().isVisible(),
     'the perception panel should be visible',
   )
+
+  // PHASE 6: the datalink must be carrying real traffic.
+  const comms = await (await fetch(`${API_URL}/api/communications`)).json()
+  assert(comms.enabled, 'the datalink should be active')
+  assert(comms.stats.sent > 0, 'position reports should be going out')
+  assert(comms.stats.delivered > 0, 'reports should be arriving')
+  assert(
+    comms.stats.delivered < comms.stats.sent || comms.stats.lost === 0,
+    'delivered cannot exceed sent',
+  )
+  console.log(
+    `DATALINK -> ${comms.stats.delivered}/${comms.stats.sent} delivered, ` +
+      `${comms.stats.lost} lost, ${comms.stats.reordered} reordered, ` +
+      `blackout ${comms.blackout_active}`,
+  )
+  assert(
+    await page.getByText('Datalink').first().isVisible(),
+    'the datalink panel should be visible',
+  )
   await shot(page, '10-running')
 
   // --- PAUSE: the world must genuinely freeze ---

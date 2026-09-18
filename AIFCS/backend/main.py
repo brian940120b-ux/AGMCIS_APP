@@ -48,6 +48,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         SubsystemState.ONLINE,
         "Range, field of regard, noise, latency and dropout applied",
     )
+    registry.set_state(
+        "communications",
+        SubsystemState.ONLINE,
+        "Datalink with latency, jitter, loss, bandwidth and blackouts",
+    )
 
     log = get_logger("startup")
     log.info(

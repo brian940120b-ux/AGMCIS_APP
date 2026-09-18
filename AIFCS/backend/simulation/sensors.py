@@ -48,12 +48,13 @@ class SensorConfig:
 
     # Detection envelope.
     max_range_m: float = 80_000.0
-    # Half-angle from the nose. 180 means all-round coverage, which is the
-    # default: an aircraft in formation keeps contact with its leader, and a
-    # forward-only sensor would lose it the moment the wingman overshoots.
-    # Narrowing this is the interesting partial-observability experiment, and
-    # PHASE 6 adds the datalink that makes a narrow sensor survivable.
-    field_of_regard_deg: float = 180.0
+    # Half-angle from the nose; 180 means all-round coverage.
+    #
+    # The default is deliberately narrower than all-round. On its own that
+    # breaks formation flying — a wingman loses its leader the moment it
+    # overshoots — but the PHASE 6 datalink covers exactly that gap, and the
+    # coupling between the two is what makes this interesting to study.
+    field_of_regard_deg: float = 120.0
 
     # Reporting latency, in seconds.
     latency_s: float = 0.2

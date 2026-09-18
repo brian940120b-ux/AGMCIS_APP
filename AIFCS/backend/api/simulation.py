@@ -153,6 +153,15 @@ def sensors(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
     return engine.sensors.status()
 
 
+@router.get("/communications")
+def communications(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
+    """Datalink configuration, traffic statistics and blackout state."""
+    return {
+        **engine.comms.status(engine.clock.simulation_time),
+        "datalink": engine.datalink.status(),
+    }
+
+
 @router.get("/controller")
 def controller(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
     """Flight controller statistics: what it applied, rejected and corrected."""

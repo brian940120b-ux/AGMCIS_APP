@@ -8,6 +8,7 @@
 import type {
   ComputeInfo,
   ConfigSummary,
+  CommunicationsStatus,
   ControllerStatus,
   AgentDecision,
   AgentsResponse,
@@ -78,6 +79,7 @@ export const api = {
   agents: () => request<AgentsResponse>('/api/agents'),
   controller: () => request<ControllerStatus>('/api/controller'),
   sensors: () => request<SensorStatus>('/api/sensors'),
+  communications: () => request<CommunicationsStatus>('/api/communications'),
   decisions: (limit = 40) =>
     request<{ count: number; decisions: AgentDecision[] }>(`/api/decisions?limit=${limit}`),
 }

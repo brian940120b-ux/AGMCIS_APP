@@ -104,7 +104,7 @@ class SensorSettings(BaseModel):
 
     enabled: bool = True
     max_range_m: float = Field(default=80_000.0, gt=0)
-    field_of_regard_deg: float = Field(default=180.0, gt=0, le=180.0)
+    field_of_regard_deg: float = Field(default=120.0, gt=0, le=180.0)
     latency_s: float = Field(default=0.2, ge=0.0, le=5.0)
     dropout_probability: float = Field(default=0.05, ge=0.0, le=1.0)
     track_memory_s: float = Field(default=3.0, ge=0.0)
@@ -113,6 +113,31 @@ class SensorSettings(BaseModel):
     velocity_noise_mps: float = Field(default=3.0, ge=0.0)
     ownship_position_noise_m: float = Field(default=5.0, ge=0.0)
     ownship_velocity_noise_mps: float = Field(default=0.5, ge=0.0)
+
+
+class CommunicationSettings(BaseModel):
+    """Abstract datalink performance (PHASE 6).
+
+    A simulation transport between simulated units. It does no real networking.
+    """
+
+    enabled: bool = True
+    latency_base_s: float = Field(default=0.15, ge=0.0, le=10.0)
+    latency_jitter_s: float = Field(default=0.08, ge=0.0, le=5.0)
+    packet_loss_probability: float = Field(default=0.03, ge=0.0, le=1.0)
+    max_messages_per_second: float = Field(default=20.0, gt=0)
+    report_rate_hz: float = Field(default=4.0, gt=0)
+    blackout_windows: list[list[float]] = Field(default_factory=list)
+
+    @field_validator("blackout_windows")
+    @classmethod
+    def _windows_are_ordered_pairs(cls, v: list[list[float]]) -> list[list[float]]:
+        for window in v:
+            if len(window) != 2:
+                raise ValueError("each blackout window must be a [start, end] pair")
+            if window[1] <= window[0]:
+                raise ValueError(f"blackout window {window} must end after it starts")
+        return v
 
 
 class TelemetrySettings(BaseModel):
@@ -239,6 +264,7 @@ class Settings(BaseModel):
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
     world: WorldSettings = Field(default_factory=WorldSettings)
     sensors: SensorSettings = Field(default_factory=SensorSettings)
+    communications: CommunicationSettings = Field(default_factory=CommunicationSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     agents: AgentSettings = Field(default_factory=AgentSettings)
@@ -298,6 +324,7 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
         simulation=SimulationSettings(**sim_doc.get("simulation", {})),
         world=WorldSettings(**sim_doc.get("world", {})),
         sensors=SensorSettings(**sim_doc.get("sensors", {})),
+        communications=CommunicationSettings(**sim_doc.get("communications", {})),
         telemetry=TelemetrySettings(**sim_doc.get("telemetry", {})),
         logging=LoggingSettings(**sim_doc.get("logging", {})),
         agents=AgentSettings(**agents_section),

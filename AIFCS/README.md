@@ -4,13 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 5 complete.** Agents no longer see the world — they
-> see an **estimate**: range-limited, noisy, delayed, and sometimes missing.
-> Fictional units fly themselves under rule-based pilots, every command passes
-> through a safety layer, and perception is now the thing standing between truth
-> and decision. Communications, WebSocket, replay, scoring and training are
-> **not implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED`
-> rather than faking it.
+> **Current status: PHASE 6 complete.** Agents see an **estimate**, not the
+> world, and teammates now share what they see over a simulated datalink with
+> latency, jitter, loss, bandwidth limits and blackouts. The two are coupled: the
+> default sensor is deliberately narrower than all-round, which on its own breaks
+> formation flying, and the datalink is what makes it work. WebSocket, replay,
+> scoring and training are **not implemented yet**; the dashboard reports each as
+> `NOT_IMPLEMENTED` rather than faking it.
 
 ---
 
@@ -252,6 +252,7 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/decisions` | Decision log with reason codes and evidence |
 | `GET` | `/api/controller` | Safety layer: commands applied, rejected, corrected |
 | `GET` | `/api/sensors` | Sensor limits and tracks held per unit |
+| `GET` | `/api/communications` | Datalink config, traffic stats, blackout state |
 
 Replay, training and the `/ws/simulation` WebSocket arrive in their respective
 phases and are documented as they land.
@@ -336,6 +337,36 @@ compare against.
 
 The seam is one function. Agents were written against `Observation` in PHASE 3
 and did not change at all when perception was degraded in PHASE 5.
+
+### Datalink
+
+The communication model carries messages between simulated units and models how
+a link degrades: latency with jitter (which is what reorders messages), packet
+loss, per-sender bandwidth limits, and blackout windows. It is a **simulation
+transport only** — it does no real networking and implements nothing that scans,
+manipulates or interferes with anything.
+
+Each unit broadcasts its own position estimate at `report_rate_hz`. Teammates
+fold those reports into their picture as `DATALINK` contacts. A contact the
+aircraft measured itself always wins over a relayed one; the datalink fills the
+gaps the sensor cannot see.
+
+A relayed track is never better than a measurement: it carries the sender's own
+imperfect estimate of itself, it is as stale as the link is slow, and it expires
+when reports stop arriving.
+
+**The coupling is the interesting part.** Measured on `demo_alpha`, wingman
+state after 150 simulation seconds:
+
+| Sensor coverage | Datalink | Result |
+|---|---|---|
+| All-round | on | `FORMATION`, station error 101 m |
+| ±100° | **off** | `HOLD` — the leader is lost and formation collapses |
+| ±100° | on | `FORMATION`, station error 10 m |
+
+The default is ±120°, so the demo depends on the link. Set
+`communications.enabled: false` in `configs/simulation.yaml` to watch formation
+fall apart, or add a `blackout_windows` entry to cut the link mid-run.
 
 ### Safety layer
 
@@ -426,7 +457,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `259 passed`.
+**Success looks like:** `287 passed`.
 
 ### End-to-end dashboard test
 
@@ -503,8 +534,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 3 | Rule-based agent, guidance, decision records | **Complete** |
 | 4 | Flight controller, action validation, safety layer | **Complete** |
 | 5 | Sensor model: partial observation, noise, delay, dropout | **Complete** |
-| 6 | Communication model: latency, loss, blackout | Next |
-| 7 | WebSocket telemetry | Planned |
+| 6 | Communication model: datalink, latency, loss, blackout | **Complete** |
+| 7 | WebSocket telemetry | Next |
 | 8 | 3D Command Center (Three.js) | Planned |
 | 9 | Replay, scoring, database | Planned |
 | 10 | Scenario editor | Planned |

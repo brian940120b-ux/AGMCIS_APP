@@ -19,7 +19,7 @@ export function SystemStatusPanel() {
           pulse
         />
       }
-      className="h-full"
+      className="max-h-[38vh]"
     >
       {error && <p className="border-b border-red-force/30 bg-red-force/5 p-3 text-[11px] text-red-force">{error}</p>}
 

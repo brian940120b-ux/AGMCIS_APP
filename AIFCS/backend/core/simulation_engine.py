@@ -34,6 +34,8 @@ from core.event_bus import EventBus, EventType
 from core.integrator import Integrator, clamp_to_bounds
 from core.logging_config import get_logger
 from core.world_state import EntityStatus, WorldState
+from simulation.communications import CommsConfig, CommunicationModel
+from simulation.datalink import DatalinkService
 from simulation.physics import Simple6DOFModel
 from simulation.scenario import Scenario, find_scenario
 from simulation.sensors import SensorConfig, SensorModel
@@ -69,11 +71,15 @@ class SimulationEngine:
             tick_rate_hz=self.settings.simulation.tick_rate_hz,
         )
 
+        self.comms = CommunicationModel(config=self._comms_config(), seed=self.settings.simulation.seed)
+        self.datalink = DatalinkService(self.comms, tick_rate_hz=self.settings.simulation.tick_rate_hz)
+
         self.agents = AgentManager(
             event_bus=self.events,
             tick_rate_hz=self.settings.simulation.tick_rate_hz,
             decision_rate_hz=self.settings.agents.decision_rate_hz,
             sensor_model=self.sensors,
+            datalink=self.datalink,
         )
 
         self.controller = FlightController(
@@ -95,6 +101,7 @@ class SimulationEngine:
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._end_reason: str | None = None
+        self._blackout_announced = False
 
     # ------------------------------------------------------------- scenarios
 
@@ -124,6 +131,12 @@ class SimulationEngine:
             self.agents.register(agent)
 
         self.sensors.reset(seed=self.seed)
+
+        self.comms.reset(seed=self.seed)
+        self.comms.clear_participants()
+        for entity in self.world.entities.values():
+            self.comms.register(entity.id, entity.team.value)
+        self.datalink.reset()
 
         # Actuators start where the scenario trimmed them, not at neutral.
         self.controller.reset()
@@ -163,6 +176,18 @@ class SimulationEngine:
             ownship_velocity_noise_mps=sensors.ownship_velocity_noise_mps,
         )
 
+    def _comms_config(self) -> CommsConfig:
+        comms = self.settings.communications
+        return CommsConfig(
+            enabled=comms.enabled,
+            latency_base_s=comms.latency_base_s,
+            latency_jitter_s=comms.latency_jitter_s,
+            packet_loss_probability=comms.packet_loss_probability,
+            max_messages_per_second=comms.max_messages_per_second,
+            report_rate_hz=comms.report_rate_hz,
+            blackout_windows=tuple((w[0], w[1]) for w in comms.blackout_windows),
+        )
+
     def _resolve(self, relative: str) -> Path:
         path = Path(relative)
         return path if path.is_absolute() else self.settings.project_root / path
@@ -184,6 +209,12 @@ class SimulationEngine:
         # Sensors capture the current truth first; what an agent then sees is
         # the delayed, noisy version of it.
         self.sensors.record(self.world)
+
+        # Datalink: units share where they believe they are, and messages whose
+        # latency has elapsed are delivered. Blackouts are announced once.
+        self.datalink.broadcast_reports(self.world, self.clock.tick_count)
+        self.comms.update(self.clock.simulation_time)
+        self._track_blackout()
 
         # Agents decide at their own slower rate and leave a standing demand.
         self.agents.update(self.world, self.clock.tick_count)
@@ -217,6 +248,21 @@ class SimulationEngine:
             EventType.SIMULATION_TICK,
             simulation_time=simulation_time,
             tick=self.clock.tick_count,
+        )
+
+    def _track_blackout(self) -> None:
+        """Publish an event when the datalink drops or comes back."""
+        active = self.comms.in_blackout(self.clock.simulation_time)
+        if active == self._blackout_announced:
+            return
+
+        self._blackout_announced = active
+        self.events.emit(
+            EventType.COMMUNICATION_EVENT,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            message="datalink blackout started" if active else "datalink restored",
+            data={"blackout_active": active},
         )
 
     def _report_control_violations(self, entity_id: str, outcome: Any) -> None:
@@ -385,6 +431,8 @@ class SimulationEngine:
         self.rng = np.random.default_rng(self.seed)
         self.agents.reset()
         self.sensors.reset(seed=self.seed)
+        self.comms.reset(seed=self.seed)
+        self.datalink.reset()
         self.controller.reset()
         for entity in self.world.entities.values():
             self.controller.seed(entity)
@@ -430,4 +478,6 @@ class SimulationEngine:
             "decision_rate_hz": self.agents.decision_rate_hz,
             "controller": self.controller.status(),
             "sensors": self.sensors.status(),
+            "communications": self.comms.status(self.clock.simulation_time),
+            "datalink": self.datalink.status(),
         }

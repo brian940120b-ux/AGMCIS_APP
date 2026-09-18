@@ -32,10 +32,11 @@ sensors:
   # An agent sees an estimate, never the world itself.
   enabled: true
   max_range_m: 80000.0          # beyond this a contact is simply not reported
-  field_of_regard_deg: 180.0    # half-angle from the nose; 180 = all-round.
-                                # Narrow it to study partial observability —
-                                # a forward-only sensor loses a leader the
-                                # moment the wingman overshoots it.
+  field_of_regard_deg: 120.0    # half-angle from the nose; 180 = all-round.
+                                # Narrower than all-round on purpose: on its own
+                                # this breaks formation flying, and the datalink
+                                # below is what makes it survivable. Turn comms
+                                # off to see the coupling.
   latency_s: 0.2                # contacts are reported where they were, not are
   dropout_probability: 0.05     # chance a detection is missed each cycle
   track_memory_s: 3.0           # how long a missed contact is coasted
@@ -44,6 +45,18 @@ sensors:
   velocity_noise_mps: 3.0
   ownship_position_noise_m: 5.0 # an aircraft does not know its own state exactly
   ownship_velocity_noise_mps: 0.5
+
+communications:
+  # Abstract datalink between fictional units (PHASE 6). A simulation transport
+  # only — it does no real networking and implements nothing that scans,
+  # manipulates or interferes with anything.
+  enabled: true
+  latency_base_s: 0.15          # nominal one-way delay
+  latency_jitter_s: 0.08        # jitter, which is what reorders messages
+  packet_loss_probability: 0.03
+  max_messages_per_second: 20.0 # bandwidth per sender; excess is dropped, not queued
+  report_rate_hz: 4.0           # how often a unit shares its own position
+  blackout_windows: []          # e.g. [[120.0, 150.0]] to cut the link for 30 s
 
 telemetry:
   # How often the WebSocket layer broadcasts world state (Hz). Independent of tick rate.

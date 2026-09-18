@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Activity, Cpu, LayoutGrid, Radio } from 'lucide-react'
 import { DecisionFeed } from '@/components/DecisionFeed'
+import { DatalinkPanel } from '@/components/DatalinkPanel'
 import { EntityList } from '@/components/EntityList'
 import { EventFeed } from '@/components/EventFeed'
 import { IntelPanel } from '@/components/IntelPanel'
@@ -70,10 +71,13 @@ export function CommandCenter() {
 
       {/* Desktop / tablet */}
       <div className="hidden min-h-0 flex-1 gap-3 p-3 lg:grid lg:grid-cols-[300px_1fr_330px]">
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        {/* Telemetry rail. Panels keep their natural height and the rail
+            scrolls, rather than every panel being squeezed as more are added. */}
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 [&>*]:shrink-0">
           <SystemStatusPanel />
           <EntityList />
           <PerceptionPanel />
+          <DatalinkPanel />
           <SafetyPanel />
         </div>
 
@@ -110,6 +114,7 @@ export function CommandCenter() {
           <>
             <SystemStatusPanel />
             <PerceptionPanel />
+            <DatalinkPanel />
             <SafetyPanel />
           </>
         )}

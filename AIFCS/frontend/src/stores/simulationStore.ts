@@ -13,6 +13,7 @@ import { api, ApiError } from '@/api/client'
 import type {
   AgentDecision,
   AgentsResponse,
+  CommunicationsStatus,
   ControllerStatus,
   SensorStatus,
   Entity,
@@ -28,6 +29,7 @@ interface SimulationState {
   decisions: AgentDecision[]
   controller: ControllerStatus | null
   sensors: SensorStatus | null
+  communications: CommunicationsStatus | null
   scenarios: string[]
   selectedScenario: string | null
   busy: boolean
@@ -70,6 +72,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     decisions: [],
     controller: null,
     sensors: null,
+    communications: null,
     scenarios: [],
     selectedScenario: null,
     busy: false,
@@ -77,7 +80,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
 
     refresh: async () => {
       try {
-        const [status, entities, events, agents, decisions, controller, sensors] =
+        const [status, entities, events, agents, decisions, controller, sensors, communications] =
           await Promise.all([
             api.simulationStatus(),
             api.entities(),
@@ -86,6 +89,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
             api.decisions(40),
             api.controller(),
             api.sensors(),
+            api.communications(),
           ])
         set({
           status,
@@ -95,6 +99,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
           decisions: decisions.decisions,
           controller,
           sensors,
+          communications,
           error: null,
         })
       } catch (cause) {

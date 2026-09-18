@@ -81,6 +81,9 @@ class ContactView:
     confidence: float = 1.0
     # False when the track is being coasted rather than measured this cycle.
     measured: bool = True
+    # Where this contact came from: this aircraft's own sensor, or a teammate's
+    # report relayed over the datalink (PHASE 6).
+    source: str = "SENSOR"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -92,6 +95,7 @@ class ContactView:
             "age_s": round(self.age_s, 3),
             "confidence": round(self.confidence, 3),
             "measured": self.measured,
+            "source": self.source,
         }
 
 
@@ -139,6 +143,7 @@ class Observation:
             "heading_deg": round(self.heading_deg, 1),
             "contacts": len(self.contacts),
             "measured_contacts": sum(1 for c in self.contacts if c.measured),
+            "datalink_contacts": sum(1 for c in self.contacts if c.source == "DATALINK"),
             "nearest_contact_m": round(nearest.distance_m, 1) if nearest else None,
             "max_track_age_s": round(max((c.age_s for c in self.contacts), default=0.0), 2),
             "confidence": round(self.confidence, 3),

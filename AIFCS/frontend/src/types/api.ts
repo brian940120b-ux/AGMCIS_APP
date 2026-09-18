@@ -228,3 +228,33 @@ export interface SensorStatus {
   track_memory_s: number
   tracked_contacts: Record<string, number>
 }
+
+// ---------------------------------------------------------------- PHASE 6
+
+export interface CommsStats {
+  sent: number
+  delivered: number
+  lost: number
+  dropped_bandwidth: number
+  blocked_blackout: number
+  reordered: number
+}
+
+export interface CommunicationsStatus {
+  enabled: boolean
+  latency_base_s: number
+  latency_jitter_s: number
+  packet_loss_probability: number
+  max_messages_per_second: number
+  report_rate_hz: number
+  blackout_windows: number[][]
+  blackout_active: boolean
+  in_flight: number
+  participants: number
+  stats: CommsStats
+  datalink: {
+    report_rate_hz: number
+    report_interval_ticks: number
+    datalink_tracks: Record<string, number>
+  }
+}

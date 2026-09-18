@@ -167,12 +167,48 @@ often it is asked.
 sharply, and the PHASE 4 load-factor limiter now genuinely engages during turns.
 Two phases apart, behaving exactly as intended.
 
-## PHASE 6 — Communication model — **Next**
+## PHASE 6 — Communication model — **Complete**
 
-Latency, packet loss, reordering, bandwidth limits and blackout windows, with
-`send_message` / `receive_message` / `broadcast` / `get_latency` / `get_packet_loss`.
+`CommunicationModel` as a simulation transport: directed send and team
+broadcast, latency with jitter, packet loss, per-sender bandwidth limits with a
+sliding window, blackout windows, and out-of-order delivery that the receiver
+can detect. `DatalinkService` turns it into shared tracks: each unit broadcasts
+its own position estimate, teammates merge those reports into their picture, and
+a measured contact always beats a relayed one.
 
-## PHASE 7 — WebSocket telemetry
+**This phase closes the loop PHASE 5 opened.** A narrow sensor was abandoned in
+PHASE 5 because a wingman that overshot lost its leader for good. With the
+datalink it survives, and the numbers show the dependency directly — wingman
+state after 150 simulation seconds on `demo_alpha`:
+
+| Sensor coverage | Datalink | Result |
+|---|---|---|
+| All-round | on | `FORMATION`, station error 101 m |
+| ±100° | off | `HOLD` — formation collapses |
+| ±100° | on | `FORMATION`, station error 10 m |
+
+The ±100° case with the link is *better* than all-round without it, because a
+teammate's own report of itself is more accurate than a noisy remote
+measurement. The default coverage went back to ±120°, so the demo genuinely
+depends on the link — turn comms off and watch formation fall apart.
+
+**Verified:** a broadcast reaches the sender's team and neither the sender nor
+the other team; a message is not delivered before its latency elapses; jitter
+reorders arrivals and the model counts it; loss is bounded and reproducible;
+bandwidth drops the excess rather than queuing it, on a sliding window, per
+sender; nothing crosses a blackout and the window boundaries are inclusive; a
+disabled link sends nothing; the same seed loses the same messages and a
+different seed does not; a datalink track appears as a `DATALINK` contact that
+is never marked measured; and no unit ever appears twice from two sources.
+28 new tests, 287 total.
+
+**Two test-only bugs:** the partial-loss test forgot to raise the bandwidth
+limit, so the limiter — working correctly — dropped 180 of 200 messages before
+loss could apply. The datalink test left jitter at its default, so delivery
+landed just after t=0 and `update(0.0)` legitimately delivered nothing. Both
+times the model was right and the fixture was wrong.
+
+## PHASE 7 — WebSocket telemetry — **Next**
 
 `/ws/simulation` broadcasting world state, entity state, agent state, events and
 score at a configurable rate, decoupled from the physics tick.

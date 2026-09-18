@@ -30,7 +30,8 @@
 | `simulation/scenario.py` | Scenario loading and validation | 1 |
 | `core/integrator.py` | Swappable physics backend protocol | 1 |
 | `simulation/sensors.py` | Truth → Observation: range, noise, latency, dropout | 5 |
-| `simulation/communications.py` | Latency, loss, blackout | 6 |
+| `simulation/communications.py` | Datalink transport: latency, loss, bandwidth, blackout | 6 |
+| `simulation/datalink.py` | Position-report sharing and track merging | 6 |
 | `agents/base_agent.py` | Agent contract: Observation, Decision, Action | 3 |
 | `agents/rule_agent.py` | Deterministic pilot: routes, formation, avoidance | 3 |
 | `agents/guidance.py` | Cascaded guidance loops (moves to controllers in PHASE 4) | 3 |

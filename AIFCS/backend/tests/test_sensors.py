@@ -14,6 +14,9 @@ from core.world_state import EntityState, EntityStatus, Team, WorldState
 from simulation.sensors import SensorConfig, SensorModel
 
 PERFECT = SensorConfig(
+    # Explicitly all-round: the platform default is narrower, and these tests
+    # isolate the other degradations rather than the detection envelope.
+    field_of_regard_deg=180.0,
     latency_s=0.0,
     dropout_probability=0.0,
     position_noise_base_m=0.0,
