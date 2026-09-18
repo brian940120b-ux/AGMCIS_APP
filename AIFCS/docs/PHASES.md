@@ -232,13 +232,44 @@ the others; disconnecting stops delivery and doing it twice is harmless; the
 broadcaster holds its configured rate; and end to end through the real ASGI
 stack, the clock advances across frames. 19 new tests, 306 total.
 
-## PHASE 8 — 3D Command Center — **Next**
+## PHASE 8 — 3D Command Center — **Complete**
 
-Three.js / React Three Fiber tactical view: abstract terrain, BLUE/RED entities
-with ID, altitude, speed, heading, status, health and AI state. Orbit / follow /
-free / top / side cameras.
+Three.js / React Three Fiber tactical view fed by the PHASE 7 telemetry stream:
+abstract delta markers for the fictional units, attitude from the quaternion,
+motion trails from recorded truth positions, altitude stalks to the datum, a
+tactical ground grid, and orbit / follow / top / side cameras. The 2D plot
+remains one click away. Three.js is lazy-loaded, keeping the initial bundle at
+about 237 kB instead of 1.26 MB.
 
-## PHASE 9 — Replay, scoring, database
+**Three bugs, each found by looking rather than assuming:**
+
+*The whole view vanished once units appeared.* drei's `<Text>` fetches a font
+over the network and suspends until it arrives. When that fetch fails, React
+hides the entire Suspense subtree — so the panel was there, sized 0x0, with its
+controls unreachable. Labels are now DOM overlays with no network dependency,
+which also matches the dashboard's typography exactly.
+
+*Two WebGL contexts.* The Command Center rendered both responsive layouts and
+let CSS hide one. That is fine for text panels and wrong for 3D: it created a
+second, invisible context, doubling the GPU cost and risking the browser's
+per-page limit. Only the layout in use is mounted now.
+
+*An almost invisible grid.* `GridHelper` colours its lines through a
+vertex-colour attribute, so assigning `material.color` afterwards does nothing.
+The colours have to go to the constructor.
+
+**Two judgement calls worth recording:** labels have no `distanceFactor`, so
+they stay a constant size on screen — scaling them in 3D made them unreadable
+across the map and overwhelming up close. And their stacking offset is in screen
+pixels, not scene units, because a 3D offset collapses to nothing at exactly the
+range where two units in close formation need their callsigns kept apart.
+
+**Verified:** one WebGL context on desktop and one on mobile; the canvas reaches
+a real size; every camera mode renders without adding a context; 2D releases the
+context and 3D takes it back; and telemetry keeps flowing while the scene
+renders. Covered by `npm run test:e2e:3d`.
+
+## PHASE 9 — Replay, scoring, database — **Next**
 
 Replay recorder and player (play, pause, step, jump, fast-forward, slow motion,
 camera follow, event jump). Independent scoring engine — scores never live inside

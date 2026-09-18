@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { Activity, Cpu, LayoutGrid, Radio } from 'lucide-react'
 import { DecisionFeed } from '@/components/DecisionFeed'
 import { DatalinkPanel } from '@/components/DatalinkPanel'
@@ -11,10 +11,27 @@ import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
 import { SystemStatusPanel } from '@/components/SystemStatusPanel'
 import { TacticalPlot } from '@/components/TacticalPlot'
+import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { useSimulationPolling } from '@/hooks/useSimulationPolling'
 import { useTelemetrySocket } from '@/hooks/useTelemetrySocket'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useSystemStore } from '@/stores/systemStore'
+
+// Three.js is by far the largest dependency here. Loading the 3D view on demand
+// keeps it out of the initial bundle for anyone who stays on the 2D plot.
+const SimulationViewer3D = lazy(() =>
+  import('@/components/SimulationViewer3D').then((m) => ({
+    default: m.SimulationViewer3D,
+  })),
+)
+
+function ViewerLoading() {
+  return (
+    <div className="hud-panel grid h-full min-h-[320px] place-items-center">
+      <p className="text-[11px] text-ink-faint">Loading tactical view…</p>
+    </div>
+  )
+}
 
 type MobileTab = 'view' | 'status' | 'units' | 'intel'
 
@@ -33,6 +50,9 @@ const TABS: { id: MobileTab; label: string; icon: typeof Activity }[] = [
  */
 export function CommandCenter() {
   const [tab, setTab] = useState<MobileTab>('view')
+  // The 3D view is the default stage; the top-down plot stays one click away.
+  const [view, setView] = useState<'3d' | '2d'>('3d')
+  const isDesktop = useIsDesktop()
   useTelemetrySocket()
   useSimulationPolling()
 
@@ -53,7 +73,9 @@ export function CommandCenter() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="hidden text-[10px] text-ink-faint sm:inline">{systemStatus?.phase}</span>
+          <span className="hidden text-[10px] text-ink-faint sm:inline">
+            {systemStatus?.phase}
+          </span>
           {simStatus?.deterministic && (
             <span className="hidden text-[10px] text-ink-faint md:inline">
               seed {simStatus.seed}
@@ -85,90 +107,112 @@ export function CommandCenter() {
         </div>
       </header>
 
-      {/* Desktop / tablet */}
-      <div className="hidden min-h-0 flex-1 gap-3 p-3 lg:grid lg:grid-cols-[300px_1fr_330px]">
-        {/* Telemetry rail. Panels keep their natural height and the rail
+      {/* Desktop / tablet. Rendered only when it applies, so the 3D view
+          never creates a second, invisible WebGL context. */}
+      {isDesktop && (
+        <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[300px_1fr_330px]">
+          {/* Telemetry rail. Panels keep their natural height and the rail
             scrolls, rather than every panel being squeezed as more are added. */}
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 [&>*]:shrink-0">
-          <SystemStatusPanel />
-          <EntityList />
-          <PerceptionPanel />
-          <DatalinkPanel />
-          <SafetyPanel />
-        </div>
-
-        <div className="flex min-h-0 flex-col gap-3">
-          <SimulationControls />
-          <div className="min-h-0 flex-1">
-            <TacticalPlot />
-          </div>
-        </div>
-
-        <div className="flex min-h-0 flex-col gap-3">
-          <IntelPanel />
-          {/* The decision feed carries more per entry, so it gets the larger share. */}
-          <div className="min-h-0 flex-[3]">
-            <DecisionFeed />
-          </div>
-          <div className="min-h-0 flex-[2]">
-            <EventFeed />
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile: one focused panel, controls always reachable on the view tab */}
-      <main className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 lg:hidden">
-        {tab === 'view' && (
-          <>
-            <SimulationControls />
-            <div className="h-[55vh]">
-              <TacticalPlot />
-            </div>
-          </>
-        )}
-        {tab === 'status' && (
-          <>
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 [&>*]:shrink-0">
             <SystemStatusPanel />
+            <EntityList />
             <PerceptionPanel />
             <DatalinkPanel />
             <SafetyPanel />
-          </>
-        )}
-        {tab === 'units' && (
-          <>
-            <EntityList />
-            <DecisionFeed />
-            <EventFeed />
-          </>
-        )}
-        {tab === 'intel' && <IntelPanel />}
-      </main>
+          </div>
 
-      <nav className="grid shrink-0 grid-cols-4 border-t border-edge bg-deck lg:hidden">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`flex flex-col items-center gap-1 py-2.5 text-[10px] tracking-[0.15em] transition ${
-              tab === id ? 'text-cyan-hud' : 'text-ink-faint'
-            }`}
-          >
-            <Icon className="size-4" strokeWidth={1.5} />
-            {label.toUpperCase()}
-          </button>
-        ))}
-      </nav>
+          <div className="flex min-h-0 flex-col gap-3">
+            <SimulationControls />
+            <div className="min-h-0 flex-1">
+              {view === '3d' ? (
+                <Suspense fallback={<ViewerLoading />}>
+                  <SimulationViewer3D onSwitchTo2D={() => setView('2d')} />
+                </Suspense>
+              ) : (
+                <TacticalPlot onSwitchTo3D={() => setView('3d')} />
+              )}
+            </div>
+          </div>
 
-      <footer className="hidden shrink-0 items-center justify-between border-t border-edge bg-deck px-4 py-1.5 text-[10px] text-ink-faint lg:flex">
-        <span>
-          All entities, platforms and parameters are fictional — research and education use only.
-        </span>
-        <span>
-          {simStatus ? `state ${simStatus.state_hash} · ` : ''}
-          {health ? `v${health.version} · cfg ${health.config_hash}` : '—'}
-        </span>
-      </footer>
+          <div className="flex min-h-0 flex-col gap-3">
+            <IntelPanel />
+            {/* The decision feed carries more per entry, so it gets the larger share. */}
+            <div className="min-h-0 flex-[3]">
+              <DecisionFeed />
+            </div>
+            <div className="min-h-0 flex-[2]">
+              <EventFeed />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile: one focused panel, controls always reachable on the view tab */}
+      {!isDesktop && (
+        <main className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+          {tab === 'view' && (
+            <>
+              <SimulationControls />
+              <div className="h-[55vh]">
+                {view === '3d' ? (
+                  <Suspense fallback={<ViewerLoading />}>
+                    <SimulationViewer3D onSwitchTo2D={() => setView('2d')} />
+                  </Suspense>
+                ) : (
+                  <TacticalPlot onSwitchTo3D={() => setView('3d')} />
+                )}
+              </div>
+            </>
+          )}
+          {tab === 'status' && (
+            <>
+              <SystemStatusPanel />
+              <PerceptionPanel />
+              <DatalinkPanel />
+              <SafetyPanel />
+            </>
+          )}
+          {tab === 'units' && (
+            <>
+              <EntityList />
+              <DecisionFeed />
+              <EventFeed />
+            </>
+          )}
+          {tab === 'intel' && <IntelPanel />}
+        </main>
+      )}
+
+      {!isDesktop && (
+        <nav className="grid shrink-0 grid-cols-4 border-t border-edge bg-deck">
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`flex flex-col items-center gap-1 py-2.5 text-[10px] tracking-[0.15em] transition ${
+                tab === id ? 'text-cyan-hud' : 'text-ink-faint'
+              }`}
+            >
+              <Icon className="size-4" strokeWidth={1.5} />
+              {label.toUpperCase()}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {isDesktop && (
+        <footer className="flex shrink-0 items-center justify-between border-t border-edge bg-deck px-4 py-1.5 text-[10px] text-ink-faint">
+          <span>
+            All entities, platforms and parameters are fictional — research and
+            education use only.
+          </span>
+          <span>
+            {simStatus ? `state ${simStatus.state_hash} · ` : ''}
+            {health ? `v${health.version} · cfg ${health.config_hash}` : '—'}
+          </span>
+        </footer>
+      )}
     </div>
   )
 }

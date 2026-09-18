@@ -18,7 +18,7 @@ const TEAM_COLOR: Record<Entity['team'], string> = {
 
 const VIEW = 1000 // SVG user-space extent; world metres are mapped into this.
 
-export function TacticalPlot() {
+export function TacticalPlot({ onSwitchTo3D }: { onSwitchTo3D?: () => void } = {}) {
   const entities = useSimulationStore((s) => s.entities)
   const status = useSimulationStore((s) => s.status)
   const bounds = useSystemStore((s) => s.config?.world.bounds)
@@ -98,13 +98,24 @@ export function TacticalPlot() {
         <div>
           <h2 className="hud-label text-ink-dim">Tactical Plot</h2>
           <p className="text-[10px] text-ink-faint">
-            Top-down X/Y · thin line = nose, thick = velocity · 3D in PHASE 8
+            Top-down X/Y · thin line = nose, thick = velocity
           </p>
         </div>
-        <span className="text-[10px] text-ink-faint">
-          {status?.scenario ?? 'no scenario'} · {entities.length} units ·{' '}
-          {(spanMetres / 1000).toFixed(0)} km across
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-ink-faint">
+            {status?.scenario ?? 'no scenario'} · {entities.length} units ·{' '}
+            {(spanMetres / 1000).toFixed(0)} km across
+          </span>
+          {onSwitchTo3D && (
+            <button
+              type="button"
+              onClick={onSwitchTo3D}
+              className="border border-edge px-2 py-0.5 text-[10px] text-ink-faint transition hover:border-ink-faint"
+            >
+              3D
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="relative min-h-0 flex-1">

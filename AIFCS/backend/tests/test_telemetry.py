@@ -56,8 +56,15 @@ async def test_a_frame_carries_the_full_simulation_picture(engine):
 
     frame = sink.frames[0]
     assert {
-        "clock", "entities", "events", "decisions",
-        "controller", "sensors", "communications", "agents", "state_hash",
+        "clock",
+        "entities",
+        "events",
+        "decisions",
+        "controller",
+        "sensors",
+        "communications",
+        "agents",
+        "state_hash",
     } <= set(frame)
     assert len(frame["entities"]) == 4
     assert frame["clock"]["tick"] == 60

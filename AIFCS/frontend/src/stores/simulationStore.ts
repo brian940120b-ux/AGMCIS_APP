@@ -40,6 +40,8 @@ interface SimulationState {
   transport: TransportState
   /** Telemetry frames received on the current connection. */
   framesReceived: number
+  /** Recent truth positions per entity, for the 3D motion trails. */
+  trails: Record<string, [number, number, number][]>
 
   applyFrame: (frame: TelemetryFrame) => void
   setTransport: (transport: TransportState) => void
@@ -87,6 +89,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     error: null,
     transport: 'connecting',
     framesReceived: 0,
+    trails: {},
 
     /**
      * Fold one pushed telemetry frame into the store.
@@ -104,7 +107,17 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
           ? [...state.decisions, ...frame.decisions].slice(-FEED_LIMIT)
           : state.decisions
 
+        // Trails are appended per frame and bounded, so a long run does not
+        // grow the buffer without limit.
+        const TRAIL_LIMIT = 300
+        const trails: Record<string, [number, number, number][]> = {}
+        for (const entity of frame.entities) {
+          const previous = state.trails[entity.id] ?? []
+          trails[entity.id] = [...previous, entity.position].slice(-TRAIL_LIMIT)
+        }
+
         return {
+          trails,
           status: {
             scenario: frame.scenario,
             scenario_loaded: frame.scenario !== null,
@@ -186,7 +199,10 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     start: () => command(() => api.start(get().selectedScenario ?? undefined)),
     pause: () => command(() => api.pause()),
     resume: () => command(() => api.resume()),
-    reset: () => command(() => api.reset()),
+    reset: async () => {
+      set({ trails: {} })
+      await command(() => api.reset())
+    },
     step: (ticks) => command(() => api.step(ticks)),
     setSpeed: (speed) => command(() => api.setSpeed(speed)),
   }

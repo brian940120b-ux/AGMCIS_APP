@@ -4,13 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 7 complete.** The dashboard is now **pushed** live
-> state over `/ws/simulation` instead of polling for it — physics at 60 Hz,
-> telemetry at 20 Hz, render at whatever the browser does, three independent
-> clocks. Agents see an estimate rather than the world, and teammates share what
-> they see over a simulated datalink. Replay, scoring and training are **not
-> implemented yet**; the dashboard reports each as `NOT_IMPLEMENTED` rather than
-> faking it.
+> **Current status: PHASE 8 complete.** The Command Center now has a **3D
+> tactical view** — abstract fictional units flying in a Three.js scene, fed by
+> the live telemetry stream, with orbit / follow / top / side cameras and motion
+> trails. Agents see an estimate rather than the world, teammates share what they
+> see over a simulated datalink, and every command passes a safety layer. Replay,
+> scoring and training are **not implemented yet**; the dashboard reports each as
+> `NOT_IMPLEMENTED` rather than faking it.
 
 ---
 
@@ -340,6 +340,35 @@ compare against.
 The seam is one function. Agents were written against `Observation` in PHASE 3
 and did not change at all when perception was degraded in PHASE 5.
 
+### 3D tactical view
+
+The centre stage is a Three.js scene driven entirely by the telemetry stream —
+the browser draws, it does not simulate. Every position on screen was reported
+by the engine.
+
+| Camera | What it gives you |
+|---|---|
+| **Orbit** | Free camera framed on the units; drag to rotate, scroll to zoom |
+| **Follow** | Chase camera locked to one unit, along its velocity |
+| **Top** | Plan view, for geometry and separation |
+| **Side** | Altitude profile |
+
+Every mode still allows manual rotation — a preset is a starting point, not a
+cage. The top-down 2D plot is one click away and stays useful for reading exact
+separations.
+
+Units are **abstract delta markers**, drawn as tactical symbols rather than to
+scale (a 20 m airframe is sub-pixel across a 40 km engagement). They are not
+modelled on any real aircraft, and there is no weapon or targeting
+representation anywhere in the view.
+
+Coordinates map ENU → Three.js uniformly, with no vertical exaggeration: a
+research plot that distorts geometry is worse than one that is harder to read.
+Altitude stalks down to the datum make height unambiguous instead.
+
+Three.js is loaded on demand, so the initial bundle stays around 237 kB for
+anyone who never opens the 3D view.
+
 ### Live telemetry
 
 The dashboard subscribes to `/ws/simulation` and the server pushes frames at
@@ -493,6 +522,13 @@ cd frontend
 npx playwright install chromium   # first time only
 npm run test:e2e        # dashboard shell, status panel, error handling
 npm run test:e2e:sim    # start / pause / step / reset drive the real engine
+npm run test:e2e:3d     # 3D view renders, every camera mode works
+```
+
+On a headless machine without a GPU, run the 3D suite with a software renderer:
+
+```bash
+PLAYWRIGHT_GL=swiftshader npm run test:e2e:3d
 ```
 
 **Success looks like:**
@@ -561,8 +597,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 5 | Sensor model: partial observation, noise, delay, dropout | **Complete** |
 | 6 | Communication model: datalink, latency, loss, blackout | **Complete** |
 | 7 | WebSocket telemetry | **Complete** |
-| 8 | 3D Command Center (Three.js) | Next |
-| 9 | Replay, scoring, database | Planned |
+| 8 | 3D Command Center (Three.js) | **Complete** |
+| 9 | Replay, scoring, database | Next |
 | 10 | Scenario editor | Planned |
 | 11–13 | Gymnasium environment, PPO, SAC | Planned |
 | 14–15 | Multi-agent, commander agent | Planned |

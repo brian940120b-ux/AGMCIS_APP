@@ -62,7 +62,9 @@ an earlier one.
 - `api/client.ts` — typed fetch wrapper; network failure yields a clear error.
 - `stores/systemStore.ts` — Zustand store of live backend state.
 - `components/`, `pages/` — Command Center panels.
-- `three/` — 3D scene (PHASE 8).
+- `three/` — 3D scene (PHASE 8): `coordinates.ts` maps ENU to Three.js,
+  `Aircraft.tsx` draws the abstract marker, `CameraRig.tsx` holds the camera
+  modes, `TacticalGround.tsx` the grid, `Trail.tsx` the motion trails.
 
 The dashboard renders only data the backend actually returned. When the backend is
 unreachable the UI says so instead of showing stale or invented values.
