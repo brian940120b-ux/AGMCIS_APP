@@ -70,6 +70,16 @@ MA_GRID = (20, 50, 100, 200)
 VOL_GRID = (15.0, 20.0, 27.0, 35.0)
 LEV_GRID = (2.0, 3.0)
 
+#: 支撐壓力突破的(進場 N 日高, 出場 M 日低)。
+#:
+#: 2026-09-18 執政官問「不是有就是說利用支撐或壓力、突破假突破、
+#: 回測去判斷嗎」。答案是:可以,而且就用這裡 —— 但它得跟均線
+#: **在同一組閘門下比**,不是靠誰講得比較有道理。
+#:
+#: 這兩組是**教科書值**:海龜系統一 20/10、系統二 55/20。
+#: 不是搜出來的區間,所以它們沒有把搜尋空間撐大。
+BREAKOUT_GRID = ((20, 10), (55, 20))
+
 #: 校正後要達到的顯著水準。
 ALPHA = 0.05
 
@@ -86,34 +96,55 @@ MIN_CALMAR_EDGE = 0.10
 
 @dataclass(frozen=True)
 class Variant:
-    """一組參數。**現任者也是一個 Variant** —— 沒有特權。"""
+    """一組參數。**現任者也是一個 Variant** —— 沒有特權。
+
+    `kind` 決定訊號規則:
+      "ma"       收盤在 N 日均線之上才持有(現任)
+      "breakout" 突破 N 日高進場、跌破 M 日低出場(Donchian / 海龜)
+
+    ⚠️ **突破類多兩個參數**(entry_n / exit_n,加上可選的 confirm_bars),
+    而均線只有一個,還是教科書值。參數多的一方在同樣的證據下更容易
+    「看起來贏」—— 那正是 Bonferroni 校正要扣掉的東西。
+    """
 
     ma: int
     vol_target_pct: float
     leverage_cap: float
+    kind: str = "ma"
+    exit_n: int = 0                      # 只有 breakout 用得到
 
     @property
     def key(self) -> str:
-        return f"ma{self.ma}-vol{self.vol_target_pct:g}-lev{self.leverage_cap:g}"
+        head = (f"ma{self.ma}" if self.kind == "ma"
+                else f"bo{self.ma}-{self.exit_n}")
+        return f"{head}-vol{self.vol_target_pct:g}-lev{self.leverage_cap:g}"
 
     def describe(self) -> str:
-        return (f"{self.ma} 日均線 · 波動目標 {self.vol_target_pct:g}% · "
+        head = (f"{self.ma} 日均線" if self.kind == "ma"
+                else f"突破 {self.ma} 日高 / 跌破 {self.exit_n} 日低出場")
+        return (f"{head} · 波動目標 {self.vol_target_pct:g}% · "
                 f"槓桿上限 {self.leverage_cap:g}×")
 
     def to_dict(self) -> dict:
         return {"ma": self.ma, "vol_target_pct": self.vol_target_pct,
-                "leverage_cap": self.leverage_cap, "key": self.key}
+                "leverage_cap": self.leverage_cap, "kind": self.kind,
+                "exit_n": self.exit_n, "key": self.key,
+                "describe": self.describe()}
 
 
 def grid(incumbent: Variant) -> list:
     """所有要試的變化。**現任者不算一次試驗** —— 它是被挑戰的對象。"""
     out = []
-    for ma in MA_GRID:
-        for vol in VOL_GRID:
-            for lev in LEV_GRID:
+    for vol in VOL_GRID:
+        for lev in LEV_GRID:
+            for ma in MA_GRID:
                 v = Variant(ma=ma, vol_target_pct=vol, leverage_cap=lev)
                 if v != incumbent:
                     out.append(v)
+            for entry_n, exit_n in BREAKOUT_GRID:
+                out.append(Variant(ma=entry_n, vol_target_pct=vol,
+                                   leverage_cap=lev, kind="breakout",
+                                   exit_n=exit_n))
     return out
 
 

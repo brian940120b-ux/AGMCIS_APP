@@ -63,6 +63,135 @@ def ma_filter(symbols: list[str], n: int):
     return f
 
 
+def _extreme(idx: dict, sym: str, dates: list, i: int, n: int,
+             high: bool):
+    """第 i 日**之前** n 天的最高/最低。
+
+    ⚠️ **不含第 i 日自己。** 含了就是拿今天的高點去判斷今天有沒有
+    突破今天的高點 —— 那永遠成立,而回測會漂亮得不像話。
+    這是突破類策略最常見的前視偏誤,而它不會報錯。
+    """
+    if i < n:
+        return None
+    vals = []
+    for j in range(i - n, i):
+        b = idx.get(sym, {}).get(dates[j])
+        if not b:
+            return None                  # 中間有缺口就不算 —— 不補
+        vals.append(b.h if high else b.l)
+    return (max(vals) if high else min(vals)) if vals else None
+
+
+def donchian_breakout(symbols: list[str], entry_n: int = 20,
+                      exit_n: int = 10, confirm_bars: int = 1):
+    """突破 N 日高點進場,跌破 M 日低點出場(Donchian / 海龜)。
+
+    ═══ 這就是「支撐壓力 + 突破」最不任意的寫法 ═══
+    2026-09-18 執政官問:「不是有就是說利用支撐或壓力、突破假突破、
+    回測去判斷嗎?」
+
+    「支撐壓力」如果讓人用眼睛畫,每個人畫出來的線都不一樣,
+    那種東西**回測不了**,因為它不是一條規則,是一個習慣。
+
+    N 日高點 / N 日低點是它的機械版:**過去 N 天沒有人願意用更高的
+    價格買** —— 那就是壓力。價格穿過去,代表那群賣方被清掉了。
+
+    ═══ 假突破怎麼濾 ═══
+    一、**用收盤價,不用盤中最高價。** 插針穿過去再收回來,不算突破。
+        這一條**不花任何參數**,而它擋掉的假突破最多。
+    二、`confirm_bars` > 1:連續幾天站穩才算。這一條**要花一個參數**,
+        所以預設是 1(不確認)—— 每多一個參數就多一個過擬合的入口,
+        而它該由研究迴路帶著多重比較校正去證明值得,不是我先設好。
+
+    ═══ 跟 50 日均線是什麼關係 ═══
+    **它們是同一件事的兩種寫法。** 均線是平滑版:價格穿過一條慢慢移動
+    的線;Donchian 是離散版:價格穿過一個明確的歷史極值。
+
+    所以這不是「加一個新想法」,是「同一個想法換一種量法」——
+    而哪一種量得比較準,**回測說了算,不是誰講得比較有道理**。
+    它要走 `portfolio/research.py` 的每一道閘:訓練段挑、驗證段驗、
+    回撤契約、多重比較校正。
+
+    ═══ 已知的弱點,先說在前面 ═══
+    · 突破類策略在**震盪盤**會被反覆掃 —— 它靠少數幾波大行情回本,
+      而那意味著勝率低、單筆虧損頻繁。心理上比均線難拿住。
+    · entry_n / exit_n / confirm_bars 是**三個參數**,而 50 日均線
+      只有一個,還是教科書值。參數多的一方要贏得更明顯才算數。
+    """
+    if entry_n < 2 or exit_n < 2 or confirm_bars < 1:
+        raise ValueError("entry_n / exit_n 至少 2,confirm_bars 至少 1")
+
+    held: dict = {}
+    #: 已經穿過壓力、但還沒站滿 confirm_bars 天的:{幣: (被穿的那條線, 天數)}
+    pending: dict = {}
+
+    def f(i, dates, idx):
+        # 每次從頭跑的時候狀態要清掉 —— 否則上一次回測的持倉會漏進來,
+        # 而那個持倉**沒有任何一筆訊號支持它**。
+        if i == 0:
+            held.clear()
+            pending.clear()
+
+        on = []
+        for s in symbols:
+            b = idx.get(s, {}).get(dates[i])
+            if not b:
+                held.pop(s, None)
+                pending.pop(s, None)
+                continue
+
+            # ── 已持有:看要不要出場 ──────────────────
+            if held.get(s):
+                floor = _extreme(idx, s, dates, i, exit_n, high=False)
+                # 出場也用收盤 —— 兩邊用同一把尺
+                if floor is not None and b.c < floor:
+                    held[s] = False
+                else:
+                    on.append(s)
+                continue
+
+            # ── 正在確認中:比的是**當初被穿的那條線** ────
+            #
+            # ⚠️ 這裡是我寫錯兩次的地方。
+            #
+            # 第一版拿每一天各自的壓力去比 —— 那條件變成「連續 K 天
+            #   都創 N 日新高」,罕見得多,不是「站穩」。
+            # 第二版改成比「今天的壓力」,更糟:**突破那一天的高點,
+            #   隔天就進到視窗裡變成新的壓力**,所以線會自己往上跳,
+            #   站穩永遠站不上去 —— 確認功能等於永遠不進場。
+            #
+            # 正確的是把線**凍住**在突破當下:那條線被穿過去之後
+            # 有沒有被收回來,才是「站穩」的意思。
+            if s in pending:
+                level, days = pending[s]
+                if b.c > level:
+                    days += 1
+                    if days >= confirm_bars:
+                        pending.pop(s)
+                        held[s] = True
+                        on.append(s)
+                    else:
+                        pending[s] = (level, days)
+                else:
+                    pending.pop(s)          # 被收回來了,重新等
+                continue
+
+            # ── 還沒穿:看今天有沒有穿過去 ────────────
+            roof = _extreme(idx, s, dates, i, entry_n, high=True)
+            if roof is None or b.c <= roof:
+                continue
+
+            if confirm_bars <= 1:
+                held[s] = True
+                on.append(s)
+            else:
+                pending[s] = (roof, 1)
+
+        return {s: 1.0 / len(symbols) for s in on} if on else {}
+
+    return f
+
+
 def dd_breaker(symbols: list[str], pct: float):
     """買入持有,但自峰值回撤超過 pct% 就全數空手,回到峰值 95% 才回場。
 
@@ -98,6 +227,12 @@ def registry(symbols: list[str]) -> dict:
         "200日均線之上才持有": ma_filter(symbols, 200),
         "回撤20%熔斷": dd_breaker(symbols, 20.0),
         "回撤30%熔斷": dd_breaker(symbols, 30.0),
+        # 支撐壓力突破(2026-09-18 加)。兩組都是**教科書值**,
+        # 不是搜出來的:海龜系統一 20/10、系統二 55/20。
+        # 對手是誰:50 日均線 —— 它們量的是同一件事,
+        # 而突破類多兩個參數,所以要贏得更明顯才算數。
+        "突破20日高(10日低出場)": donchian_breakout(symbols, 20, 10),
+        "突破55日高(20日低出場)": donchian_breakout(symbols, 55, 20),
     }
 
 

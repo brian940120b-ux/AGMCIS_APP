@@ -43,9 +43,39 @@ def judged(**over):
 # ══════════════════════════════════════════════════════════
 def test_the_grid_is_small_and_the_incumbent_is_not_a_trial():
     g = R.grid(INC)
-    assert len(g) == len(R.MA_GRID) * len(R.VOL_GRID) * len(R.LEV_GRID) - 1
+    combos = len(R.VOL_GRID) * len(R.LEV_GRID)
+    assert len(g) == combos * (len(R.MA_GRID) + len(R.BREAKOUT_GRID)) - 1
     assert INC not in g, "現任者是被挑戰的對象,不算一次試驗"
     assert len(g) < 64, "網格一旦變大,這支就是過擬合機器"
+
+
+def test_breakout_is_a_challenger_not_a_special_case():
+    """2026-09-18 執政官問「不是有支撐壓力、突破假突破、回測去判斷嗎」。
+
+    答案是可以 —— 但它得跟均線**在同一組閘門下比**,不是因為它聽起來
+    比較像「真正的技術分析」就給它特權。
+    """
+    kinds = {v.kind for v in R.grid(INC)}
+    assert kinds == {"ma", "breakout"}
+    bo = [v for v in R.grid(INC) if v.kind == "breakout"]
+    assert {(v.ma, v.exit_n) for v in bo} == set(R.BREAKOUT_GRID)
+
+
+def test_the_breakout_values_are_textbook_not_searched():
+    """20/10 與 55/20 是海龜系統一與系統二。
+
+    **搜出來的區間會把搜尋空間撐大**,而撐大的代價是校正變嚴、
+    或者更糟 —— 沒人注意到它撐大了。
+    """
+    assert R.BREAKOUT_GRID == ((20, 10), (55, 20))
+
+
+def test_a_breakout_variant_describes_itself_in_plain_words():
+    v = R.Variant(ma=20, vol_target_pct=27.0, leverage_cap=3.0,
+                  kind="breakout", exit_n=10)
+    assert "突破 20 日高" in v.describe()
+    assert "跌破 10 日低" in v.describe()
+    assert v.key.startswith("bo20-10")
 
 
 def test_the_grid_never_tries_more_leverage_than_the_incumbent():

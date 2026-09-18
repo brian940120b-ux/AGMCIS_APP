@@ -37,7 +37,7 @@ interpreter.require()
 from portfolio import judge, research as R
 from portfolio.paper import (LEVERAGE_CAP, STRATEGY, SYMBOLS,
                              VOL_LOOKBACK, VOL_TARGET_ANNUAL_PCT)
-from portfolio.rules import ma_filter, vol_target
+from portfolio.rules import donchian_breakout, ma_filter, vol_target
 from portfolio.sim import align, metrics, simulate
 
 LINE = "═" * 64
@@ -46,8 +46,10 @@ WARMUP = 205          # 夠 200 日均線 + 緩衝
 
 def weights_fn(v: R.Variant):
     """把一組參數變成 simulate() 吃的權重函式。"""
-    return vol_target(ma_filter(SYMBOLS, v.ma), v.vol_target_pct,
-                      VOL_LOOKBACK, SYMBOLS, v.leverage_cap)
+    base = (donchian_breakout(SYMBOLS, v.ma, v.exit_n)
+            if v.kind == "breakout" else ma_filter(SYMBOLS, v.ma))
+    return vol_target(base, v.vol_target_pct, VOL_LOOKBACK, SYMBOLS,
+                      v.leverage_cap)
 
 
 def run(dates, idx, v: R.Variant):
@@ -111,11 +113,13 @@ def main(argv=None) -> int:
     # 排名照**驗證段** Calmar —— 拿訓練段排名就是在挑最會背答案的
     rows.sort(key=lambda r: (r[2].get("calmar") or -99), reverse=True)
     print(f"  {'參數':<30}{'訓練':>8}{'驗證':>8}{'回撤':>8}")
-    for v, tr, te, _ in rows[:8]:
+    for v, tr, te, _ in rows[:10]:
         print(f"  {v.key:<30}{tr.get('calmar') or 0:>8.2f}"
               f"{te.get('calmar') or 0:>8.2f}{te.get('max_dd_pct', 0):>7.1f}%")
-    if len(rows) > 8:
-        print(f"  …另外 {len(rows) - 8} 種")
+    if len(rows) > 10:
+        print(f"  …另外 {len(rows) - 10} 種")
+    print("\n  bo = 突破(支撐壓力),ma = 均線 —— 它們量的是同一件事,"
+          "\n  而突破多兩個參數,所以要贏得更明顯才算數。")
 
     best, best_tr, best_te, best_res = rows[0]
     p_raw = R.block_bootstrap_pvalue(daily_returns(best_res),
