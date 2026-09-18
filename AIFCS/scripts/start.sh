@@ -154,7 +154,9 @@ if ! curl -sf -m 2 "http://127.0.0.1:$FRONTEND_PORT" >/dev/null 2>&1; then
 fi
 
 # --- 6. Ready ---------------------------------------------------------------
-URL="http://localhost:$FRONTEND_PORT"
+# "localhost" can resolve to the IPv6 loopback on Windows, which the dev
+# server does not listen on. The literal IPv4 address always works.
+URL="http://127.0.0.1:$FRONTEND_PORT"
 echo
 echo "================================================================"
 echo "  AIFCS is running.  AIFCS 已啟動。"
@@ -162,7 +164,10 @@ echo
 echo "  Open this in your browser / 用瀏覽器打開："
 echo "      $URL"
 echo
-echo "  Press Ctrl+C here to stop.  在這個視窗按 Ctrl+C 可以關閉。"
+echo "  KEEP THIS WINDOW OPEN while you use AIFCS."
+echo "  使用期間請保持這個視窗開著 — 關掉視窗 AIFCS 就會停止。"
+echo
+echo "  To stop: press Ctrl+C here.  要關閉：在這個視窗按 Ctrl+C。"
 echo "================================================================"
 echo
 

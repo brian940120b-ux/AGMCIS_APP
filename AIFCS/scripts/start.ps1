@@ -198,7 +198,9 @@ try {
     }
 
     # --- 6. Ready -----------------------------------------------------------
-    $url = "http://localhost:$FrontendPort"
+    # "localhost" can resolve to the IPv6 loopback on Windows, which the dev
+    # server does not listen on. The literal IPv4 address always works.
+    $url = "http://127.0.0.1:$FrontendPort"
     Write-Host ''
     Write-Host '================================================================' -ForegroundColor Green
     Write-Host '  AIFCS is running.  AIFCS 已啟動。'
@@ -206,7 +208,10 @@ try {
     Write-Host '  Open this in your browser / 用瀏覽器打開：'
     Write-Host "      $url" -ForegroundColor Cyan
     Write-Host ''
-    Write-Host '  Press Ctrl+C here to stop.  在這個視窗按 Ctrl+C 可以關閉。'
+    Write-Host '  KEEP THIS WINDOW OPEN while you use AIFCS.' -ForegroundColor Yellow
+    Write-Host '  使用期間請保持這個視窗開著 — 關掉視窗 AIFCS 就會停止。' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  To stop: press Ctrl+C here.  要關閉：在這個視窗按 Ctrl+C。'
     Write-Host '================================================================' -ForegroundColor Green
     Write-Host ''
 

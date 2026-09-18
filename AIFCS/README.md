@@ -185,8 +185,17 @@ the backend and the dashboard, and opens your browser.
 ================================================================
 ```
 
+**Leave that terminal open.** It is not a completion notice — it is the running
+program. Closing the window stops AIFCS, and the browser will then say the
+connection was refused.
+
 Press `Ctrl + C` in that terminal to stop everything. It shuts down both
 servers and releases the ports.
+
+> The banner prints `http://127.0.0.1:5173` rather than `http://localhost:5173`
+> on purpose: on Windows `localhost` can resolve to the IPv6 loopback, which the
+> dev server does not listen on. If a link to `localhost` ever fails, try the
+> numeric address.
 
 If a port is already taken, the script says so and tells you how to change it:
 
@@ -591,6 +600,13 @@ On Windows, run `scripts\stop.bat` to clear whatever is holding the ports.
 Press `Ctrl + C` in the terminal running the launcher rather than closing the
 window — it stops both servers and releases the ports on interrupt. On Windows,
 `scripts\stop.bat` clears anything that survived.
+
+**The browser says the connection was refused / 無法連線.**
+Nothing is listening on the port. Either the launcher was never started, or its
+terminal window was closed — that window *is* AIFCS, not a notice that it
+finished. Start it again and leave the window open. If it then reports the port
+is in use, a process survived the last run: `scripts\stop.bat` on Windows, or
+`kill $(lsof -ti :5173)` elsewhere.
 
 **`No virtualenv found. Run: scripts/setup.sh`.**
 `.venv` is missing — run the setup script first.
