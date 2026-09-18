@@ -286,36 +286,57 @@ class Ticket:
         return bingx_links(self.symbol)
 
     def fields(self) -> list:
-        """BingX 標準合約開單畫面要填的每一格。(標籤, 值, 說明)
+        """BingX 標準合約開單畫面**真的要你填**的那幾格。(標籤, 值, 說明)
 
-        ═══ 順序照 App 的表單,不照我方便 ═══
-        2026-09-18 執政官:「我希望資訊是能比照 BingX 標準合約開單
-        畫面要填的資訊。」所以由上到下就是 App 上由上到下:
-        保證金模式 → 槓桿 → 方向 → 數量 → 止損。
+        ═══ 2026-09-18:執政官拍了開單畫面,而我的欄位是錯的 ═══
+        那張表單長這樣:
 
-        ═══ 數量、保證金、交易總額**三個都給** ═══
-        BingX 的開單框可以用「數量」也可以用「保證金」下單,而它
-        顯示的是「交易總額」。**你會看到哪一個,我不知道** ——
-        所以三個都算好,填到哪一格就用哪一個。
-        少給一個,你就得在手機上自己乘除,而那是最容易打錯的一步。
+            逐倉 ▾                          ← 右上角切
+            開多 / 開空                      ← 不是「買入/做多」
+            市價 / 計劃委託
+            槓桿  5x 10x 17x 19x 20x 40x ✏️  ← **預設檔位,3× 要用鉛筆自訂**
+            本金  [輸入]  10% 20% 50% 100%   ← **這是唯一的輸入框**
+            交易總額 --                      ← 系統算給你看的,不能填
+            止盈止損                         ← 要點進去才設得到
 
-        值是**乾淨的字串** —— 沒有千分位、沒有單位、沒有正負號裝飾,
-        因為它要被原封不動貼進輸入框。多一個逗號就是一張被拒的單。
+        **根本沒有「數量」這一格。** 標準合約是用**本金**下單的 ——
+        我把「數量」排在第一個要填的位置,那一格在 App 上根本不存在。
+
+        所以這裡只留真的要填的五格,順序照表單由上到下。
+        「數量」與「交易總額」搬到 `verify_after()` —— 它們是
+        **填完之後用來核對的**,不是拿來填的。
         """
         out = [
-            ("保證金模式", self.margin_mode, "逐倉:這一倉爆掉不會拖累別倉"),
-            ("槓桿", f"{self.leverage:.10g}", ""),
-            ("方向", self.tap, ""),
-            ("數量", f"{self.quantity:.10g}", "幣數"),
+            ("① 保證金模式", self.margin_mode, "右上角切"),
+            ("② 槓桿", f"{self.leverage:.10g}",
+             "預設檔位最低 5x —— 這個值要用 ✏️ 自訂"
+             if self.leverage < 5 else ""),
+            ("③ 方向", "開多" if self.action == OPEN_LONG else
+             ("開空" if self.action == OPEN_SHORT else "平倉"), ""),
         ]
-        if self.est_notional is not None:
-            out.append(("交易總額", f"{self.est_notional:.2f}",
-                        "USDT —— App 上多半顯示這個"))
         if self.est_margin is not None:
-            out.append(("保證金", f"{self.est_margin:.2f}",
-                        "USDT —— 用保證金下單就填這格"))
-        out.append(("止損", f"{self.stop_price:.10g}",
-                    "一定要設 —— 這是機器死掉時唯一的保護"))
+            out.append(("④ 本金", f"{self.est_margin:.2f}",
+                        "USDT —— 這是唯一的輸入框"))
+        out.append(("⑤ 止損", f"{self.stop_price:.10g}",
+                    "點「止盈止損」進去設。一定要設 —— "
+                    "這是機器死掉時唯一的保護"))
+        return out
+
+    def verify_after(self) -> list:
+        """填完本金之後,**畫面上應該出現的數字**。
+
+        它們不是拿來填的,是拿來核對的 —— 對不上就代表某一格填錯了,
+        而那比填漏一格更難發現:一張數量錯十倍的單會成交。
+        """
+        out = []
+        if self.est_notional is not None:
+            out.append(("交易總額", f"{self.est_notional:,.2f}",
+                        "USDT —— 填完本金之後畫面會自己算出來"))
+        out.append(("成交後持倉", f"{self.quantity:.8g}",
+                    "幣數 —— 成交後對一下,差很多就是填錯了"))
+        if self.est_liq_price is not None:
+            out.append(("預估強平", f"{self.est_liq_price:,.6g}",
+                        "App 也會顯示一個 —— 2026-09-18 實測兩邊差 0.07%"))
         return out
 
     def why(self) -> list:

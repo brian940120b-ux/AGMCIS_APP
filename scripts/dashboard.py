@@ -316,6 +316,9 @@ tbody tr:first-child td{border-top:none}
 .ticket td:first-child{color:var(--dim);width:88px;white-space:nowrap}
 .ticket td:last-child{font-family:var(--mono);text-align:right}
 .ticket .why{text-align:right}
+.ticket td.sect{color:var(--dim);font-size:10.5px;
+ letter-spacing:.5px;padding-top:9px;width:auto;
+ border-top:1px solid var(--line)}
 /* 為什麼是這一單。一張說不出理由的單不該被按下去。 */
 .why-box{margin-top:11px;padding-top:10px;
  border-top:1px solid var(--line)}
@@ -410,6 +413,7 @@ def _ticket_card(t) -> str:
         f'<span class="pill {"p-buy" if t.action == "OPEN_LONG" else "p-sell"}">'
         f'{html.escape(t.tap)}</span></div>'
         '<table><tbody>'
+        + '<tr><td colspan="2" class="sect">要填的(順序照 App)</td></tr>'
         + "".join(
             f'<tr><td>{html.escape(label)}</td><td>'
             f'<button class="cp" data-v="{html.escape(value)}">'
@@ -420,8 +424,14 @@ def _ticket_card(t) -> str:
             + '</td></tr>'
             for label, value, note in t.fields())
         +
-        f'<tr><td>預估強平</td><td>{liq}'
-        '<div class="why">我方算的,交易所這個產品不回</div></td></tr>'
+        # 填完之後用來核對的 —— 不是拿來填的
+        + '<tr><td colspan="2" class="sect">填完之後畫面上應該是</td></tr>'
+        + "".join(
+            f'<tr><td>{html.escape(label)}</td><td>{html.escape(value)}'
+            + (f'<div class="why">{html.escape(note)}</div>' if note else '')
+            + '</td></tr>'
+            for label, value, note in t.verify_after())
+        +
         f'<tr><td>有效價格</td><td>{t.price_low:,.6g} ~ '
         f'{t.price_high:,.6g}<div class="why">跑出去就作廢,重算</div>'
         '</td></tr>'

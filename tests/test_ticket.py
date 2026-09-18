@@ -364,23 +364,54 @@ def test_the_stop_explains_that_it_is_not_the_strategy_exit():
 # ══════════════════════════════════════════════════════════
 # 八、欄位照 BingX 開單畫面
 # ══════════════════════════════════════════════════════════
-def test_fields_follow_the_bingx_order_form_top_to_bottom():
+def test_fields_match_the_real_standard_contract_order_form():
+    """2026-09-18 執政官拍了開單畫面,而我的欄位是錯的。
+
+    那張表單**根本沒有「數量」這一格** —— 標準合約是用**本金**下單的。
+    我把「數量」排在第一個要填的位置,而那一格在 App 上不存在。
+    """
     labels = [k for k, _, _ in with_reason().fields()]
-    assert labels[:4] == ["保證金模式", "槓桿", "方向", "數量"]
-    assert labels[-1] == "止損", "止損擺最後一個 —— 它是送出前最後確認的"
+    assert labels == ["① 保證金模式", "② 槓桿", "③ 方向", "④ 本金", "⑤ 止損"]
+    assert not any("數量" in k for k in labels), "數量不是輸入欄"
 
 
-def test_quantity_notional_and_margin_are_all_given():
-    """**App 讓你填哪一格,我不知道。** 三個都給,免得在手機上乘除 ——
-    那是最容易打錯的一步。"""
+def test_the_direction_uses_the_apps_own_words():
+    """App 上寫的是「開多 / 開空」,不是「買入/做多」。"""
     got = {k: v for k, v, _ in with_reason().fields()}
-    assert got["數量"] == "0.01"
-    assert got["交易總額"] == "760.00"          # 0.01 × 76000
-    assert got["保證金"] == "253.33"            # 760 ÷ 3
+    assert got["③ 方向"] == "開多"
+
+
+def test_the_principal_is_the_only_input_and_it_is_the_margin():
+    got = {k: v for k, v, _ in with_reason().fields()}
+    assert got["④ 本金"] == "253.33"            # 760 ÷ 3
+
+
+def test_a_leverage_below_the_preset_buttons_says_so():
+    """檔位是 5x 10x 17x 19x 20x 40x —— **3× 不在裡面**,要用 ✏️ 自訂。
+
+    不說的話,人會直接按 5x,而那是槓桿差 67% 的一張單。
+    """
+    note = [n for k, _, n in with_reason().fields() if k == "② 槓桿"][0]
+    assert "✏️" in note and "5x" in note
+
+
+def test_quantity_and_notional_moved_to_the_check_after_list():
+    """它們是**填完之後用來核對的**,不是拿來填的。
+
+    對不上就代表某一格填錯了 —— 而那比填漏一格更難發現:
+    一張數量錯十倍的單會成交。
+    """
+    got = {k: v for k, v, _ in with_reason().verify_after()}
+    assert got["交易總額"] == "760.00"
+    assert got["成交後持倉"] == "0.01"
+    assert "預估強平" in got
 
 
 def test_values_are_clean_strings_ready_to_paste():
-    """沒有千分位、沒有單位。**多一個逗號就是一張被拒的單。**"""
+    """沒有千分位、沒有單位。**多一個逗號就是一張被拒的單。**
+
+    只管**要填的**那幾格 —— verify_after() 是給人讀的,可以有千分位。
+    """
     for _, value, _ in with_reason().fields():
         assert "," not in value
         assert "USDT" not in value and "×" not in value
