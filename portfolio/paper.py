@@ -126,6 +126,86 @@ class Config:
 MAIN = Config()
 
 
+# ══════════════════════════════════════════════════════════
+# 測試組:動態交易池 · 2026-09-19 復活
+# ══════════════════════════════════════════════════════════
+#
+# 執政官:「我要的就是很簡單,讓系統去模擬真實交易所 BingX 裡面的
+# 所有東西、系統自行模擬開單交易、並且有一種篩選機制。」
+#
+# 前兩件一直在跑。第三件**做出來過,壞掉了,然後被退役** ——
+# 2026-09-13 的測試組跑動態交易池,篩進 1000PEPE-USDT,而沒有人抓過
+# 那個幣的資金費歷史:
+#
+#     SpecMissing: 沒有 1000PEPE-USDT 的資金費率歷史 —— 不猜一個數字
+#
+# 那個例外**是對的**(用不完整的資料記帳會靜靜少收資金費、美化績效)。
+# 錯的是沒有人先去抓歷史,而且**整個 tick 跟著死**:73.7 小時沒有記帳,
+# 巡檢報了三天沒人管。
+#
+# 退役是當時對的決定。但退役之後沒有人把那個 bug 修掉再把它接回來,
+# 而我一路用「那是策略層的決定」把它推掉 —— 它不是策略決定,
+# 是一個沒修的 bug。
+#
+# ═══ 這次修的是什麼 ═══
+# 不是「別讓它挑到新幣」—— 那是把篩選閹掉。
+# 修的是 **`screened_universe()` 只回「資料齊全到可以誠實記帳」的幣**:
+# 篩完之後逐幣確認日線與資金費歷史都在,缺的**當場補抓**,補不到的
+# 就排除並留下理由。挑不到東西的時候退回主城名單,不讓 tick 死掉。
+#
+# 一個少了兩個幣的交易池,比一個死掉三天的帳本好得多。
+
+
+def screened_universe(min_volume: float | None = None,
+                      min_bars: int | None = None) -> list[str]:
+    """篩出可交易、夠流動、歷史夠長、**而且資料齊全到可以記帳**的幣。
+
+    最後那一關是 2026-09-13 那次停機的直接教訓。前三關是「這個幣值不值
+    得交易」,第四關是「我有沒有資格替它記帳」—— 兩者不是同一件事,
+    而混在一起的代價是三天沒有帳本。
+    """
+    from portfolio import specs, universe
+
+    picked = universe.screen(
+        min_volume=(universe.MIN_QUOTE_VOLUME_USDT
+                    if min_volume is None else min_volume),
+        min_bars=(universe.MIN_DAILY_BARS if min_bars is None else min_bars))
+
+    ok, dropped = [], []
+    for sym in picked:
+        try:
+            # 資金費歷史:缺了就補抓。specs 自己會落地快取。
+            specs.refresh_funding([sym])
+            ok.append(sym)
+        except Exception as e:                       # noqa: BLE001
+            dropped.append(f"{sym}({type(e).__name__})")
+
+    if dropped:
+        log.warning("交易池排除(資料不全,補抓失敗):" + "、".join(dropped))
+    if not ok:
+        # **不讓 tick 死掉。** 挑不到就用主城名單,並且說出來 ——
+        # 一個退回預設值而不吭聲的篩選,比沒有篩選更難發現。
+        log.error("動態交易池一個都挑不出來,退回主城名單 —— "
+                  "這不是正常狀態,查 universe.screen() 的輸出")
+        return list(SYMBOLS)
+    log.info(f"動態交易池:{len(picked)} 個過前三關,"
+             f"{len(ok)} 個資料齊全可記帳")
+    return ok
+
+
+#: 測試組。**平行的紙上帳戶**,獨立帳本,同一份 plan()/tick()。
+#: 它跟主城唯一的差別是交易池:主城寫死七幣,它每天重新篩。
+#: 兩邊用同一段真實價格,所以「動態交易池有沒有比較好」這個問題
+#: 會被前向資料自己回答,而不是被一次回測回答。
+SCREENED = Config(
+    name="screened",
+    universe_fn=screened_universe,
+    state_path=BASE / "data" / "screened_account.json",
+    curve_path=BASE / "data" / "screened_equity.jsonl",
+    risk_path=BASE / "data" / "screened_risk.json",
+)
+
+
 def _fresh_bars(symbols=None, lookback_days=None
                 ) -> tuple[list[datetime], dict[str, dict]]:
     """抓最新日線。共用 market_data.history 的累積式快取。"""
@@ -289,6 +369,7 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     a = Account.load(cfg.state_path)
     if p["already_done"]:
         return {"skipped": "本交易日已記帳",
+                "symbols": list(p.get("symbols") or []),
                 "equity": a.equity(p["prices"])}
 
     prices = p["prices"]
@@ -459,6 +540,9 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     return {"liquidated": liquidated, "risk": risk.to_dict(),
             "equity": eq, "return_pct": eq / a.start_equity * 100 - 100,
             "benchmark_pct": bench, "drawdown_pct": dd,
+            # 交易池:主城是固定七幣,測試組每天重篩 —— 那個數字本身
+            # 就是「篩選有沒有在動」的證據,所以要回得出來。
+            "symbols": list(p.get("symbols") or []),
             "holdings": sorted(a.positions), "orders": filled,
             "realized_pnl": a.realized_pnl,
             "unrealized_pnl": a.unrealized(prices),

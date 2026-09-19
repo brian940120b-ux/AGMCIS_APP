@@ -247,6 +247,32 @@ def main() -> int:
         return 1
     print(f"   {r.get('skipped') or f'''權益 {r['equity']:,.2f}'''}")
 
+    print("②b 測試組記帳(動態交易池)")
+    # ═══ 2026-09-19:測試組復活 ═══
+    # 2026-09-13 它因為篩進 1000PEPE-USDT、而沒有人抓過那個幣的資金費
+    # 歷史而整個 tick 死掉,73.7 小時沒有記帳。退役是當時對的決定,
+    # 但退役之後沒有人把那個 bug 修掉再把它接回來。
+    #
+    # 這次 screened_universe() 自己保證「只回資料齊全到可以誠實記帳的
+    # 幣」,而且挑不到就退回主城名單、不讓 tick 死。
+    #
+    # ⚠️ **測試組失敗不得拖垮主城。** 主城已經在上面記完了,
+    # 這裡無論怎麼爆炸都只印一行、發一則通知,然後往下走 ——
+    # 一個實驗把本業弄掛掉,是最蠢的一種當機(跟研究迴路同一條規則)。
+    try:
+        from portfolio.paper import SCREENED
+        rs = tick(cfg=SCREENED)
+        if "error" in rs:
+            print(f"   測試組記帳失敗:{rs['error']}")
+        else:
+            print(f"   {rs.get('skipped') or f'''權益 {rs['equity']:,.2f}'''}"
+                  f" · 交易池 {len(rs.get('symbols') or [])} 幣")
+    except Exception as e:                           # noqa: BLE001
+        log.warning(f"測試組記帳失敗(不影響主城):{type(e).__name__}: {e}")
+        print(f"   測試組例外(主城不受影響):{type(e).__name__}: {e}")
+        telegram.send(f"⚠️ AGMCIS 測試組記帳失敗(主城正常)\n"
+                      f"{type(e).__name__}: {e}")
+
     print("③ 更新契約")
     try:
         from portfolio.contract import evaluate
