@@ -259,3 +259,50 @@ class TestTheShippedCalendarIsReal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ══════════════════════════════════════════════════════════
+# 事件日曆十天來每一次記帳都失敗 · 2026-09-19
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-19 測試組第一次記帳的輸出裡:
+#
+#   WARNING 事件日曆讀取失敗(不影響記帳):
+#           Invalid isoformat string: '2026-09-19T00:00:00+00:00'
+#
+# plan() 回的 exec_day 是 `exec_day.isoformat()` —— 一個**帶時間的
+# 字串**,而 date.fromisoformat() 不吃那種。主城也一樣,每天都在發生。
+#
+# 而它壞掉的方式最惡劣:例外被接住、記一行 warning、回 None,
+# **而 None 的意思是「沒有日曆」**。帳本裡十天的 events 全是 null,
+# 看起來就像「這台機器沒裝日曆」,而不是「解析壞了」。
+
+def test_the_execution_day_as_plan_returns_it_can_actually_be_read():
+    """**這一條就是那十天。** plan() 回的就是這個形狀。"""
+    from portfolio.paper import _events_on
+    got = _events_on("2026-09-19T00:00:00+00:00")
+    assert got == [] or (got and "error" not in got[0]), got
+
+
+def test_every_shape_the_execution_day_comes_in_is_handled():
+    from datetime import date, datetime, timezone
+
+    from portfolio.paper import _events_on
+    for val in ("2026-09-19T00:00:00+00:00", "2026-09-19",
+                datetime(2026, 9, 19, tzinfo=timezone.utc), date(2026, 9, 19)):
+        got = _events_on(val)
+        assert got is None or "error" not in (got[0] if got else {}), \
+            f"{val!r} 讀不懂"
+
+
+def test_a_broken_date_is_not_reported_as_having_no_calendar():
+    """**把「沒查到」寫成「沒有」,是把一個空白偽裝成一個結論。**
+
+    None 的意思是「這台機器沒有日曆」。解析壞掉跟那件事完全不同,
+    而它們在帳本裡曾經共用同一個 null。
+    """
+    from portfolio.paper import _events_on
+    got = _events_on("這不是日期")
+    assert got is not None, "解析失敗被寫成了「沒有日曆」"
+    assert got and "error" in got[0]
+    assert "讀不懂成交日" in got[0]["error"]

@@ -235,19 +235,48 @@ def _events_on(exec_day) -> list | None:
     兩者在帳本裡是不同的字,之後回頭看才分得出來 ——
     把「沒查」寫成「沒有」,是把一個空白偽裝成一個結論。
     """
-    from datetime import date
+    from datetime import date, datetime
 
     from portfolio import events
 
+    # ── 2026-09-19:這裡十天來每一次都失敗 ────────────────────
+    #
+    #   Invalid isoformat string: '2026-09-19T00:00:00+00:00'
+    #
+    # plan() 回的 exec_day 是 `exec_day.isoformat()` —— 一個**帶時間的
+    # 字串**,而 `date.fromisoformat()` 不吃那種。第一版的
+    # `isinstance(exec_day, date)` 看起來擋得住(datetime 是 date 的
+    # 子類別),但傳進來的根本不是 datetime,是 str。
+    #
+    # 而它壞掉的方式最惡劣:例外被接住、記一行 warning、回 None,
+    # **而 None 的意思是「沒有日曆」**。於是帳本裡十天的 events 全是
+    # null,看起來就像「這台機器沒裝日曆」,而不是「解析壞了」。
+    #
+    # 把「沒查到」寫成「沒有」,是把一個空白偽裝成一個結論 ——
+    # 這支函式自己的 docstring 就是這樣寫的。
+    if isinstance(exec_day, datetime):
+        day = exec_day.date()
+    elif isinstance(exec_day, date):
+        day = exec_day
+    else:
+        txt = str(exec_day)
+        try:
+            # 帶時間的先試 datetime,純日期再退回 date。
+            day = (datetime.fromisoformat(txt).date() if "T" in txt
+                   else date.fromisoformat(txt))
+        except ValueError as e:
+            # **解析壞掉不是「沒有日曆」。** 回一個看得出差別的東西,
+            # 而不是跟「沒裝日曆」共用同一個 None。
+            log.error(f"事件日曆:讀不懂成交日 {exec_day!r} —— {e}")
+            return [{"error": f"讀不懂成交日 {exec_day!r}: {e}"}]
+
     try:
-        day = exec_day if isinstance(exec_day, date) else date.fromisoformat(
-            str(exec_day))
         return [e.to_dict() for e in events.on_day(day)]
     except events.CalendarMissing:
         return None
     except Exception as e:
         log.warning(f"事件日曆讀取失敗(不影響記帳):{e}")
-        return None
+        return [{"error": f"{type(e).__name__}: {e}"}]
 
 
 def _append(path: Path, rec: dict) -> None:
