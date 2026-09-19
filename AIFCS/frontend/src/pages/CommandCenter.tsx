@@ -1,11 +1,13 @@
 import { Suspense, lazy, useState } from 'react'
-import { Activity, Cpu, LayoutGrid, Radio } from 'lucide-react'
+import { Activity, Cpu, Film, LayoutGrid, Radio as RadioIcon } from 'lucide-react'
 import { DecisionFeed } from '@/components/DecisionFeed'
 import { DatalinkPanel } from '@/components/DatalinkPanel'
 import { EntityList } from '@/components/EntityList'
 import { EventFeed } from '@/components/EventFeed'
 import { IntelPanel } from '@/components/IntelPanel'
 import { PerceptionPanel } from '@/components/PerceptionPanel'
+import { ReplayPanel } from '@/components/ReplayPanel'
+import { ScoreboardPanel } from '@/components/ScoreboardPanel'
 import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
@@ -14,6 +16,7 @@ import { TacticalPlot } from '@/components/TacticalPlot'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { useSimulationPolling } from '@/hooks/useSimulationPolling'
 import { useTelemetrySocket } from '@/hooks/useTelemetrySocket'
+import { useReplayStore } from '@/stores/replayStore'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useSystemStore } from '@/stores/systemStore'
 
@@ -33,12 +36,13 @@ function ViewerLoading() {
   )
 }
 
-type MobileTab = 'view' | 'status' | 'units' | 'intel'
+type MobileTab = 'view' | 'status' | 'units' | 'replay' | 'intel'
 
 const TABS: { id: MobileTab; label: string; icon: typeof Activity }[] = [
   { id: 'view', label: 'View', icon: LayoutGrid },
   { id: 'status', label: 'Status', icon: Activity },
-  { id: 'units', label: 'Units', icon: Radio },
+  { id: 'units', label: 'Units', icon: RadioIcon },
+  { id: 'replay', label: 'Replay', icon: Film },
   { id: 'intel', label: 'Intel', icon: Cpu },
 ]
 
@@ -53,6 +57,9 @@ export function CommandCenter() {
   // The 3D view is the default stage; the top-down plot stays one click away.
   const [view, setView] = useState<'3d' | '2d'>('3d')
   const isDesktop = useIsDesktop()
+  // Which source the tactical views draw: live telemetry or a recording.
+  const stageMode = useReplayStore((s) => s.mode)
+  const setStageMode = useReplayStore((s) => s.setMode)
   useTelemetrySocket()
   useSimulationPolling()
 
@@ -73,6 +80,26 @@ export function CommandCenter() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {/* LIVE / REPLAY. The views draw one source or the other, never a
+              mix of the two. */}
+          <div className="flex items-center border border-edge">
+            {(['live', 'replay'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStageMode(value)}
+                className={`px-2 py-0.5 text-[10px] tracking-[0.15em] transition ${
+                  stageMode === value
+                    ? value === 'replay'
+                      ? 'bg-amber-300/15 text-amber-300'
+                      : 'bg-cyan-hud/10 text-cyan-hud'
+                    : 'text-ink-faint hover:text-ink-dim'
+                }`}
+              >
+                {value.toUpperCase()}
+              </button>
+            ))}
+          </div>
           <span className="hidden text-[10px] text-ink-faint sm:inline">
             {systemStatus?.phase}
           </span>
@@ -122,7 +149,7 @@ export function CommandCenter() {
           </div>
 
           <div className="flex min-h-0 flex-col gap-3">
-            <SimulationControls />
+            {stageMode === 'replay' ? <ReplayPanel /> : <SimulationControls />}
             <div className="min-h-0 flex-1">
               {view === '3d' ? (
                 <Suspense fallback={<ViewerLoading />}>
@@ -135,14 +162,22 @@ export function CommandCenter() {
           </div>
 
           <div className="flex min-h-0 flex-col gap-3">
-            <IntelPanel />
-            {/* The decision feed carries more per entry, so it gets the larger share. */}
-            <div className="min-h-0 flex-[3]">
-              <DecisionFeed />
-            </div>
-            <div className="min-h-0 flex-[2]">
-              <EventFeed />
-            </div>
+            {stageMode === 'replay' ? (
+              <div className="min-h-0 flex-1">
+                <ScoreboardPanel />
+              </div>
+            ) : (
+              <>
+                <IntelPanel />
+                {/* The decision feed carries more per entry, so it gets the larger share. */}
+                <div className="min-h-0 flex-[3]">
+                  <DecisionFeed />
+                </div>
+                <div className="min-h-0 flex-[2]">
+                  <EventFeed />
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -152,7 +187,7 @@ export function CommandCenter() {
         <main className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
           {tab === 'view' && (
             <>
-              <SimulationControls />
+              {stageMode === 'replay' ? <ReplayPanel /> : <SimulationControls />}
               <div className="h-[55vh]">
                 {view === '3d' ? (
                   <Suspense fallback={<ViewerLoading />}>
@@ -179,12 +214,18 @@ export function CommandCenter() {
               <EventFeed />
             </>
           )}
+          {tab === 'replay' && (
+            <>
+              <ReplayPanel />
+              <ScoreboardPanel />
+            </>
+          )}
           {tab === 'intel' && <IntelPanel />}
         </main>
       )}
 
       {!isDesktop && (
-        <nav className="grid shrink-0 grid-cols-4 border-t border-edge bg-deck">
+        <nav className="grid shrink-0 grid-cols-5 border-t border-edge bg-deck">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}

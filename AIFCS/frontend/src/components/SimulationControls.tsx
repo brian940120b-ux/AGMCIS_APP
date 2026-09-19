@@ -1,4 +1,4 @@
-import { Pause, Play, RotateCcw, SkipForward } from 'lucide-react'
+import { Pause, Play, RotateCcw, SkipForward, Square } from 'lucide-react'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useSystemStore } from '@/stores/systemStore'
 
@@ -19,6 +19,7 @@ export function SimulationControls() {
   const start = useSimulationStore((s) => s.start)
   const pause = useSimulationStore((s) => s.pause)
   const resume = useSimulationStore((s) => s.resume)
+  const stop = useSimulationStore((s) => s.stop)
   const reset = useSimulationStore((s) => s.reset)
   const step = useSimulationStore((s) => s.step)
   const setSpeed = useSimulationStore((s) => s.setSpeed)
@@ -76,6 +77,19 @@ export function SimulationControls() {
             <Play className="size-3.5" /> START
           </button>
         )}
+
+        {/* STOP ends the run: the engine halts and the recording is closed and
+            scored. RESET also rebuilds the world, which STOP deliberately does
+            not — after STOP the final state is still there to look at. */}
+        <button
+          type="button"
+          onClick={() => void stop()}
+          disabled={busy || (!running && !paused)}
+          title="End the run and close its recording"
+          className={buttonClass}
+        >
+          <Square className="size-3.5" /> STOP
+        </button>
 
         <button
           type="button"

@@ -51,6 +51,7 @@ interface SimulationState {
   start: () => Promise<void>
   pause: () => Promise<void>
   resume: () => Promise<void>
+  stop: () => Promise<void>
   reset: () => Promise<void>
   step: (ticks: number) => Promise<void>
   setSpeed: (speed: number) => Promise<void>
@@ -198,6 +199,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
 
     start: () => command(() => api.start(get().selectedScenario ?? undefined)),
     pause: () => command(() => api.pause()),
+    stop: () => command(() => api.stop()),
     resume: () => command(() => api.resume()),
     reset: async () => {
       set({ trails: {} })

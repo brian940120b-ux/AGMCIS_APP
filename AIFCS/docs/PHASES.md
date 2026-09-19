@@ -269,14 +269,87 @@ a real size; every camera mode renders without adding a context; 2D releases the
 context and 3D takes it back; and telemetry keeps flowing while the scene
 renders. Covered by `npm run test:e2e:3d`.
 
-## PHASE 9 — Replay, scoring, database — **Next**
+## PHASE 9 — Replay, scoring, database — **Complete**
 
-Replay recorder and player (play, pause, step, jump, fast-forward, slow motion,
-camera follow, event jump). Independent scoring engine — scores never live inside
-the simulation engine. SQLite schema for scenarios, runs, entities, decisions,
-telemetry, events, replays, training runs, models and metrics.
+Every run is now recorded, stored and scored. The layer is strictly downstream
+of the truth state: the recorder observes, the scoring engine reads a finished
+file, and the database only stores. Nothing here can write to the world.
 
-## PHASE 10 — Scenario editor
+**Recording.** JSON Lines, gzipped, at 20 Hz rather than the 60 Hz physics tick.
+A `header` carries everything needed to reproduce the run, then a frame per
+sample, then an `end` record with the final state hash. JSON Lines because a
+crashed run still leaves a readable file, and because the player can stream
+frames instead of holding a whole run in memory. gzip is detected by magic
+bytes, so a recording renamed by hand still opens.
+
+**The engine gained one hook**, and only one: a list of read-only tick
+observers, called after the state settles. An observer that raises is logged
+and detached rather than being allowed to stop the simulation. The engine still
+knows nothing about replay.
+
+**Playback** is a server-side cursor, for the same reason the simulation is:
+there is then one answer to "where are we", whichever view asks. Play, pause,
+frame step, seek by frame/tick/time, speed, and jump to the next or previous
+notable event.
+
+**Scoring lives outside the engine.** Six weighted terms
+(survival, navigation, formation, safety, efficiency, information), each a
+fraction in 0..1 against a threshold from YAML, each reporting the measurement
+behind it. A term that cannot apply to a unit is redistributed across the ones
+that can, and shown as inapplicable rather than hidden inside a total — a
+leader has no leader, and a wingman is never given waypoints.
+
+There is deliberately no weapon, engagement or targeting term. AIFCS models
+none, and scoring one would imply a capability the platform must not acquire.
+`test_scoring_has_no_weapon_or_targeting_term` asserts it.
+
+**Storage** is SQLite through the standard library: no new dependency, one file,
+eleven tables, `ON DELETE CASCADE` throughout, WAL so listing past runs does not
+block the run being written.
+
+### What running it changed
+
+Four things were wrong and were only found by running the reference scenario and
+reading the numbers. Each is now pinned by a test.
+
+*Envelope clamps counted as safety failures.* `ACTION_REJECTED` carries two
+different meanings — a command the controller refused, and a demand the envelope
+protection eased back. The second is the safety layer working, and it fires on
+every control tick an aggressive manoeuvre lasts. A clean waypoint turn at
+t≈179 s produced 45 events in 1.5 seconds and scored the leaders zero on safety.
+The term now measures rejections and interventions separately, and interventions
+as a fraction of the run rather than as a count.
+
+*Formation was averaged over the whole run.* A wingman spawns 1.7 km from
+station and needs about 90 seconds to close. Measured across the run the mean
+station error is 382 m and the score is zero; measured over the settled tail it
+is 82 m with 100% of samples in station. Only the tail is scored, and the term
+says so.
+
+*Route progress was unreachable.* Crediting four waypoints in a scenario whose
+first leg is 40 km — three minutes at cruise — meant no run could earn the term.
+Progress is now judged against what the run had time for, and skipped entirely
+when the run was too short for even one waypoint.
+
+*A wingman was scored on route progress it was never given.* Wingmen hold
+station; they have no waypoints. The term is now marked inapplicable for them.
+
+### A test that had been failing since PHASE 8
+
+Running the full e2e set for the first time since PHASE 8 showed `smoke.mjs` and
+`simulation.mjs` both failing: making the 3D view the default stage removed
+"Tactical Plot" from the initial screen, and neither test was updated. PHASE 8
+was shipped having run only `test:e2e:3d`. Both now assert the 3D view is the
+default and that the 2D plot is still reachable.
+
+**Verified:** a recorded run and an unrecorded one produce identical state
+hashes, and each recorded frame's hash matches what the engine held at that
+tick. 5x playback advances at 5x. A run killed mid-write still loads. A path
+outside the replay directory is refused. Deleting a run removes its rows and its
+file. 362 backend tests, plus `npm run test:e2e:replay`, which records a run
+through the UI and then plays, scrubs and scores it.
+
+## PHASE 10 — Scenario editor — **Next**
 
 Create / save / load / clone / delete / import / export scenarios from the UI.
 

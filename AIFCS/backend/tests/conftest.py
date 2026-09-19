@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -9,12 +11,43 @@ import pytest
 from fastapi.testclient import TestClient
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_CONFIGS = BACKEND_ROOT.parent / "configs"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from core.config import load_settings, reset_settings_cache
 from core.runtime import reset_runtime
 from main import create_app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_data(tmp_path_factory):
+    """Point recordings and the database at a temporary directory.
+
+    PHASE 9 writes files. Without this, running the suite would drop replay
+    files and rows into the project's own ``data/`` directory, and a test would
+    see runs left behind by the last one.
+
+    The real ``configs/`` are copied and only the two paths are rewritten, so
+    tests still exercise the shipped configuration rather than a stub.
+    """
+    root = tmp_path_factory.mktemp("aifcs-data")
+    config_dir = root / "configs"
+    shutil.copytree(PROJECT_CONFIGS, config_dir)
+
+    analysis = config_dir / "analysis.yaml"
+    text = analysis.read_text(encoding="utf-8")
+    text = text.replace("directory: data/replay", f"directory: {root / 'replay'}")
+    text = text.replace("database_path: data/aifcs.db", f"database_path: {root / 'aifcs.db'}")
+    analysis.write_text(text, encoding="utf-8")
+
+    previous = os.environ.get("AIFCS_CONFIG_DIR")
+    os.environ["AIFCS_CONFIG_DIR"] = str(config_dir)
+    yield root
+    if previous is None:
+        os.environ.pop("AIFCS_CONFIG_DIR", None)
+    else:
+        os.environ["AIFCS_CONFIG_DIR"] = previous
 
 
 @pytest.fixture(autouse=True)

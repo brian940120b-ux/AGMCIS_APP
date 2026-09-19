@@ -1,15 +1,21 @@
 import { Panel } from '@/components/Panel'
-import { useSimulationStore } from '@/stores/simulationStore'
+import { useStage } from '@/hooks/useStage'
 
 /** Radians to a signed whole-degree string. */
 const deg = (radians: number) => `${(radians * (180 / Math.PI)).toFixed(0)}°`
 
 /** Live entity readout, straight from GET /api/entities. */
 export function EntityList() {
-  const entities = useSimulationStore((s) => s.entities)
+  // Follows whatever is on stage. In replay mode this tracks the playback
+  // cursor; showing the live world beside a replay would be two different
+  // moments presented as one.
+  const { entities, mode } = useStage()
 
   return (
-    <Panel title="Entities" subtitle={`${entities.length} fictional units`}>
+    <Panel
+      title="Entities"
+      subtitle={`${entities.length} fictional units${mode === 'replay' ? ' · replay' : ''}`}
+    >
       {entities.length === 0 ? (
         <p className="px-3 py-4 text-[11px] text-ink-faint">No entities loaded.</p>
       ) : (

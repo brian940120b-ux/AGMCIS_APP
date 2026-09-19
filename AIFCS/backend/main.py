@@ -16,11 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.agents import router as agents_router
 from api.health import router as health_router
+from api.replay import router as replay_router
 from api.simulation import router as simulation_router
 from api.telemetry import router as telemetry_router
 from core.config import APP_TITLE, Settings, get_settings
 from core.logging_config import configure_logging, get_logger
-from core.runtime import get_broadcaster, get_engine, get_status_registry
+from core.runtime import get_broadcaster, get_engine, get_run_manager, get_status_registry
 from core.system_status import SubsystemState
 
 
@@ -60,6 +61,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "Pushing telemetry on /ws/simulation",
     )
 
+    # PHASE 9. Each reports what its configuration actually enables, rather
+    # than claiming to be online because the code exists.
+    registry.set_state(
+        "replay",
+        SubsystemState.ONLINE if settings.replay.enabled else SubsystemState.OFFLINE,
+        (
+            f"Recording at {settings.replay.record_rate_hz:g} Hz to {settings.replay.directory}"
+            if settings.replay.enabled
+            else "Recording disabled in configs/analysis.yaml"
+        ),
+    )
+    registry.set_state(
+        "storage",
+        SubsystemState.ONLINE if settings.storage.enabled else SubsystemState.OFFLINE,
+        (
+            f"SQLite run history at {settings.storage.database_path}"
+            if settings.storage.enabled
+            else "Run storage disabled in configs/analysis.yaml"
+        ),
+    )
+    registry.set_state(
+        "scoring",
+        SubsystemState.ONLINE if settings.scoring.enabled else SubsystemState.OFFLINE,
+        (
+            f"Six weighted terms, {settings.scoring.weights.total():g} points available"
+            if settings.scoring.enabled
+            else "Scoring disabled in configs/analysis.yaml"
+        ),
+    )
+
+    # Opening the database here means a broken path fails at startup with a
+    # clear message, rather than on the first run hours later.
+    get_run_manager()
+
     # Telemetry pushes at its own rate, independent of the physics tick.
     get_broadcaster().start()
 
@@ -78,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Stop the telemetry and simulation loops cleanly so no task outlives us.
     await get_broadcaster().stop()
     await get_engine().stop()
+    get_run_manager().finish_sync("backend shutting down")
     get_logger("shutdown").info("AIFCS backend offline", extra={"event": "APP_STOPPED"})
 
 
@@ -108,6 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(simulation_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
+    app.include_router(replay_router, prefix="/api")
     app.include_router(telemetry_router)
 
     @app.get("/", tags=["meta"])

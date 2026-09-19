@@ -1,4 +1,4 @@
-import { useSimulationStore } from '@/stores/simulationStore'
+import { useStage } from '@/hooks/useStage'
 import { useSystemStore } from '@/stores/systemStore'
 import type { Entity } from '@/types/api'
 
@@ -19,8 +19,8 @@ const TEAM_COLOR: Record<Entity['team'], string> = {
 const VIEW = 1000 // SVG user-space extent; world metres are mapped into this.
 
 export function TacticalPlot({ onSwitchTo3D }: { onSwitchTo3D?: () => void } = {}) {
-  const entities = useSimulationStore((s) => s.entities)
-  const status = useSimulationStore((s) => s.status)
+  // Live telemetry or a recording being played back — never a blend of both.
+  const { entities, scenario, mode, simulationTime } = useStage()
   const bounds = useSystemStore((s) => s.config?.world.bounds)
 
   /*
@@ -96,15 +96,18 @@ export function TacticalPlot({ onSwitchTo3D }: { onSwitchTo3D?: () => void } = {
     <div className="hud-panel relative flex h-full min-h-[320px] flex-col overflow-hidden">
       <header className="flex shrink-0 items-center justify-between border-b border-edge px-3 py-2">
         <div>
-          <h2 className="hud-label text-ink-dim">Tactical Plot</h2>
+          <h2 className="hud-label text-ink-dim">
+            Tactical Plot
+            {mode === 'replay' && <span className="ml-2 text-amber-300">REPLAY</span>}
+          </h2>
           <p className="text-[10px] text-ink-faint">
             Top-down X/Y · thin line = nose, thick = velocity
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-ink-faint">
-            {status?.scenario ?? 'no scenario'} · {entities.length} units ·{' '}
-            {(spanMetres / 1000).toFixed(0)} km across
+            {scenario ?? 'no scenario'} · {entities.length} units ·{' '}
+            {(spanMetres / 1000).toFixed(0)} km across · t+{simulationTime.toFixed(0)}s
           </span>
           {onSwitchTo3D && (
             <button

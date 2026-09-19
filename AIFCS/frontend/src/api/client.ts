@@ -12,9 +12,18 @@ import type {
   ControllerStatus,
   AgentDecision,
   AgentsResponse,
+  CurrentRun,
   Entity,
   HealthResponse,
+  RecordingSummary,
+  ReplayEventMarker,
+  ReplayFrame,
+  ReplayStatus,
+  RunDetail,
+  RunScore,
+  RunSummary,
   ScenariosResponse,
+  ScoringWeights,
   SensorStatus,
   SimEvent,
   SimulationStatus,
@@ -82,4 +91,37 @@ export const api = {
   communications: () => request<CommunicationsStatus>('/api/communications'),
   decisions: (limit = 40) =>
     request<{ count: number; decisions: AgentDecision[] }>(`/api/decisions?limit=${limit}`),
+
+  // Replay, run history and scoring (PHASE 9). Every transport call moves the
+  // real server-side cursor; nothing here is simulated in the browser.
+  recordings: () =>
+    request<{ directory: string; count: number; recordings: RecordingSummary[]; enabled: boolean }>(
+      '/api/replay/recordings',
+    ),
+  replayLoad: (runId: string) => post<ReplayStatus>('/api/replay/load', { run_id: runId }),
+  replayUnload: () => post<ReplayStatus>('/api/replay/unload'),
+  replayStatus: () => request<ReplayStatus>('/api/replay/status'),
+  replayFrame: () =>
+    request<{ status: ReplayStatus; frame: ReplayFrame | null }>('/api/replay/frame'),
+  replayPlay: () => post<ReplayStatus>('/api/replay/play'),
+  replayPause: () => post<ReplayStatus>('/api/replay/pause'),
+  replayStep: (frames: number) => post<ReplayStatus>('/api/replay/step', { frames }),
+  replaySeek: (frame: number) => post<ReplayStatus>('/api/replay/seek', { frame }),
+  replaySpeed: (speed: number) => post<ReplayStatus>('/api/replay/speed', { speed }),
+  replayJump: (direction: number) =>
+    post<ReplayStatus & { jumped_to: ReplayEventMarker | null }>('/api/replay/jump', { direction }),
+  replayEvents: () =>
+    request<{ count: number; events: ReplayEventMarker[] }>('/api/replay/events'),
+
+  runs: (limit = 50) =>
+    request<{ count: number; runs: RunSummary[]; current: CurrentRun }>(`/api/runs?limit=${limit}`),
+  currentRun: () => request<CurrentRun>('/api/runs/current'),
+  run: (runId: string) => request<RunDetail>(`/api/runs/${encodeURIComponent(runId)}`),
+  scoreRun: (runId: string) => post<RunScore>(`/api/runs/${encodeURIComponent(runId)}/score`),
+  deleteRun: (runId: string) =>
+    request<{ run_id: string; rows_deleted: boolean; recording_deleted: boolean }>(
+      `/api/runs/${encodeURIComponent(runId)}`,
+      { method: 'DELETE' },
+    ),
+  scoringWeights: () => request<ScoringWeights>('/api/scoring/weights'),
 }

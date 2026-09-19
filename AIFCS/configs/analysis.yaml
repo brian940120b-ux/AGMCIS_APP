@@ -1,0 +1,81 @@
+# AIFCS — Recording, scoring and storage configuration (PHASE 9).
+#
+# Everything here is analysis of a finished or running simulation. Nothing in
+# this file can influence the truth state: the recorder observes, the scoring
+# engine reads, and the database stores.
+
+replay:
+  enabled: true
+  directory: data/replay
+  # Frames are written at this rate, not at the 60 Hz physics tick. Playback is
+  # for watching and analysing, and 20 Hz is already smoother than the eye
+  # needs; recording every tick would triple the file for nothing.
+  record_rate_hz: 20
+  # gzip the recording. Costs a little CPU, saves roughly 10x on disk.
+  compress: true
+  # Oldest recordings are pruned beyond this count, so a long afternoon of runs
+  # cannot quietly fill the disk. 0 disables pruning.
+  max_recordings_kept: 50
+  # Refuse to start a recording that would exceed this, as a safety valve
+  # against an unattended run filling the disk.
+  max_file_mb: 200.0
+
+scoring:
+  enabled: true
+  # Score terms are flight- and mission-quality measures for research and
+  # teaching. There is deliberately no weapon, engagement or targeting term:
+  # AIFCS does not model any, and scoring one would be inventing capability
+  # the platform does not and must not have.
+  weights:
+    survival: 30.0          # finished the run active and inside the envelope
+    navigation: 25.0        # waypoint progress against the scenario route
+    formation: 15.0         # station keeping, for units that have a leader
+    safety: 15.0            # envelope protection and rejected commands
+    efficiency: 10.0        # smooth control use rather than thrashing
+    information: 5.0        # quality of the picture the unit actually held
+  # A unit that never had a leader cannot be scored on formation. Rather than
+  # award or deny it silently, its weight is redistributed across the terms
+  # that do apply, and the breakdown says the term was not applicable.
+  redistribute_inapplicable: true
+
+  # Every threshold a score term uses. A term is a measured quantity divided by
+  # the value here at which it scores zero, so changing the standard a run is
+  # judged against never means editing code.
+  thresholds:
+    # Navigation: heading and altitude error at which tracking scores zero.
+    heading_tolerance_deg: 45.0
+    altitude_tolerance_m: 300.0
+    # Route progress is judged against what the run had time for: one waypoint
+    # is expected per this many seconds. A run too short to reach even one
+    # cannot be judged on progress, and the term says so instead of scoring 0.
+    # Tune per scenario — demo_alpha's legs are ~180 s at cruise.
+    seconds_per_expected_waypoint: 150.0
+    # Formation: station error at which a unit counts as out of station.
+    formation_tolerance_m: 300.0
+    # A wingman spawned away from its station has to fly there first, and that
+    # join-up is not bad station keeping. Only the last of the run is
+    # scored — 0.5 means the second half.
+    formation_settle_fraction: 0.5
+    # Safety splits into three measurements, because they mean different things.
+    # A rejected command is a real failure; envelope protection easing a demand
+    # back is the safety layer doing its job, and fires every tick a manoeuvre
+    # is aggressive, so it is measured as a fraction of the run rather than
+    # counted; leaving the world is its own category.
+    rejected_commands_for_zero: 5
+    envelope_intervention_fraction_for_zero: 0.2
+    boundary_events_for_zero: 3
+    # Efficiency: mean control movement per second at which smoothness scores
+    # zero. Normalised surfaces run -1..1, so 2.0 is a full-travel reversal
+    # every second, sustained.
+    control_rate_for_zero: 2.0
+    # Information: track age at which the picture counts as stale.
+    track_age_tolerance_s: 3.0
+
+storage:
+  enabled: true
+  # SQLite via the standard library. One file, no server, and it travels with
+  # the project directory.
+  database_path: data/aifcs.db
+  # Decisions are the highest-volume row type by far. This caps how many are
+  # persisted per run; the full stream always remains in the replay file.
+  max_decisions_per_run: 5000

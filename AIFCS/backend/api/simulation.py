@@ -7,6 +7,7 @@ rebuilds it from the scenario. Nothing is a placeholder.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,7 +15,8 @@ from pydantic import BaseModel, Field
 
 from core.config import Settings, get_settings
 from core.event_bus import EventType
-from core.runtime import get_engine
+from core.run_manager import RunManager
+from core.runtime import get_engine, get_run_manager
 from core.simulation_engine import SimulationEngine, SimulationError
 from simulation.scenario import ScenarioError, list_scenarios
 
@@ -48,13 +50,18 @@ def simulation_status(engine: SimulationEngine = Depends(get_engine)) -> dict[st
 async def simulation_start(
     request: StartRequest | None = None,
     engine: SimulationEngine = Depends(get_engine),
+    runs: RunManager = Depends(get_run_manager),
 ) -> dict[str, Any]:
     body = request or StartRequest()
     try:
         await engine.start(scenario=body.scenario, seed=body.seed)
     except (SimulationError, ScenarioError) as exc:
         raise _fail(exc) from exc
-    return engine.status()
+
+    # Recording begins after the engine has accepted the run, so a refused
+    # start never leaves an empty recording behind.
+    runs.start(engine)
+    return {**engine.status(), "run": runs.status()}
 
 
 @router.post("/simulation/pause")
@@ -76,15 +83,27 @@ def simulation_resume(engine: SimulationEngine = Depends(get_engine)) -> dict[st
 
 
 @router.post("/simulation/stop")
-async def simulation_stop(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
+async def simulation_stop(
+    engine: SimulationEngine = Depends(get_engine),
+    runs: RunManager = Depends(get_run_manager),
+) -> dict[str, Any]:
     await engine.stop()
-    return engine.status()
+    # Closing the recording writes a file and scores it, so it goes to a thread
+    # rather than blocking the event loop the dashboard is being served from.
+    summary = await asyncio.to_thread(runs.finish_sync, "stopped by operator")
+    return {**engine.status(), "run": runs.status(), "summary": summary}
 
 
 @router.post("/simulation/reset")
-async def simulation_reset(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
+async def simulation_reset(
+    engine: SimulationEngine = Depends(get_engine),
+    runs: RunManager = Depends(get_run_manager),
+) -> dict[str, Any]:
+    # Close the run before the world is rebuilt: after reset the final state is
+    # the scenario's initial state, which is not how the run actually ended.
+    summary = await asyncio.to_thread(runs.finish_sync, "reset by operator")
     await engine.reset()
-    return engine.status()
+    return {**engine.status(), "run": runs.status(), "summary": summary}
 
 
 @router.post("/simulation/step")

@@ -57,10 +57,21 @@ try {
 
   await page.getByRole('button', { name: /ENTER COMMAND CENTER/i }).click()
   await page.getByText('COMMAND CENTER').first().waitFor()
+
+  // The 3D view is the default stage since PHASE 8; the 2D plot is one click
+  // away. Check both, so neither can quietly disappear.
+  await page.getByText('Tactical View').first().waitFor({ timeout: 20000 })
+  assert(
+    await page.getByText('Tactical View').first().isVisible(),
+    'the 3D tactical view is the default stage',
+  )
+  await page.getByRole('button', { name: '2D', exact: true }).click()
   assert(
     await page.getByText('Tactical Plot').first().isVisible(),
-    'the tactical plot panel is present',
+    'the 2D tactical plot is reachable',
   )
+  await page.getByRole('button', { name: '3D', exact: true }).click()
+  await page.getByText('Tactical View').first().waitFor()
   assert(
     await page.getByText('60 Hz').first().isVisible(),
     'runtime configuration shows the real tick rate',

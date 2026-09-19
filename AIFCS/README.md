@@ -4,12 +4,13 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 8 complete.** The Command Center now has a **3D
-> tactical view** — abstract fictional units flying in a Three.js scene, fed by
-> the live telemetry stream, with orbit / follow / top / side cameras and motion
-> trails. Agents see an estimate rather than the world, teammates share what they
-> see over a simulated datalink, and every command passes a safety layer. Replay,
-> scoring and training are **not implemented yet**; the dashboard reports each as
+> **Current status: PHASE 9 complete.** Every run is now **recorded, stored and
+> scored**. Press STOP and the run is written to a replay file, its decisions and
+> events land in SQLite, and an independent scoring engine grades it on six
+> weighted flight-quality terms — each one reporting the measurement behind it.
+> The Command Center has a REPLAY mode with real transport controls (play, pause,
+> frame step, scrub, speed, jump-to-event) and a run history with per-term score
+> breakdowns. Training is **not implemented yet**; the dashboard reports it as
 > `NOT_IMPLEMENTED` rather than faking it.
 
 ---
@@ -22,6 +23,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Running AIFCS](#running-aifcs)
 - [API](#api)
 - [Configuration](#configuration)
+- [Replay, scoring and run history](#replay-scoring-and-run-history)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -271,9 +273,30 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/communications` | Datalink config, traffic stats, blackout state |
 | `GET` | `/api/telemetry` | Broadcaster rate, connected clients, frames sent |
 | `WS` | `/ws/simulation` | Live telemetry stream (see below) |
+| `GET` | `/api/replay/recordings` | Every recording on disk, newest first |
+| `POST` | `/api/replay/load` | Open a recording for playback |
+| `POST` | `/api/replay/unload` | Close it |
+| `GET` | `/api/replay/status` | Where the playback cursor is |
+| `GET` | `/api/replay/frame` | The frame the cursor is on |
+| `POST` | `/api/replay/play` | Start advancing the cursor |
+| `POST` | `/api/replay/pause` | Hold position |
+| `POST` | `/api/replay/step` | Move by a number of frames, forwards or back |
+| `POST` | `/api/replay/seek` | Seek by frame, tick or simulation time |
+| `POST` | `/api/replay/speed` | Playback multiplier from the allowed list |
+| `POST` | `/api/replay/jump` | Jump to the next or previous notable event |
+| `GET` | `/api/replay/events` | Notable events, for timeline markers |
+| `GET` | `/api/runs` | Run history, newest first, with team scores |
+| `GET` | `/api/runs/current` | What the run in progress is recording |
+| `GET` | `/api/runs/{id}` | One run: entities, replay, scores, metrics |
+| `GET` | `/api/runs/{id}/decisions` | Stored decisions with reason codes |
+| `GET` | `/api/runs/{id}/events` | Stored events |
+| `GET` | `/api/runs/{id}/telemetry` | One-per-second samples, for charting |
+| `POST` | `/api/runs/{id}/score` | Recompute the score from the recording |
+| `DELETE` | `/api/runs/{id}` | Delete a run, its rows and its recording |
+| `GET` | `/api/scoring/weights` | The standard runs are judged against |
 
-Replay, training and the `/ws/simulation` WebSocket arrive in their respective
-phases and are documented as they land.
+Training endpoints arrive in their respective phases and are documented as they
+land.
 
 ### Flight model
 
@@ -496,6 +519,7 @@ Nothing is tuned in code. All parameters live in `configs/`:
 | `simulation.yaml` | Tick rate, speeds, determinism, world bounds, telemetry, logging |
 | `agents.yaml` | Agent type, decision rate, action validation |
 | `scenarios.yaml` | Scenario directory and validation |
+| `analysis.yaml` | Recording, scoring weights and thresholds, database |
 | `training.yaml` | Device, PPO/SAC hyperparameters, reward weights |
 
 Point the backend at a different directory with `AIFCS_CONFIG_DIR=/path/to/configs`.
@@ -510,6 +534,130 @@ The guarantee is enforced by tests: the same seed produces an identical
 `state_hash`, stepping 600 x 1 tick equals 1 x 600 ticks, and running at 0.25x
 produces exactly the same trajectory as 50x. **Speed changes pacing, never the
 timestep** — that is what makes a fast run and a slow run comparable.
+
+---
+
+## Replay, scoring and run history
+
+Every run is recorded, stored and scored. Nothing in this layer can reach the
+truth state: the recorder observes, the scoring engine reads a finished file,
+and the database only stores. The determinism test asserts it directly — a
+recorded run and an unrecorded one produce the same `state_hash`.
+
+### What happens when you press STOP
+
+```
+run  ──►  data/replay/<run-id>.jsonl.gz     every frame, event and decision
+     ──►  data/aifcs.db                     queryable history
+     ──►  score                             six weighted terms, per unit
+```
+
+The run id is the UTC timestamp plus four random characters
+(`20260919-034203-6a94`), so recordings sort chronologically by name.
+
+### The recording format
+
+JSON Lines, gzipped. One object per line: a `header` carrying everything needed
+to reproduce the run (scenario, seed, config hash, tick rate), then a `frame`
+per sample, then an `end` record with the final state hash.
+
+JSON Lines rather than one big document for two reasons: a run that crashes
+still leaves a readable file up to the last flush, and the player can stream
+frames without holding the whole run in memory. A recording renamed by hand
+still opens — gzip is detected by content, not by extension.
+
+Frames are written at `record_rate_hz` (20 Hz), not at the 60 Hz physics tick.
+Playback is for watching and analysing, and recording every tick would triple
+the file for nothing.
+
+### Replay transport
+
+Switch the Command Center header to **REPLAY** and pick a recording. The cursor
+lives on the server, so the 3D view, the 2D plot and the entity list always
+agree about which moment is on screen.
+
+| Control | What it does |
+|---|---|
+| Play / Pause | Advances the real cursor at the recorded rate |
+| Frame step | One recorded frame forward or back |
+| Scrubber | Seeks to that frame; reports where the player actually is |
+| Speed | 0.25x to 10x, from the allowed list |
+| Event jump | Next / previous notable event, skipping the quiet stretches |
+
+Seeking clears the motion trails: the frames they were built from are no longer
+the ones leading up to the cursor, and a stale trail would draw something that
+did not happen.
+
+### Scoring
+
+Scores live **outside** the simulation engine. Nothing here can be reached from
+a tick, so a score can be recomputed with different weights without any risk of
+changing how an aircraft flies. `POST /api/runs/<id>/score` rebuilds a score
+from the recording under the current weights.
+
+Six terms, each a fraction in 0..1 times a weight from
+`configs/analysis.yaml`:
+
+| Term | Points | What it measures |
+|---|---|---|
+| survival | 30 | Active through the run, and still active at the end |
+| navigation | 25 | Course and altitude tracking, plus route progress |
+| formation | 15 | Time held in station on its leader |
+| safety | 15 | Commands rejected, envelope interventions, boundary events |
+| efficiency | 10 | Control smoothness rather than thrashing |
+| information | 5 | Confidence and freshness of the picture it actually held |
+
+**There is no weapon, engagement or targeting term.** AIFCS models none, and
+scoring one would imply a capability the platform does not have and must not
+acquire.
+
+Every term reports the measurement behind it, so a score can always be
+explained:
+
+```json
+{ "name": "formation", "fraction": 0.568, "weight": 15.0, "points": 8.52,
+  "detail": { "in_station_fraction": 0.6247, "median_station_error_m": 169.55,
+              "formation_tolerance_m": 300.0, "samples_scored": 1500 } }
+```
+
+**A term that does not apply is redistributed, not forfeited.** A leader has no
+leader of its own, so formation cannot apply to it; its 15 points are spread
+across the terms that do apply, and the breakdown shows the term marked
+inapplicable rather than hiding the adjustment inside a total. The same holds
+for route progress on a wingman, which is never given waypoints.
+
+Two scores are only comparable when `weights_hash` matches. Change a weight or
+a threshold and every earlier score was measured against a different ruler,
+which is why the hash is stored with the score and shown in the UI.
+
+#### Two things this got wrong first, and how
+
+Both were found by running the reference scenario and reading the numbers,
+which is why the thresholds are shaped the way they are:
+
+- **Envelope clamps were counted as safety failures.** `ACTION_REJECTED` covers
+  both a command the controller refused and a demand the protection eased back.
+  The second is the safety layer working, and it fires *every control tick* an
+  aggressive manoeuvre lasts — so a clean 1.5-second waypoint turn produced 45
+  "violations" and scored zero. They are now separate measurements, and
+  interventions are scored as a fraction of the run rather than counted.
+- **Formation was scored over the whole run.** A wingman spawns 1.7 km from
+  station and takes about 90 seconds to close. Averaging that in measured the
+  join-up, not the station keeping. Only the settled tail of the run is scored.
+
+### The database
+
+SQLite through the standard library — one file, no server, and it travels with
+the project directory. `data/aifcs.db`, schema version 1:
+
+`scenarios`, `runs`, `run_entities`, `events`, `decisions`,
+`telemetry_samples`, `replays`, `scores`, `metrics`, and `training_runs` /
+`models` declared now so the schema is stable from PHASE 9 on.
+
+Deleting a run cascades to everything hanging off it. Decisions are capped per
+run (`max_decisions_per_run`) because they are by far the highest-volume row
+type; the replay file always holds the complete stream, which is what makes
+capping acceptable at all.
 
 ---
 
@@ -539,6 +687,7 @@ npx playwright install chromium   # first time only
 npm run test:e2e        # dashboard shell, status panel, error handling
 npm run test:e2e:sim    # start / pause / step / reset drive the real engine
 npm run test:e2e:3d     # 3D view renders, every camera mode works
+npm run test:e2e:replay # record a run, then load, play, scrub and score it
 ```
 
 On a headless machine without a GPU, run the 3D suite with a software renderer:
@@ -630,7 +779,7 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 6 | Communication model: datalink, latency, loss, blackout | **Complete** |
 | 7 | WebSocket telemetry | **Complete** |
 | 8 | 3D Command Center (Three.js) | **Complete** |
-| 9 | Replay, scoring, database | Next |
+| 9 | Replay, scoring, database | **Complete** |
 | 10 | Scenario editor | Planned |
 | 11–13 | Gymnasium environment, PPO, SAC | Planned |
 | 14–15 | Multi-agent, commander agent | Planned |

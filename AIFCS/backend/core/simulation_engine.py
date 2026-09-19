@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,11 @@ class SimulationEngine:
         self.world = WorldState()
         self.seed: int = self.settings.simulation.seed
         self.rng: np.random.Generator = np.random.default_rng(self.seed)
+
+        # Things that want to look at the world after each tick — the replay
+        # recorder, today. They only ever read: an observer that raises is
+        # logged and dropped rather than being allowed to stop the simulation.
+        self.tick_observers: list[Callable[[], None]] = []
 
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -249,6 +255,21 @@ class SimulationEngine:
             simulation_time=simulation_time,
             tick=self.clock.tick_count,
         )
+
+        self._notify_observers()
+
+    def _notify_observers(self) -> None:
+        """Let read-only observers see the settled state of this tick."""
+        for observer in list(self.tick_observers):
+            try:
+                observer()
+            except Exception:
+                log.exception(
+                    "tick observer failed; detaching it",
+                    extra={"event": "TICK_OBSERVER_ERROR"},
+                )
+                with contextlib.suppress(ValueError):
+                    self.tick_observers.remove(observer)
 
     def _track_blackout(self) -> None:
         """Publish an event when the datalink drops or comes back."""

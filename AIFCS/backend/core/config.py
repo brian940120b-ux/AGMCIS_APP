@@ -225,6 +225,132 @@ class ScenarioSettings(BaseModel):
     strict_validation: bool = True
 
 
+class ReplaySettings(BaseModel):
+    """Recording of a run for later playback and analysis (PHASE 9)."""
+
+    enabled: bool = True
+    directory: str = "data/replay"
+    record_rate_hz: float = 20.0
+    compress: bool = True
+    max_recordings_kept: int = 50
+    max_file_mb: float = 200.0
+
+    @field_validator("record_rate_hz")
+    @classmethod
+    def _positive_rate(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("record_rate_hz must be positive")
+        return v
+
+    @field_validator("max_recordings_kept")
+    @classmethod
+    def _not_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("max_recordings_kept must be 0 (no pruning) or more")
+        return v
+
+    @field_validator("max_file_mb")
+    @classmethod
+    def _positive_size(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("max_file_mb must be positive")
+        return v
+
+
+class ScoreWeights(BaseModel):
+    """Weights for the scoring terms.
+
+    Flight- and mission-quality only. There is no weapon, engagement or
+    targeting term because AIFCS models none, and scoring one would imply a
+    capability the platform does not have.
+    """
+
+    survival: float = 30.0
+    navigation: float = 25.0
+    formation: float = 15.0
+    safety: float = 15.0
+    efficiency: float = 10.0
+    information: float = 5.0
+
+    @field_validator("*")
+    @classmethod
+    def _not_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("score weights must not be negative")
+        return v
+
+    def total(self) -> float:
+        return (
+            self.survival
+            + self.navigation
+            + self.formation
+            + self.safety
+            + self.efficiency
+            + self.information
+        )
+
+
+class ScoreThresholds(BaseModel):
+    """The measured value at which each term scores zero.
+
+    Terms are scored as ``1 - measured / threshold``, clamped to 0..1, so every
+    standard a run is judged against lives in YAML rather than in the code.
+    """
+
+    heading_tolerance_deg: float = 45.0
+    altitude_tolerance_m: float = 300.0
+    seconds_per_expected_waypoint: float = 150.0
+    formation_tolerance_m: float = 300.0
+    formation_settle_fraction: float = 0.5
+    rejected_commands_for_zero: int = 5
+    envelope_intervention_fraction_for_zero: float = 0.2
+    boundary_events_for_zero: int = 3
+    control_rate_for_zero: float = 2.0
+    track_age_tolerance_s: float = 3.0
+
+    @field_validator("*")
+    @classmethod
+    def _must_be_positive(cls, v: float) -> float:
+        # Each threshold is a divisor; zero would make the term undefined.
+        if v <= 0:
+            raise ValueError("scoring thresholds must be greater than zero")
+        return v
+
+    @field_validator("formation_settle_fraction")
+    @classmethod
+    def _is_a_fraction(cls, v: float) -> float:
+        if v > 1.0:
+            raise ValueError("formation_settle_fraction is a fraction of the run, so at most 1.0")
+        return v
+
+
+class ScoringSettings(BaseModel):
+    enabled: bool = True
+    weights: ScoreWeights = Field(default_factory=ScoreWeights)
+    redistribute_inapplicable: bool = True
+    thresholds: ScoreThresholds = Field(default_factory=ScoreThresholds)
+
+    @field_validator("weights")
+    @classmethod
+    def _weights_sum_to_something(cls, v: ScoreWeights) -> ScoreWeights:
+        if v.total() <= 0:
+            raise ValueError("at least one scoring weight must be greater than zero")
+        return v
+
+
+class StorageSettings(BaseModel):
+    enabled: bool = True
+    database_path: str = "data/aifcs.db"
+    max_decisions_per_run: int = 5000
+
+    @field_validator("max_decisions_per_run")
+    @classmethod
+    def _not_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("max_decisions_per_run must be 0 (store none) or more")
+        return v
+
+
 class RewardWeights(BaseModel):
     """Reward terms are weights, never hard-coded constants inside the engine."""
 
@@ -271,6 +397,9 @@ class Settings(BaseModel):
     safety: SafetySettings = Field(default_factory=SafetySettings)
     scenarios: ScenarioSettings = Field(default_factory=ScenarioSettings)
     training: TrainingSettings = Field(default_factory=TrainingSettings)
+    replay: ReplaySettings = Field(default_factory=ReplaySettings)
+    scoring: ScoringSettings = Field(default_factory=ScoringSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
 
     @property
     def config_hash(self) -> str:
@@ -310,6 +439,7 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
     agents_doc = _read_yaml(config_path / "agents.yaml")
     scenarios_doc = _read_yaml(config_path / "scenarios.yaml")
     training_doc = _read_yaml(config_path / "training.yaml")
+    analysis_doc = _read_yaml(config_path / "analysis.yaml")
 
     training_section = dict(training_doc.get("training", {}))
     reward_section = training_doc.get("reward", {})
@@ -331,6 +461,9 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
         safety=SafetySettings(**agents_doc.get("safety", {})),
         scenarios=ScenarioSettings(**scenarios_doc.get("scenarios", {})),
         training=TrainingSettings(**training_section),
+        replay=ReplaySettings(**analysis_doc.get("replay", {})),
+        scoring=ScoringSettings(**analysis_doc.get("scoring", {})),
+        storage=StorageSettings(**analysis_doc.get("storage", {})),
     )
 
 

@@ -52,7 +52,8 @@ try {
     { timeout: 20000 },
   )
   await page.getByRole('button', { name: /ENTER COMMAND CENTER/i }).click()
-  await page.getByText('Tactical Plot').first().waitFor()
+  // The 3D view is the default stage since PHASE 8.
+  await page.getByText('Tactical View').first().waitFor({ timeout: 20000 })
 
   // --- START: simulation time must advance ---
   await page.getByRole('button', { name: /^START$/ }).click()
@@ -210,7 +211,11 @@ try {
     { timeout: 20000 },
   )
   await mobile.getByRole('button', { name: /ENTER COMMAND CENTER/i }).click()
-  await mobile.locator('main').getByText('Tactical Plot').first().waitFor({ state: 'visible' })
+  await mobile
+    .locator('main')
+    .getByText('Tactical View')
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 })
   await mobile.getByRole('button', { name: /UNITS/i }).click()
   await mobile.locator('main').getByText('Entities').first().waitFor({ state: 'visible' })
   console.log('MOBILE -> view and units tabs render')

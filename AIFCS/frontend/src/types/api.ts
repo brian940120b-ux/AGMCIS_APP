@@ -284,3 +284,186 @@ export interface TelemetryFrame {
 }
 
 export type TransportState = 'connecting' | 'live' | 'polling' | 'offline'
+
+/* ---------------------------------------------------------------- PHASE 9 */
+
+/** One recording on disk, as the listing reports it (header only). */
+export interface RecordingSummary {
+  run_id: string
+  path: string
+  filename: string
+  size_bytes: number
+  modified_at: number
+  readable: boolean
+  error?: string
+  scenario?: string | null
+  seed?: number | null
+  config_hash?: string | null
+  record_rate_hz?: number | null
+  started_at?: number | null
+}
+
+export interface RecordingDetail {
+  run_id: string
+  path: string
+  scenario: string
+  seed: number
+  config_hash: string | null
+  tick_rate_hz: number
+  record_rate_hz: number
+  frames: number
+  duration_s: number
+  entities: string[]
+  complete: boolean
+  truncated: boolean
+  end_reason: string | null
+  final_state_hash: string | null
+  size_bytes: number
+}
+
+/** Where the playback cursor is. `loaded: false` means nothing is open. */
+export interface ReplayStatus {
+  loaded: boolean
+  playing: boolean
+  speed?: number
+  allowed_speeds?: number[]
+  frame_index?: number
+  frame_count?: number
+  progress?: number
+  tick?: number
+  simulation_time?: number
+  duration_s?: number
+  state_hash?: string | null
+  at_end?: boolean
+  recording?: RecordingDetail
+  event_count?: number
+}
+
+/** A recorded frame: the world at one sampled tick. */
+export interface ReplayFrame {
+  kind: string
+  tick: number
+  simulation_time: number
+  state_hash: string
+  entities: Entity[]
+  events: SimEvent[]
+  decisions: AgentDecision[]
+}
+
+export interface ReplayEventMarker {
+  frame: number
+  tick: number
+  simulation_time: number
+  type: string
+  entity_id: string | null
+  message: string
+}
+
+/** One scored dimension, with the measurement behind it. */
+export interface ScoreTerm {
+  name: string
+  fraction: number
+  weight: number
+  points: number
+  applicable: boolean
+  detail: Record<string, unknown>
+}
+
+export interface EntityScore {
+  entity_id: string
+  team: string
+  total: number
+  terms: ScoreTerm[]
+  metrics: Record<string, string | number | boolean>
+}
+
+export interface RunScore {
+  run_id: string
+  scenario: string
+  seed: number
+  max_points: number
+  weights_hash: string
+  entities: EntityScore[]
+  teams: Record<string, number>
+}
+
+/** A stored score row, as the run detail returns it. */
+export interface StoredScore {
+  run_id: string
+  subject: 'entity' | 'team'
+  subject_id: string
+  total: number
+  breakdown: { terms?: ScoreTerm[] }
+  weights_hash: string
+  scored_at: number
+}
+
+export interface RunSummary {
+  run_id: string
+  scenario_name: string
+  seed: number
+  config_hash: string
+  integrator: string
+  tick_rate_hz: number
+  app_version: string
+  started_at: number
+  ended_at: number | null
+  end_reason: string | null
+  ticks: number
+  simulation_time_s: number
+  final_state_hash: string | null
+  entity_count: number
+  replay_path?: string | null
+  replay_frames?: number | null
+  replay_bytes?: number | null
+  scores: StoredScore[]
+}
+
+export interface RunEntity {
+  run_id: string
+  entity_id: string
+  team: string
+  agent_type: string
+  agent_id: string | null
+  final_status: string | null
+}
+
+export interface RunDetail extends RunSummary {
+  entities: RunEntity[]
+  replay: {
+    run_id: string
+    path: string
+    format: string
+    compressed: number
+    record_rate_hz: number
+    frames: number
+    bytes: number
+    created_at: number
+  } | null
+  metrics: Record<string, Record<string, number>>
+}
+
+/** What the current run is recording, from /api/runs/current. */
+export interface CurrentRun {
+  active: boolean
+  run_id: string | null
+  recording: boolean
+  storing: boolean
+  scoring_enabled: boolean
+  replay_directory: string
+  frames: number
+  bytes: number
+  truncated: boolean
+  database: { path: string; size_bytes: number; schema_version: number; rows: Record<string, number> } | null
+  last_run: Record<string, unknown> | null
+}
+
+export interface ScoringWeights {
+  enabled: boolean
+  weights: Record<string, number>
+  thresholds: Record<string, number>
+  redistribute_inapplicable: boolean
+  max_points: number
+  weights_hash: string
+  notice: string
+}
