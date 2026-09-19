@@ -256,7 +256,8 @@ def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     eq = a.equity(prices)
     # held_qty 讓全平倉用實際持有量下單,不靠權重反推(避免留下殘倉)
     held_qty = {s: p.position_amt for s, p in a.positions.items()}
-    orders = build_orders(target, held_w, eq, prices, mas, held_qty)
+    orders = build_orders(target, held_w, eq, prices, mas, held_qty,
+                          strategy=cfg.strategy)
     # 成交日的完整 K 棒 —— 強平要用當日最低/最高判定(盤中觸價就發生),
     # 只給開盤價會漏掉「盤中破線、收盤拉回」的情況,而那在真實交易所
     # 是實實在在被平掉了。

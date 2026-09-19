@@ -1032,6 +1032,16 @@ def sim_payload() -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _strategy() -> str:
+    """現役策略的名字。**不要把它寫死在文字裡** —— 換了策略之後,
+    寫死的那句話會變成一段看起來很權威的假話。"""
+    try:
+        from portfolio.paper import STRATEGY
+        return str(STRATEGY)
+    except Exception:                                # noqa: BLE001
+        return "現役策略"
+
+
 def _n(v, spec: str = ",.2f") -> str:
     return "—" if v is None else format(v, spec)
 
@@ -1068,8 +1078,8 @@ def block_sim() -> str:
             # 現在的答案是沒有 —— 而這件事不寫在畫面上的話,
             # 看到「多」這個標籤的人會以為那是這一筆的方向,
             # 而不是**系統唯一做得出來的方向**。
-            '<div class="flag">現役策略<b>只做多</b>:站上 50 日均線'
-            '持有,跌破就<b>空手</b>,不做空。<br>'
+            f'<div class="flag">現役策略(<b>{html.escape(_strategy())}</b>)'
+            '<b>只做多</b>:條件成立才持有,不成立就<b>空手</b>,不做空。<br>'
             '多空版(跌破做空)程式碼 2026-09-08 就寫好了,'
             '但一直沒有接上任何地方 —— 2026-09-18 把它接進研究迴路'
             '<b>當挑戰者</b>,要贏過現任才會換。做空改變的是風險的'
@@ -1103,8 +1113,11 @@ def block_sim() -> str:
 
     # ── 逐檔 ──────────────────────────────────────
     if not lv.legs:
+        from portfolio.paper import STRATEGY, SYMBOLS
         out.append('<div class="flag">模擬帳戶目前<b>空手</b> —— '
-                   '七個幣都在 50 日均線之下,或波動目標把規模壓到零。'
+                   f'{len(SYMBOLS)} 個幣都不符合'
+                   f'「{html.escape(STRATEGY)}」,'
+                   '或波動目標把規模壓到零。'
                    '空手是一個部位,不是沒在跑。</div>')
     else:
         out.append('<table class="pos"><thead><tr><th>幣種</th><th>數量</th>'
@@ -1243,10 +1256,13 @@ def block_screen() -> str:
             return {"error": f"{type(e).__name__}: {e}"}
 
     got = _cached("screen", 300, _screen)
+    # 2026-09-19:這段原本寫死「50 日均線」與「27%」。策略換掉之後
+    # 它會繼續這樣講,而那是一段看起來很權威的假話。改成讀現役設定。
+    from portfolio.paper import STRATEGY, VOL_TARGET_ANNUAL_PCT
     head = ('<div class="card"><h2>幣種 —— 能不能做,以及現在該不該做</h2>'
             '<p class="note">系統的決策變數只有一個:'
-            '<b>收盤價在不在 50 日均線之上</b>。在之上就持有、之下就空手,'
-            '再由波動目標把整體規模調到年化 27%。'
+            f'<b>{html.escape(STRATEGY)}</b>。條件成立就持有、不成立就空手,'
+            f'再由波動目標把整體規模調到年化 {VOL_TARGET_ANNUAL_PCT:g}%。'
             '「離均線」越接近 0,下一次換手越可能發生在那個幣上。</p>')
     if got.get("error"):
         return (head + '<p class="note">算不出來:'
@@ -1421,6 +1437,21 @@ def block_gaps() -> str:
          if BACKSTOP_PCT is not None else
          '<b>還沒有人決定</b>。指令單開不出來 —— '
          '一張沒有停損的單不該存在(§19)。'))
+
+    # 2026-09-19 反查時發現的,而它是目前最大的一個洞:
+    # 指令單上最重的一句話沒有任何東西在驗證。
+    gap(False, "止損有沒有真的設",
+        '指令單說「止損一定要設 —— 這是機器死掉時唯一的保護」,'
+        '而<b>系統從來沒有檢查過那件事有沒有發生</b>。<br>'
+        '<code>StandardPosition</code> 這個型別裡根本沒有止損欄位,'
+        '因為沒有人確認過交易所的唯讀回應給不給。'
+        '<code>trade.unprotected()</code> 寫好了(docstring 自稱'
+        '「實盤最重要的一條巡檢」)卻<b>沒有任何地方呼叫它</b>。<br>'
+        '唯一看過的一筆真倉(2026-09-18 的 AAVE)止損就是 <code>--</code>,'
+        '而面板一聲都沒吭 —— 因為它看不到。<br>'
+        '查得到查不到由 <code>scripts/probe_stop_visibility.py</code> 回答'
+        '(要先有持倉才問得出來)。<b>看不到的話這個洞就關不掉</b>,'
+        '那也要如實寫在這裡,而不是繼續叫人設止損卻永遠不檢查。')
 
     gap(False, "交易池",
         'U 本位標準合約<b>沒有 contracts 端點</b>,程式問不到有哪些幣'

@@ -46,7 +46,11 @@ class Order:
     price: float                     # 預期成交價(隔日開盤)
     notional: float
     reason: str
-    stop: float | None = None        # 出場價 = 50 日均線(策略本身的規則)
+    #: 一條參考線(`build_orders` 的 `mas` 給的)。
+    #: ⚠️ **這不保證是策略的出場線** —— mas 用的是 cfg.vol_lookback,
+    #: 現在剛好也是 50,但那是巧合。策略真正的出場線走
+    #: `rules.exit_level_of()`,而指令單用的是那一個。
+    stop: float | None = None
     stop_pct: float | None = None    # 現價距停損多遠(%)
     weight_from: float = 0.0
     weight_to: float = 0.0
@@ -63,14 +67,28 @@ class Order:
 def build_orders(target_w: dict[str, float], held_w: dict[str, float],
                  equity: float, prices: dict[str, float],
                  mas: dict[str, float] | None = None,
-                 held_qty: dict[str, float] | None = None) -> list[Order]:
+                 held_qty: dict[str, float] | None = None,
+                 strategy: str = "") -> list[Order]:
     """由目標權重與現有權重產生訂單。
 
     · 只下「差額」—— 已持有的部分不重複下單
     · 過小的調整直接略過(手續費會吃掉它)
-    · 每張買單附停損價(該幣的 50 日均線)與距離
+    · 每張買單附一條參考線(`mas` 傳進來的那條)與距離
+
+    ═══ `strategy` 為什麼要傳進來 ═══
+    2026-09-19 反查時發現:`reason` 寫死了「收盤站上 50 日均線」。
+    那句話會一路印到指令單的「訊號」欄 —— **使用者按單前看的那一行**。
+
+    策略換成 100 日均線或突破族,它會繼續說 50 日均線,而旁邊的數字
+    是另一條線的。這是同一類錯的第四處(出場價、止損說明、證據,
+    現在是訊號),而它們的共通點是:**寫的當下是真的。**
+
+    這裡不去拼湊「站上/突破」那種句子 —— 進場條件與出場條件對突破族
+    根本不是同一條線(進場看 N 日高,出場看 M 日低),拼出來的句子
+    會是另一種假話。直接講策略的名字:它永遠是準的。
     """
     mas = mas or {}
+    rule = strategy or "現役策略"
     out: list[Order] = []
     for sym in sorted(set(target_w) | set(held_w)):
         w0 = float(held_w.get(sym, 0.0))
@@ -95,10 +113,10 @@ def build_orders(target_w: dict[str, float], held_w: dict[str, float],
             continue
         ma = mas.get(sym)
         if dw > 0:
-            reason = ("新開倉:收盤站上 50 日均線" if w0 <= 0
+            reason = (f"新開倉:訊號成立({rule})" if w0 <= 0
                       else "加碼:波動下降,目標規模上調")
         else:
-            reason = ("平倉:收盤跌破 50 日均線" if w1 <= 0
+            reason = (f"平倉:訊號結束({rule})" if w1 <= 0
                       else "減碼:波動上升,目標規模下調")
 
         # ── 交易所規格(2026-09-09 加)────────────────────────
