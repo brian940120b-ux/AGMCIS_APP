@@ -625,11 +625,26 @@ def block_tickets() -> str:
                 from portfolio.account import Account
                 from portfolio.ticket import catch_up
 
+                # ⚠️ 2026-09-19:交易所的持倉查詢回空,**不代表對方是空的**。
+                # 實測 allPosition 回 [] 而 App 上有 3 筆倉,餘額裡有
+                # 60,703.67 被逐倉鎖住。對齊單的前提正是「我知道對方
+                # 有什麼」—— 前提不成立就**不准出單**,否則它會叫人去
+                # 開一個他已經持有的倉,而那是實實在在的雙倍曝險。
+                from exchange.bingx.standard_usdt import positions_are_hidden
+                ex_pos = BingXStandardUSDT().rich_positions()
+                bal = BingXStandardUSDT().balance()
+                hidden, why = positions_are_hidden(bal, ex_pos)
+                if hidden:
+                    raise RuntimeError(
+                        "交易所持倉查詢回空,但餘額顯示有部位鎖著保證金"
+                        f"({why})。**看不到對方有什麼就不能算對齊** —— "
+                        "硬算會叫你去開一個你已經持有的倉。")
+
                 held = {sym: pos.position_amt
                         for sym, pos in Account.load().positions.items()
                         if abs(pos.position_amt) > 1e-12}
                 catch, catch_refused, catch_notes = catch_up(
-                    held, BingXStandardUSDT().rich_positions(),
+                    held, ex_pos,
                     p.get("prices") or {}, BACKSTOP_PCT, LEVERAGE_CAP,
                     strategy=str(getattr(p.get("cfg"), "strategy", "")),
                     signal_day=str(p.get("signal_day") or ""),
@@ -838,18 +853,33 @@ def block_exchange() -> str:
         # 空清單只能講一件事:**我問到的是空的。** 至於那代表
         # 「沒有倉」還是「這個端點不給我看」,在 probe_positions_raw.py
         # 跑出結果之前,我們**不知道**。
-        out += ('<p class="note">交易所端持倉查詢回了<b>空清單</b>。</p>'
-                '<div class="flag warn">⚠️ <b>空清單不等於沒有倉。</b><br>'
-                '2026-09-19 17:21 實測:App 上是「持倉 (3)」'
-                '(BTC / BNB / 第三筆,未實現 +88.35),而這個查詢'
-                '同一時間回的是空的。<b>至少有一邊是錯的,而目前不知道'
-                '是哪一邊。</b><br>'
-                '在弄清楚之前,這一格<b>不會</b>說「沒有倉」—— '
-                '把「沒問到」講成「沒有」,對齊單就會叫你去開一個'
-                '你已經持有的倉。<br>'
-                '查:<code>python scripts/probe_positions_raw.py</code>'
-                '(不帶參數 / 帶 symbol / 兩種代號格式 / 餘額對照組,'
-                '原始信封原樣印出來)。</div>')
+        from exchange.bingx.standard_usdt import positions_are_hidden
+        hidden, why = positions_are_hidden(got.get("balance"), positions)
+        if hidden:
+            # **有倉,而且算得出鎖了多少** —— 只是看不到是哪幾檔。
+            out += ('<p class="note">交易所端持倉查詢回了<b>空清單</b>,'
+                    '但餘額說<b>有倉</b>。</p>'
+                    '<div class="flag warn">⚠️ <b>有部位,而這個查詢看不到'
+                    '它們。</b><br>'
+                    f'{html.escape(why)}<br>'
+                    '2026-09-19 實測:<code>allPosition</code> 不帶參數、'
+                    '帶 <code>BTCUSDT</code>、帶 <code>BNBUSDT</code>、'
+                    '帶 <code>BTC-USDT</code> 全部回 <code>[]</code>,'
+                    '而同一把金鑰的 <code>balance</code> 是通的 —— '
+                    '<b>不是權限、不是簽章、不是代號格式</b>。<br>'
+                    '算得出來的是<b>被鎖住多少保證金</b>;'
+                    '算不出來的是<b>哪幾檔、多少量、有沒有止損</b>。<br>'
+                    '所以<b>對齊單已經停掉</b> —— 看不到對方有什麼就不能'
+                    '算對齊,硬算會叫你去開一個你已經持有的倉。</div>')
+        else:
+            out += ('<p class="note">交易所端持倉查詢回了<b>空清單</b>,'
+                    '而餘額裡也沒有被鎖住的保證金。</p>'
+                    '<div class="flag">兩邊一致,所以這次的空清單'
+                    '<b>可以</b>當成「沒有倉」。<br>'
+                    '⚠️ 但 <code>allPosition</code> 這個端點本身'
+                    '2026-09-19 被證實會漏報(App 有 3 筆而它回空),'
+                    '所以這個結論靠的是<b>餘額那一側的佐證</b>,'
+                    '不是它自己說了算。</div>')
     else:
         trs = []
         for pos in positions:
@@ -1459,6 +1489,20 @@ def block_gaps() -> str:
 
     # 2026-09-19 反查時發現的,而它是目前最大的一個洞:
     # 指令單上最重的一句話沒有任何東西在驗證。
+    gap(False, "交易所持倉看不見",
+        '<code>allPosition</code> 回空,而餘額顯示有部位鎖著保證金。'
+        '2026-09-19 實測:不帶參數 / 帶 <code>BTCUSDT</code> / 帶 '
+        '<code>BNBUSDT</code> / 帶 <code>BTC-USDT</code> 全部回 '
+        '<code>[]</code>,同一把金鑰的 <code>balance</code> 卻是通的 —— '
+        '<b>不是權限、不是簽章、不是代號格式</b>。<br>'
+        '同一時刻 App 上是「持倉 (3)」,持倉保證金 60,703.67,'
+        '而 餘額 120,776.01 − 全倉 60,072.34 = <b>60,703.67</b>,'
+        '分毫不差。所以<b>倉存不存在算得出來</b>,'
+        '但<b>哪幾檔、多少量、有沒有止損,看不到</b>。<br>'
+        '後果:<b>對齊單已經停掉</b>(看不到對方有什麼就不能算對齊),'
+        '而「這個倉有沒有止損」也因此驗不了 —— 止損那一欄'
+        '本來就在同一筆持倉資料裡。<b>兩個洞是同一個。</b>')
+
     gap(False, "事件日曆只是記錄,不是閘門",
         '<code>paper._events_on()</code> 把成交日當天的事件寫進帳本'
         '那一行,<b>就只有這樣</b> —— 它自己的註解寫著「不影響記帳」。'
@@ -1478,9 +1522,10 @@ def block_gaps() -> str:
         '「實盤最重要的一條巡檢」)卻<b>沒有任何地方呼叫它</b>。<br>'
         '唯一看過的一筆真倉(2026-09-18 的 AAVE)止損就是 <code>--</code>,'
         '而面板一聲都沒吭 —— 因為它看不到。<br>'
-        '查得到查不到由 <code>scripts/probe_stop_visibility.py</code> 回答'
-        '(要先有持倉才問得出來)。<b>看不到的話這個洞就關不掉</b>,'
-        '那也要如實寫在這裡,而不是繼續叫人設止損卻永遠不檢查。')
+        '2026-09-19 查到根因:止盈止損在 App 上是<b>附在持倉那一筆</b>的'
+        '(「檢視止盈止損 (2)」,而「當前委託」是 0,所以它們不是掛單)。'
+        '也就是說 —— <b>只要持倉查得到,止損很可能就在同一筆裡</b>。'
+        '而持倉現在查不到(見上一條)。<b>兩個洞是同一個,先解持倉。</b>')
 
     gap(False, "交易池",
         'U 本位標準合約<b>沒有 contracts 端點</b>,程式問不到有哪些幣'

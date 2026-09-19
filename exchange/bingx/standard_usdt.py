@@ -369,3 +369,73 @@ def infer_spec(symbol: str, orders) -> InferredSpec:
             "不代表精度就是幾位。用來擋不合規的單可以,"
             "用來四捨五入不行。")
     return spec
+
+
+# ══════════════════════════════════════════════════════════
+# 有沒有倉 —— 從餘額算出來 · 2026-09-19
+# ══════════════════════════════════════════════════════════
+#
+# `allPosition` 回空,而 App 上有 3 筆倉。實測(2026-09-19 17:31):
+#
+#   不帶參數            -> []
+#   symbol=BTCUSDT      -> []
+#   symbol=BNBUSDT      -> []
+#   symbol=BTC-USDT     -> []
+#   balance(對照組)    -> 有回東西
+#
+# 不是權限、不是簽章(餘額同一把金鑰同一條路徑)。不是代號格式
+# (三種都試了)。**就是這個端點看不到這些倉。**
+#
+# 但餘額那一份把答案寫在裡面了:
+#
+#   balance            120,776.01261904526696
+#   crossWalletBalance  60,072.34261904526696
+#   差                  60,703.67  = App 的「持倉保證金 60,703.67」
+#   availableBalance    60,072.34  = App 的「可用保證金 60,072.34」
+#
+# 兩個都分毫不差。所以**倉存不存在是算得出來的**,即使看不到是哪幾檔。
+#
+# 這件事的用途不是好看:它讓「交易所是空的」這個結論**可以被否證**。
+# 而那正是對齊單最危險的前提 —— 以為對方是空的,就會叫人去開一個
+# 他已經持有的倉。
+
+
+def locked_margin(balance_rows) -> tuple:
+    """被倉位鎖住的保證金。回 (金額, 依據)。算不出來回 (None, 原因)。
+
+    逐倉的保證金不在 crossWalletBalance 裡,所以兩者的差就是它。
+    **這是下限不是總額**:全倉的倉位不會在這個差裡出現。
+    """
+    rows = balance_rows
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, (list, tuple)):
+        return None, f"餘額回應不是清單,是 {type(rows).__name__}"
+
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        total = _num(r.get("balance"))
+        cross = _num(r.get("crossWalletBalance"))
+        if total is None or cross is None:
+            continue
+        gap = total - cross
+        if gap <= 1e-9:
+            continue
+        asset = str(r.get("asset") or "?")
+        return gap, (f"{asset} 錢包 {total:,.2f} − 全倉錢包 {cross:,.2f}"
+                     f" = {gap:,.2f} 被逐倉部位鎖住")
+    return None, "餘額裡沒有「錢包 > 全倉錢包」的幣種 —— 算不出被鎖的保證金"
+
+
+def positions_are_hidden(balance_rows, positions) -> tuple:
+    """持倉查詢回空,但餘額顯示有保證金被鎖住。回 (是不是, 說明)。
+
+    **這個組合只能是一件事:有倉,而我們看不到它們。**
+    """
+    if positions:
+        return False, ""
+    gap, why = locked_margin(balance_rows)
+    if gap is None:
+        return False, why
+    return True, why

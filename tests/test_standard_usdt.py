@@ -189,3 +189,77 @@ def test_a_spec_missing_either_precision_is_not_usable():
     assert isinstance(spec, InferredSpec)
     assert spec.usable is False
     assert "不得下單" in spec.reason
+
+
+# ══════════════════════════════════════════════════════════
+# 持倉查回空,但餘額說有倉 · 2026-09-19
+# ══════════════════════════════════════════════════════════
+#
+# 執政官 2026-09-19 17:21 的 App:持倉 (3)、持倉保證金 60,703.67。
+# 同一時間 allPosition 回 []。實測不帶參數、帶 BTCUSDT、帶 BNBUSDT、
+# 帶 BTC-USDT 全部回 [],而同一把金鑰的 balance 是通的 ——
+# 不是權限、不是簽章、不是代號格式,就是這個端點看不到那些倉。
+#
+# 但餘額那一份把答案寫在裡面了,而且分毫不差。
+
+VST_ROWS = [
+    {"asset": "VST",
+     "balance": "120776.01261904526696000000",
+     "crossWalletBalance": "60072.34261904526696000000",
+     "availableBalance": "60072.34261904526696000000"},
+    {"asset": "USDT", "balance": "1.24489369033362000000",
+     "crossWalletBalance": "1.24489369033362000000"},
+]
+
+
+def test_locked_margin_matches_the_app_to_the_cent():
+    """App 的「持倉保證金 60,703.67」。**這是實測對照,不是估計。**"""
+    from exchange.bingx.standard_usdt import locked_margin
+    gap, why = locked_margin(VST_ROWS)
+    assert round(gap, 2) == 60703.67
+    assert "被逐倉部位鎖住" in why
+
+
+def test_an_empty_position_list_with_locked_margin_means_hidden():
+    """**這個組合只能是一件事:有倉,而我們看不到它們。**"""
+    from exchange.bingx.standard_usdt import positions_are_hidden
+    hidden, why = positions_are_hidden(VST_ROWS, [])
+    assert hidden
+    assert "60,703.67" in why
+
+
+def test_an_empty_list_with_no_locked_margin_is_not_called_hidden():
+    """兩邊一致的時候,空清單可以當成沒有倉 —— 但那個結論靠的是
+    餘額那一側的佐證,不是 allPosition 自己說了算。"""
+    from exchange.bingx.standard_usdt import positions_are_hidden
+    flat = [{"asset": "VST", "balance": "100.0",
+             "crossWalletBalance": "100.0"}]
+    hidden, _ = positions_are_hidden(flat, [])
+    assert not hidden
+
+
+def test_having_positions_means_nothing_is_hidden():
+    from exchange.bingx.standard_usdt import positions_are_hidden
+    hidden, _ = positions_are_hidden(VST_ROWS, [object()])
+    assert not hidden
+
+
+def test_a_malformed_balance_says_why_instead_of_claiming_flat():
+    """算不出來要說算不出來 —— 不要因為算不出來就宣告「沒有倉」。"""
+    from exchange.bingx.standard_usdt import locked_margin
+    gap, why = locked_margin("不是清單")
+    assert gap is None and "不是清單" in why
+
+
+def test_the_catch_up_refuses_when_the_exchange_side_is_invisible():
+    """**對齊單的前提是「我知道對方有什麼」。**
+
+    前提不成立就不准出單 —— 否則它會叫人去開一個他已經持有的倉,
+    而那是實實在在的雙倍曝險。
+    """
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1]
+           / "scripts/dashboard.py").read_text(encoding="utf-8")
+    body = src[src.index("def block_tickets("):src.index("def gate_correlation(")]
+    assert "positions_are_hidden" in body
+    assert "開一個你已經持有的倉" in body

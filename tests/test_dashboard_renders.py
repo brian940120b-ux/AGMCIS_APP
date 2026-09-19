@@ -293,21 +293,46 @@ def test_a_shorts_stop_is_described_as_above_the_price():
 # ══════════════════════════════════════════════════════════
 # 五、「空清單」不准被講成「沒有倉」· 2026-09-19
 # ══════════════════════════════════════════════════════════
-def test_an_empty_position_query_is_not_reported_as_no_positions():
+def _exchange_card(balance, positions=()):
+    import time as _t
+
+    import scripts.dashboard as dash
+    dash._CACHE["exchange"] = (_t.time(), {
+        "balance": balance, "positions": list(positions),
+        "host": "open-api-vst.bingx.com", "who": "fc43…SGDw", "live": False})
+    return dash.block_exchange()
+
+
+#: 執政官 2026-09-19 17:21 的真實餘額。持倉保證金 60,703.67。
+VST_WITH_POSITIONS = [
+    {"asset": "VST", "balance": "120776.01261904526696",
+     "crossWalletBalance": "60072.34261904526696"}]
+VST_FLAT = [{"asset": "VST", "balance": "100.0",
+             "crossWalletBalance": "100.0"}]
+
+
+def test_an_empty_position_query_is_never_reported_as_zero_positions():
     """2026-09-19 17:21 實測:App 上是「持倉 (3)」,而 allPosition
     同一時間回空,面板照樣寫「交易所端 **0 筆持倉**」。
 
     **那是最危險的一種假話**:對齊單會據此叫人去開一個他已經持有的
     倉。系統不是不知道,是它以為自己知道。
-
-    空清單只能講一件事:我問到的是空的。
     """
-    import scripts.dashboard as dash
-    import time as _t
-    dash._CACHE["exchange"] = (_t.time(), {
-        "balances": {}, "positions": [], "orders": [],
-        "host": "open-api-vst.bingx.com", "who": "fc43…SGDw", "live": False})
-    html_ = dash.block_exchange()
-    assert "0 筆持倉" not in html_
-    assert "空清單不等於沒有倉" in html_
-    assert "probe_positions_raw" in html_
+    for bal in (VST_WITH_POSITIONS, VST_FLAT):
+        assert "0 筆持倉" not in _exchange_card(bal)
+
+
+def test_locked_margin_turns_an_empty_list_into_hidden_positions():
+    """餘額算得出被鎖住的保證金 -> **有倉,只是看不到是哪幾檔。**"""
+    html_ = _exchange_card(VST_WITH_POSITIONS)
+    assert "有部位,而這個查詢看不到它們" in html_
+    assert "60,703.67" in html_
+    assert "對齊單已經停掉" in html_
+
+
+def test_a_genuinely_flat_account_may_be_called_flat_but_cites_its_evidence():
+    """兩邊一致就可以說沒有倉 —— 但要說清楚那個結論靠的是餘額的佐證,
+    不是 allPosition 自己說了算(它已經被證實會漏報)。"""
+    html_ = _exchange_card(VST_FLAT)
+    assert "可以</b>當成「沒有倉」" in html_
+    assert "會漏報" in html_
