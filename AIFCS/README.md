@@ -4,14 +4,14 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 9 complete.** Every run is now **recorded, stored and
-> scored**. Press STOP and the run is written to a replay file, its decisions and
-> events land in SQLite, and an independent scoring engine grades it on six
-> weighted flight-quality terms — each one reporting the measurement behind it.
-> The Command Center has a REPLAY mode with real transport controls (play, pause,
-> frame step, scrub, speed, jump-to-event) and a run history with per-term score
-> breakdowns. Training is **not implemented yet**; the dashboard reports it as
-> `NOT_IMPLEMENTED` rather than faking it.
+> **Current status: PHASE 10 complete.** Scenarios can now be **written from the
+> dashboard**: create, edit, clone, delete, import and export, with a live 3D
+> preview of where the units start and validation by the same parser the
+> simulation uses — so the editor cannot save a scenario the engine would refuse.
+> Runs are recorded, stored and scored (PHASE 9), and REPLAY mode plays them back
+> with real transport controls and per-term score breakdowns. Training is **not
+> implemented yet**; the dashboard reports it as `NOT_IMPLEMENTED` rather than
+> faking it.
 
 ---
 
@@ -24,6 +24,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [API](#api)
 - [Configuration](#configuration)
 - [Replay, scoring and run history](#replay-scoring-and-run-history)
+- [Editing scenarios](#editing-scenarios)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -294,6 +295,16 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `POST` | `/api/runs/{id}/score` | Recompute the score from the recording |
 | `DELETE` | `/api/runs/{id}` | Delete a run, its rows and its recording |
 | `GET` | `/api/scoring/weights` | The standard runs are judged against |
+| `GET` | `/api/scenarios` | Every scenario, with a reason for any that will not load |
+| `GET` | `/api/scenarios/template` | A minimal valid scenario to start from |
+| `GET` | `/api/scenarios/{name}` | One scenario, plus the document the editor edits |
+| `GET` | `/api/scenarios/{name}/export` | The file's own text, comments included |
+| `POST` | `/api/scenarios/validate` | Check a draft without saving it |
+| `POST` | `/api/scenarios` | Create a scenario |
+| `PUT` | `/api/scenarios/{name}` | Replace a scenario |
+| `POST` | `/api/scenarios/{name}/clone` | Copy it under a new name |
+| `POST` | `/api/scenarios/import` | Store pasted or uploaded YAML |
+| `DELETE` | `/api/scenarios/{name}` | Delete a scenario |
 
 Training endpoints arrive in their respective phases and are documented as they
 land.
@@ -661,6 +672,65 @@ capping acceptable at all.
 
 ---
 
+## Editing scenarios
+
+Switch the Command Center header to **EDIT**. The right rail is the editor, the
+centre is import/export, and the tactical view becomes a **preview of where the
+units start** — so placing an aircraft is something you can see rather than
+something you work out from three numbers.
+
+### What the editor can do
+
+| Action | Notes |
+|---|---|
+| New | Starts from a template the backend serves, so it is always valid |
+| Edit | Name, description, duration, seed; per unit: id, team, agent, position, velocity, yaw, throttle, waypoints, formation leader and station offset |
+| Save | Writes the YAML file, after the backend has validated it |
+| Clone | Copies under a new name, renaming it inside the file too |
+| Delete | With a confirmation step; the default scenario is protected |
+| Import | Paste or upload YAML; validated before it is stored |
+| Export | The file's own text, comments included, downloadable |
+
+### Three refusals, and why each one is there
+
+**A name is a filename, so it must be a plain identifier.** `../escape`,
+`a/b`, `con` and anything with a space are refused rather than quietly
+sanitised into a name you did not ask for. Without this, a name parameter is a
+way to write anywhere on the machine.
+
+**An invalid scenario is never written.** Every save parses the document first,
+with the same parser the simulation uses, so a file in the directory always
+loads. The editor validates as you type and shows the error against the
+offending unit:
+
+```
+entity BLUE-02: formation leader 'GHOST-99' is not declared in this scenario
+```
+
+**The scenario a run is flying cannot be changed underneath it.** Overwriting or
+deleting it returns `409` and names the reason. Stop the simulation first.
+
+### Round-tripping
+
+`parse(scenario.to_document())` must reproduce the scenario exactly, and a test
+asserts it. Before PHASE 10 the serialiser dropped `orientation`, `health`,
+`energy`, `fuel`, `route_loop` and `formation_offset` — harmless while nothing
+wrote scenarios back, and silent data loss the moment something did. An editor
+built on a lossy serialiser is a way to corrupt scenarios, not to write them.
+
+Saved files keep coordinates on one line (`position: [-20000.0, 0.0, 6000.0]`)
+so a scenario stays readable by hand after a round trip through the UI.
+
+### Writing safely
+
+Saves go to a temporary file in the same directory and are then renamed, which
+is atomic: a crash or a full disk leaves the previous file intact rather than a
+truncated one. The temporary file's permissions are corrected before the rename
+— Python creates it at `0600`, and a scenario only its writer can read would
+stop loading the moment the backend ran as a different user.
+
+---
+
 ## Testing
 
 Run every gate — lint, format, types, backend tests, frontend lint and types:
@@ -688,6 +758,7 @@ npm run test:e2e        # dashboard shell, status panel, error handling
 npm run test:e2e:sim    # start / pause / step / reset drive the real engine
 npm run test:e2e:3d     # 3D view renders, every camera mode works
 npm run test:e2e:replay # record a run, then load, play, scrub and score it
+npm run test:e2e:editor # build a scenario in the UI, save it, then fly it
 ```
 
 On a headless machine without a GPU, run the 3D suite with a software renderer:
@@ -780,7 +851,7 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 7 | WebSocket telemetry | **Complete** |
 | 8 | 3D Command Center (Three.js) | **Complete** |
 | 9 | Replay, scoring, database | **Complete** |
-| 10 | Scenario editor | Planned |
+| 10 | Scenario editor | **Complete** |
 | 11–13 | Gymnasium environment, PPO, SAC | Planned |
 | 14–15 | Multi-agent, commander agent | Planned |
 | 16 | JSBSim adapter (swappable physics backend) | Planned |

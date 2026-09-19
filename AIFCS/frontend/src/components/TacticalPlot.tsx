@@ -99,6 +99,7 @@ export function TacticalPlot({ onSwitchTo3D }: { onSwitchTo3D?: () => void } = {
           <h2 className="hud-label text-ink-dim">
             Tactical Plot
             {mode === 'replay' && <span className="ml-2 text-amber-300">REPLAY</span>}
+            {mode === 'edit' && <span className="ml-2 text-violet-300">PREVIEW</span>}
           </h2>
           <p className="text-[10px] text-ink-faint">
             Top-down X/Y · thin line = nose, thick = velocity

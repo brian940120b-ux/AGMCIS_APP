@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from 'react'
-import { Activity, Cpu, Film, LayoutGrid, Radio as RadioIcon } from 'lucide-react'
+import { Activity, Cpu, Film, LayoutGrid, PencilRuler, Radio as RadioIcon } from 'lucide-react'
 import { DecisionFeed } from '@/components/DecisionFeed'
 import { DatalinkPanel } from '@/components/DatalinkPanel'
 import { EntityList } from '@/components/EntityList'
@@ -7,6 +7,8 @@ import { EventFeed } from '@/components/EventFeed'
 import { IntelPanel } from '@/components/IntelPanel'
 import { PerceptionPanel } from '@/components/PerceptionPanel'
 import { ReplayPanel } from '@/components/ReplayPanel'
+import { ScenarioEditor } from '@/components/ScenarioEditor'
+import { ScenarioYamlPanel } from '@/components/ScenarioYamlPanel'
 import { ScoreboardPanel } from '@/components/ScoreboardPanel'
 import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
@@ -16,7 +18,7 @@ import { TacticalPlot } from '@/components/TacticalPlot'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { useSimulationPolling } from '@/hooks/useSimulationPolling'
 import { useTelemetrySocket } from '@/hooks/useTelemetrySocket'
-import { useReplayStore } from '@/stores/replayStore'
+import { useStageStore } from '@/stores/stageStore'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useSystemStore } from '@/stores/systemStore'
 
@@ -36,13 +38,14 @@ function ViewerLoading() {
   )
 }
 
-type MobileTab = 'view' | 'status' | 'units' | 'replay' | 'intel'
+type MobileTab = 'view' | 'status' | 'units' | 'replay' | 'edit' | 'intel'
 
 const TABS: { id: MobileTab; label: string; icon: typeof Activity }[] = [
   { id: 'view', label: 'View', icon: LayoutGrid },
   { id: 'status', label: 'Status', icon: Activity },
   { id: 'units', label: 'Units', icon: RadioIcon },
   { id: 'replay', label: 'Replay', icon: Film },
+  { id: 'edit', label: 'Edit', icon: PencilRuler },
   { id: 'intel', label: 'Intel', icon: Cpu },
 ]
 
@@ -58,8 +61,8 @@ export function CommandCenter() {
   const [view, setView] = useState<'3d' | '2d'>('3d')
   const isDesktop = useIsDesktop()
   // Which source the tactical views draw: live telemetry or a recording.
-  const stageMode = useReplayStore((s) => s.mode)
-  const setStageMode = useReplayStore((s) => s.setMode)
+  const stageMode = useStageStore((s) => s.mode)
+  const setStageMode = useStageStore((s) => s.setMode)
   useTelemetrySocket()
   useSimulationPolling()
 
@@ -83,7 +86,7 @@ export function CommandCenter() {
           {/* LIVE / REPLAY. The views draw one source or the other, never a
               mix of the two. */}
           <div className="flex items-center border border-edge">
-            {(['live', 'replay'] as const).map((value) => (
+            {(['live', 'replay', 'edit'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -92,7 +95,9 @@ export function CommandCenter() {
                   stageMode === value
                     ? value === 'replay'
                       ? 'bg-amber-300/15 text-amber-300'
-                      : 'bg-cyan-hud/10 text-cyan-hud'
+                      : value === 'edit'
+                        ? 'bg-violet-300/15 text-violet-300'
+                        : 'bg-cyan-hud/10 text-cyan-hud'
                     : 'text-ink-faint hover:text-ink-dim'
                 }`}
               >
@@ -149,7 +154,13 @@ export function CommandCenter() {
           </div>
 
           <div className="flex min-h-0 flex-col gap-3">
-            {stageMode === 'replay' ? <ReplayPanel /> : <SimulationControls />}
+            {stageMode === 'replay' ? (
+              <ReplayPanel />
+            ) : stageMode === 'edit' ? (
+              <ScenarioYamlPanel />
+            ) : (
+              <SimulationControls />
+            )}
             <div className="min-h-0 flex-1">
               {view === '3d' ? (
                 <Suspense fallback={<ViewerLoading />}>
@@ -162,7 +173,11 @@ export function CommandCenter() {
           </div>
 
           <div className="flex min-h-0 flex-col gap-3">
-            {stageMode === 'replay' ? (
+            {stageMode === 'edit' ? (
+              <div className="min-h-0 flex-1">
+                <ScenarioEditor />
+              </div>
+            ) : stageMode === 'replay' ? (
               <div className="min-h-0 flex-1">
                 <ScoreboardPanel />
               </div>
@@ -187,7 +202,13 @@ export function CommandCenter() {
         <main className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
           {tab === 'view' && (
             <>
-              {stageMode === 'replay' ? <ReplayPanel /> : <SimulationControls />}
+              {stageMode === 'replay' ? (
+                <ReplayPanel />
+              ) : stageMode === 'edit' ? (
+                <ScenarioYamlPanel />
+              ) : (
+                <SimulationControls />
+              )}
               <div className="h-[55vh]">
                 {view === '3d' ? (
                   <Suspense fallback={<ViewerLoading />}>
@@ -220,12 +241,18 @@ export function CommandCenter() {
               <ScoreboardPanel />
             </>
           )}
+          {tab === 'edit' && (
+            <>
+              <ScenarioEditor />
+              <ScenarioYamlPanel />
+            </>
+          )}
           {tab === 'intel' && <IntelPanel />}
         </main>
       )}
 
       {!isDesktop && (
-        <nav className="grid shrink-0 grid-cols-5 border-t border-edge bg-deck">
+        <nav className="grid shrink-0 grid-cols-6 border-t border-edge bg-deck">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}

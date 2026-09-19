@@ -29,10 +29,7 @@ const TRAIL_LIMIT = 300
 /** Frame poll interval while playing, in ms. The recorder writes at 20 Hz. */
 const POLL_MS = 100
 
-type Mode = 'live' | 'replay'
-
 interface ReplayState {
-  mode: Mode
   recordings: RecordingSummary[]
   recordingsLoaded: boolean
   status: ReplayStatus
@@ -47,7 +44,6 @@ interface ReplayState {
   error: string | null
   notice: string | null
 
-  setMode: (mode: Mode) => void
   loadRecordings: () => Promise<void>
   loadRuns: () => Promise<void>
   selectRun: (runId: string | null) => Promise<void>
@@ -89,7 +85,6 @@ export const useReplayStore = create<ReplayState>((set, get) => {
   }
 
   return {
-    mode: 'live',
     recordings: [],
     recordingsLoaded: false,
     status: EMPTY_STATUS,
@@ -103,16 +98,6 @@ export const useReplayStore = create<ReplayState>((set, get) => {
     busy: false,
     error: null,
     notice: null,
-
-    setMode: (mode) => {
-      set({ mode, error: null, notice: null })
-      if (mode === 'replay') {
-        void get().loadRecordings()
-        void get().loadRuns()
-      } else {
-        get().stopPolling()
-      }
-    },
 
     loadRecordings: async () => {
       try {

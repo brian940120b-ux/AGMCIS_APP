@@ -28,7 +28,7 @@ export function SimulationViewer3D({
   onSwitchTo2D: () => void
 }) {
   // Live telemetry or a recording being played back — never a blend of both.
-  const { entities, trails, scenario, mode, label: stageLabel, awaitingRecording } = useStage()
+  const { entities, trails, scenario, mode, label: stageLabel, emptyHint } = useStage()
 
   const [cameraMode, setCameraMode] = useState<CameraMode>('orbit')
   const [followId, setFollowId] = useState<string | null>(null)
@@ -42,10 +42,11 @@ export function SimulationViewer3D({
           <h2 className="hud-label text-ink-dim">
             Tactical View
             {mode === 'replay' && <span className="ml-2 text-amber-300">REPLAY</span>}
+            {mode === 'edit' && <span className="ml-2 text-violet-300">PREVIEW</span>}
           </h2>
           <p className="text-[10px] text-ink-faint">
             {scenario ?? 'no scenario'} · {entities.length} units · abstract 3D
-            {mode === 'replay' && ` · ${stageLabel}`}
+            {mode !== 'live' && ` · ${stageLabel}`}
           </p>
         </div>
 
@@ -118,9 +119,8 @@ export function SimulationViewer3D({
         {entities.length === 0 && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
             <p className="max-w-[22rem] px-4 text-center text-[11px] text-ink-faint">
-              {awaitingRecording
-                ? 'Replay mode. Choose a recording in the Replay panel to load it.'
-                : 'No entities. Press START to load a scenario and run the simulation.'}
+              {emptyHint ??
+                'No entities. Press START to load a scenario and run the simulation.'}
             </p>
           </div>
         )}

@@ -13,7 +13,8 @@
     "test:e2e": "node e2e/smoke.mjs",
     "test:e2e:sim": "node e2e/simulation.mjs",
     "test:e2e:3d": "node e2e/view3d.mjs",
-    "test:e2e:replay": "node e2e/replay.mjs"
+    "test:e2e:replay": "node e2e/replay.mjs",
+    "test:e2e:editor": "node e2e/editor.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

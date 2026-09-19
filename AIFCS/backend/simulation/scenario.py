@@ -43,6 +43,69 @@ class ScenarioEntity:
     formation_leader: str | None = None
     formation_offset: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
+    def to_dict(self) -> dict[str, Any]:
+        """Every declared field, so an editor can round-trip a scenario.
+
+        Nothing is omitted. A form that loads a scenario, changes one number
+        and saves it must not quietly drop the fields it did not show.
+        """
+        return {
+            "id": self.id,
+            "team": self.team.value,
+            "type": self.type,
+            "position": list(self.position),
+            "velocity": list(self.velocity),
+            "orientation": list(self.orientation),
+            "health": self.health,
+            "energy": self.energy,
+            "fuel": self.fuel,
+            "controls": self.controls.to_dict(),
+            "agent": self.agent,
+            "waypoints": [list(w) for w in self.waypoints],
+            "route_loop": self.route_loop,
+            "formation_leader": self.formation_leader,
+            "formation_offset": list(self.formation_offset),
+        }
+
+    def to_document(self) -> dict[str, Any]:
+        """The YAML shape, which nests formation and omits plain defaults.
+
+        Defaults are left out so a hand-written scenario stays readable after a
+        round trip through the editor instead of growing every optional field.
+        """
+        document: dict[str, Any] = {
+            "id": self.id,
+            "type": self.type,
+            "team": self.team.value,
+            "position": list(self.position),
+            "velocity": list(self.velocity),
+        }
+        if any(self.orientation):
+            document["orientation"] = list(self.orientation)
+        for name, value, default in (
+            ("health", self.health, 1.0),
+            ("energy", self.energy, 1.0),
+            ("fuel", self.fuel, 1.0),
+        ):
+            if value != default:
+                document[name] = value
+
+        controls = {k: v for k, v in self.controls.to_dict().items() if v}
+        if controls:
+            document["controls"] = controls
+        if self.agent:
+            document["agent"] = self.agent
+        if self.waypoints:
+            document["waypoints"] = [list(w) for w in self.waypoints]
+            if not self.route_loop:
+                document["route_loop"] = False
+        if self.formation_leader:
+            document["formation"] = {
+                "leader": self.formation_leader,
+                "offset": list(self.formation_offset),
+            }
+        return document
+
     def to_entity_state(self) -> EntityState:
         return EntityState(
             id=self.id,
@@ -85,6 +148,7 @@ class Scenario:
         return world
 
     def to_dict(self) -> dict[str, Any]:
+        """Full state for the API and the editor — every field, nothing dropped."""
         return {
             "name": self.name,
             "description": self.description,
@@ -92,22 +156,31 @@ class Scenario:
             "duration_s": self.duration_s,
             "seed": self.seed,
             "entity_count": len(self.entities),
-            "entities": [
-                {
-                    "id": e.id,
-                    "team": e.team.value,
-                    "type": e.type,
-                    "position": e.position,
-                    "velocity": e.velocity,
-                    "controls": e.controls.to_dict(),
-                    "agent": e.agent,
-                    "waypoints": e.waypoints,
-                    "formation_leader": e.formation_leader,
-                }
-                for e in self.entities
-            ],
+            "entities": [e.to_dict() for e in self.entities],
             "environment": self.environment,
         }
+
+    def to_document(self) -> dict[str, Any]:
+        """The YAML document this scenario came from, or would be written as.
+
+        ``parse_scenario(s.to_document())`` must reproduce ``s`` exactly; the
+        round-trip test asserts it. Without that guarantee the editor would be
+        a way to corrupt scenarios rather than to write them.
+        """
+        header: dict[str, Any] = {
+            "name": self.name,
+            "description": self.description,
+            "version": self.version,
+            "duration": self.duration_s,
+        }
+        if self.seed is not None:
+            header["seed"] = self.seed
+
+        document: dict[str, Any] = {"scenario": header}
+        if self.environment:
+            document["environment"] = self.environment
+        document["entities"] = [e.to_document() for e in self.entities]
+        return document
 
 
 class ScenarioError(ValueError):

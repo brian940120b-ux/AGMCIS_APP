@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.agents import router as agents_router
 from api.health import router as health_router
 from api.replay import router as replay_router
+from api.scenarios import router as scenarios_router
 from api.simulation import router as simulation_router
 from api.telemetry import router as telemetry_router
 from core.config import APP_TITLE, Settings, get_settings
@@ -145,6 +146,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(simulation_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(replay_router, prefix="/api")
+    app.include_router(scenarios_router, prefix="/api")
     app.include_router(telemetry_router)
 
     @app.get("/", tags=["meta"])

@@ -14,7 +14,9 @@ export function EntityList() {
   return (
     <Panel
       title="Entities"
-      subtitle={`${entities.length} fictional units${mode === 'replay' ? ' · replay' : ''}`}
+      subtitle={`${entities.length} fictional units${
+        mode === 'replay' ? ' · replay' : mode === 'edit' ? ' · scenario start' : ''
+      }`}
     >
       {entities.length === 0 ? (
         <p className="px-3 py-4 text-[11px] text-ink-faint">No entities loaded.</p>

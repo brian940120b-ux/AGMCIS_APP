@@ -13,12 +13,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from core.config import Settings, get_settings
 from core.event_bus import EventType
 from core.run_manager import RunManager
 from core.runtime import get_engine, get_run_manager
 from core.simulation_engine import SimulationEngine, SimulationError
-from simulation.scenario import ScenarioError, list_scenarios
+from simulation.scenario import ScenarioError
 
 router = APIRouter(tags=["simulation"])
 
@@ -185,17 +184,3 @@ def communications(engine: SimulationEngine = Depends(get_engine)) -> dict[str, 
 def controller(engine: SimulationEngine = Depends(get_engine)) -> dict[str, Any]:
     """Flight controller statistics: what it applied, rejected and corrected."""
     return engine.controller.status()
-
-
-@router.get("/scenarios")
-def scenarios(
-    settings: Settings = Depends(get_settings),
-    engine: SimulationEngine = Depends(get_engine),
-) -> dict[str, Any]:
-    directory = settings.project_root / settings.scenarios.directory
-    return {
-        "directory": str(settings.scenarios.directory),
-        "default": settings.scenarios.default_scenario,
-        "available": list_scenarios(directory),
-        "loaded": engine.scenario.to_dict() if engine.scenario else None,
-    }

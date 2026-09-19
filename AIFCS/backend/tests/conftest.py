@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_CONFIGS = BACKEND_ROOT.parent / "configs"
+PROJECT_SCENARIOS = BACKEND_ROOT.parent / "scenarios"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
@@ -40,6 +41,18 @@ def _isolated_data(tmp_path_factory):
     text = text.replace("directory: data/replay", f"directory: {root / 'replay'}")
     text = text.replace("database_path: data/aifcs.db", f"database_path: {root / 'aifcs.db'}")
     analysis.write_text(text, encoding="utf-8")
+
+    # PHASE 10 writes scenario files. Point the directory at a copy so a test
+    # that creates or deletes one cannot touch the scenarios in the repository.
+    scenario_dir = root / "scenarios"
+    shutil.copytree(PROJECT_SCENARIOS, scenario_dir)
+    scenarios_config = config_dir / "scenarios.yaml"
+    scenarios_config.write_text(
+        scenarios_config.read_text(encoding="utf-8").replace(
+            "directory: scenarios", f"directory: {scenario_dir}"
+        ),
+        encoding="utf-8",
+    )
 
     previous = os.environ.get("AIFCS_CONFIG_DIR")
     os.environ["AIFCS_CONFIG_DIR"] = str(config_dir)

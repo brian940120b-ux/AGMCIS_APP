@@ -52,6 +52,8 @@
 | `storage/schema.py` | Tables and ordered migrations | 9 |
 | `storage/database.py` | Connection per thread, WAL, foreign keys | 9 |
 | `storage/repository.py` | The only module that knows SQL | 9 |
+| `simulation/scenario.py` | Parsing and validating a scenario | 1 |
+| `simulation/scenario_store.py` | The only module that writes scenario files | 10 |
 | `training/*` | Gymnasium env, rewards, PPO/SAC, evaluation | 11–13 |
 
 ## Determinism
@@ -85,6 +87,18 @@ finished recording and returns numbers; it cannot be reached from a tick. That
 is what makes it safe to change a weight, or add a term, without any risk of
 changing how an aircraft flies.
 
+## Scenarios are written through one door
+
+`scenario.py` reads and validates; `scenario_store.py` is the only module that
+writes. Every write parses the document first — with the same parser the
+simulation uses — so a file in the scenario directory always loads, and the
+editor cannot save something the engine would then refuse.
+
+Writes are atomic (temporary file, then rename), names are checked rather than
+sanitised so one can never escape the directory, and serialisation is lossless:
+`parse_scenario(s.to_document()) == s` is a test, because an editor built on a
+lossy serialiser is a way to corrupt scenarios rather than to write them.
+
 ## Frontend
 
 `frontend/src` mirrors the backend contract:
@@ -98,10 +112,14 @@ changing how an aircraft flies.
   modes, `TacticalGround.tsx` the grid, `Trail.tsx` the motion trails.
 - `stores/replayStore.ts` — playback state (PHASE 9). The cursor itself lives on
   the server; this mirrors it and polls the current frame while playing.
+- `stores/scenarioStore.ts` — the scenario editor's draft (PHASE 10). Held as
+  the YAML document shape, not as a view model, so what the editor holds is
+  exactly what gets written to disk.
+- `stores/stageStore.ts` — which of the three sources is on stage.
 - `hooks/useStage.ts` — the single place that decides whether the views draw
-  live telemetry or a recording. Without it the 3D view, the 2D plot and the
-  entity list could disagree, and a replay frame drawn beside live positions
-  would be a picture of a moment that never happened.
+  live telemetry, a recording, or the scenario being edited. Without it the 3D
+  view, the 2D plot and the entity list could disagree, and a replay frame drawn
+  beside live positions would be a picture of a moment that never happened.
 
 The dashboard renders only data the backend actually returned. When the backend is
 unreachable the UI says so instead of showing stale or invented values.

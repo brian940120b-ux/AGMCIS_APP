@@ -22,7 +22,11 @@ import type {
   RunDetail,
   RunScore,
   RunSummary,
+  ScenarioCatalogue,
+  ScenarioDetail,
+  ScenarioDocument,
   ScenariosResponse,
+  ScenarioValidation,
   ScoringWeights,
   SensorStatus,
   SimEvent,
@@ -124,4 +128,33 @@ export const api = {
       { method: 'DELETE' },
     ),
   scoringWeights: () => request<ScoringWeights>('/api/scoring/weights'),
+
+  // Scenario editing (PHASE 10). Every write is validated by the backend
+  // first, so the editor can never put a file on disk that will not load.
+  scenarioCatalogue: () => request<ScenarioCatalogue>('/api/scenarios'),
+  scenarioTemplate: () =>
+    request<{ document: ScenarioDocument; yaml: string }>('/api/scenarios/template'),
+  scenario: (name: string) => request<ScenarioDetail>(`/api/scenarios/${encodeURIComponent(name)}`),
+  scenarioExport: (name: string) =>
+    request<{ name: string; yaml: string }>(`/api/scenarios/${encodeURIComponent(name)}/export`),
+  scenarioValidate: (document: ScenarioDocument) =>
+    post<ScenarioValidation>('/api/scenarios/validate', document),
+  scenarioCreate: (document: ScenarioDocument) => post<ScenarioDetail>('/api/scenarios', document),
+  scenarioUpdate: (name: string, document: ScenarioDocument) =>
+    request<ScenarioDetail>(`/api/scenarios/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(document),
+    }),
+  scenarioClone: (name: string, newName: string) =>
+    post<ScenarioDetail>(`/api/scenarios/${encodeURIComponent(name)}/clone`, { new_name: newName }),
+  scenarioImport: (yamlText: string, name?: string, overwrite = false) =>
+    post<ScenarioDetail>('/api/scenarios/import', {
+      yaml_text: yamlText,
+      name: name ?? null,
+      overwrite,
+    }),
+  scenarioDelete: (name: string) =>
+    request<{ name: string; deleted: boolean }>(`/api/scenarios/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
 }

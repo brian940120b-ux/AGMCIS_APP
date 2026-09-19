@@ -467,3 +467,81 @@ export interface ScoringWeights {
   weights_hash: string
   notice: string
 }
+
+/* --------------------------------------------------------------- PHASE 10 */
+
+/** One entity as declared in a scenario file — every field, nothing dropped. */
+export interface ScenarioEntityDetail {
+  id: string
+  team: EntityTeam
+  type: string
+  position: [number, number, number]
+  velocity: [number, number, number]
+  orientation: [number, number, number]
+  health: number
+  energy: number
+  fuel: number
+  controls: ControlState
+  agent: string | null
+  waypoints: [number, number, number][]
+  route_loop: boolean
+  formation_leader: string | null
+  formation_offset: [number, number, number]
+}
+
+/** A parsed scenario, as the API returns it. */
+export interface ScenarioDetail {
+  name: string
+  description: string
+  version: string
+  duration_s: number
+  seed: number | null
+  entity_count: number
+  entities: ScenarioEntityDetail[]
+  environment: Record<string, unknown>
+  protected?: boolean
+  /** The YAML document shape, which is what gets written back. */
+  document?: ScenarioDocument
+}
+
+/** The YAML shape. Kept loose because it is the file, not a view model. */
+export interface ScenarioDocument {
+  scenario: {
+    name: string
+    description?: string
+    version?: string
+    duration?: number
+    seed?: number | null
+  }
+  environment?: Record<string, unknown>
+  entities: Record<string, unknown>[]
+}
+
+/** A row in the scenario list; `readable: false` carries the reason. */
+export interface ScenarioListEntry {
+  name: string
+  readable: boolean
+  protected: boolean
+  size_bytes: number
+  modified_at: number
+  error?: string
+  description?: string
+  version?: string
+  duration_s?: number
+  seed?: number | null
+  entity_count?: number
+  teams?: string[]
+}
+
+export interface ScenarioCatalogue {
+  directory: string
+  default: string
+  available: string[]
+  scenarios: ScenarioListEntry[]
+  loaded: ScenarioDetail | null
+}
+
+/** Result of checking a draft without saving it. */
+export type ScenarioValidation =
+  | { valid: true; scenario: ScenarioDetail }
+  | { valid: false; error: string }

@@ -349,11 +349,67 @@ outside the replay directory is refused. Deleting a run removes its rows and its
 file. 362 backend tests, plus `npm run test:e2e:replay`, which records a run
 through the UI and then plays, scrubs and scores it.
 
-## PHASE 10 — Scenario editor — **Next**
+## PHASE 10 — Scenario editor — **Complete**
 
-Create / save / load / clone / delete / import / export scenarios from the UI.
+Scenarios can now be written from the dashboard, not just read. Create, edit,
+clone, delete, import and export, with a live preview of where the units start.
 
-## PHASE 11–13 — RL
+**The preview reuses the tactical view.** Edit mode is a third stage source
+beside live telemetry and replay, so placing an aircraft is something you can
+see. `useStage()` is the single place that decides which of the three is on
+screen; the 3D view, the 2D plot and the entity list all read it, and therefore
+cannot disagree about what they are showing.
+
+**Validation is the simulation's own parser.** The editor cannot accept a
+scenario the engine would refuse, because there is only one validator. Errors
+come back naming the unit and the problem — "entity BLUE-02: formation leader
+'GHOST-99' is not declared in this scenario" — rather than "invalid".
+
+### The bug that had to be fixed first
+
+`Scenario.to_dict()` dropped `orientation`, `health`, `energy`, `fuel`,
+`route_loop` and `formation_offset`. Harmless while nothing ever wrote a
+scenario back; silent data loss the moment something did. A form that loaded
+demo_alpha, changed the duration and saved would have flattened every wingman's
+station offset and every aircraft's initial attitude.
+
+So serialisation was made lossless before anything was built on it, and
+`parse_scenario(s.to_document()) == s` is now a test.
+
+### Three refusals
+
+*A name is a filename.* `../escape`, `a/b`, `con` and names with spaces are
+refused rather than sanitised into something the caller did not ask for.
+Sanitising would silently write to a different file than the one requested;
+refusing says so.
+
+*An invalid scenario is never written*, so every file in the directory loads and
+the list is trustworthy.
+
+*The scenario a run is flying cannot be changed underneath it* — `409`, naming
+the reason.
+
+### Two things found by running it
+
+*Saved scenarios were owner-only.* `NamedTemporaryFile` creates at `0600`, so
+every file the editor wrote had different permissions from the ones shipped with
+the project, and would have stopped loading the moment the backend ran as
+another user — in a container, or after a `sudo`. The mode is now set before the
+rename, and an existing file keeps whatever mode it had.
+
+*The editor test grabbed the wrong input.* The name field was located by
+position, and the first input on the page belongs to the import panel, so the
+test filled that instead and then failed several steps later. The editor's
+fields now carry accessible labels, which is what the test targets — and what a
+screen reader needs.
+
+**Verified:** a scenario built through the UI saves, validates, exports,
+re-imports and then **actually flies** — `npm run test:e2e:editor` asserts the
+engine reaches a positive tick count with the units the editor declared. 420
+backend tests, including round-tripping, every unsafe name, a failed write
+leaving no temporary file behind, and the in-use and protected refusals.
+
+## PHASE 11–13 — RL — **Next**
 
 `AIFCSCombatEnv` (Gymnasium), configurable and explainable reward engine with a
 per-term breakdown, then PPO and SAC training pipelines with evaluation and model
