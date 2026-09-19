@@ -210,6 +210,14 @@ class AgentSettings(BaseModel):
     strict_action_validation: bool = True
     rule_agent: RuleAgentSettings = Field(default_factory=RuleAgentSettings)
 
+    # Coordination (PHASE 15). A commander allocates high-level tasks and never
+    # writes a control surface. Turning it off leaves every unit flying the
+    # standing orders its scenario declared.
+    commander_enabled: bool = True
+    # Commanders think slowly on purpose: re-allocating faster than orders can
+    # cross the datalink and be acted on just churns.
+    commander_rate_hz: float = Field(default=0.5, gt=0)
+
     @field_validator("default_type")
     @classmethod
     def _known_agent_type(cls, v: str) -> str:

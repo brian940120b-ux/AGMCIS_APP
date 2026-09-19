@@ -612,3 +612,69 @@ export interface TrainedModel {
   } | null
   card_error?: string
 }
+
+/* ------------------------------------------------------------ PHASE 14-15 */
+
+export interface TeamMember {
+  entity_id: string
+  status: EntityStatus
+  heard_from: boolean
+  position: [number, number, number] | null
+  /** Seconds since the team last heard from this unit. */
+  report_age_s: number | null
+}
+
+/** A team's view of itself — from the datalink, not from the world. */
+export interface TeamPicture {
+  team: string
+  simulation_time: number
+  size: number
+  active: number
+  heard_from: number
+  unheard: string[]
+  coverage: number
+  members: TeamMember[]
+}
+
+export interface TaskRecord {
+  task_id: string
+  type: 'PATROL' | 'TRANSIT' | 'ESCORT' | 'HOLD'
+  entity_id: string
+  issued_by: string
+  issued_at: number
+  parameters: Record<string, unknown>
+  priority: number
+  reasons: string[]
+  status?: string
+  note?: string
+}
+
+export interface TasksResponse {
+  issued: number
+  tracked: number
+  by_status: Record<string, number>
+  active: Record<string, TaskRecord>
+  recent: TaskRecord[]
+  applied: number
+  refused: number
+}
+
+export interface CommanderStatus {
+  commander_id: string
+  team: string
+  decision_count: number
+  decision_interval_s: number
+  orders_sent: number
+  orders_refused: number
+  plan_size: number
+  /** Always false. A commander has no path to a control surface. */
+  writes_controls: boolean
+  last_allocations: { entity_id: string; task_type: string; reasons: string[] }[]
+}
+
+export interface CommandersResponse {
+  enabled: boolean
+  count: number
+  commanders: CommanderStatus[]
+  notice: string
+}

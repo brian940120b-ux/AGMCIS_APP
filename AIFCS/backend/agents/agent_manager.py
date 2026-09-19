@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from agents.base_agent import Action, BaseAgent, ContactView, Decision, Observation
+from agents.tasks import Task
 from core.event_bus import EventBus, EventType
 from core.logging_config import get_logger
 from core.world_state import EntityState, EntityStatus, WorldState
@@ -84,6 +85,7 @@ class AgentManager:
         decision_log_size: int = 500,
         sensor_model: SensorModel | None = None,
         datalink: DatalinkService | None = None,
+        messages: Any = None,
     ) -> None:
         self.events = event_bus
         # When present, agents perceive the world through it instead of reading
@@ -92,6 +94,14 @@ class AgentManager:
         # When present, teammates' shared position reports fill gaps the
         # aircraft's own sensor cannot see.
         self.datalink = datalink
+        # When present, this owns the inbox: it drains once per cycle and
+        # routes by type, so task orders are not eaten by the datalink's
+        # position-report drain (PHASE 14).
+        self.messages = messages
+        # Set by the engine so delivered task orders can be taken up.
+        self.tasks: Any = None
+        self.tasks_applied = 0
+        self.tasks_refused = 0
         self.tick_rate_hz = tick_rate_hz
         self.decision_rate_hz = decision_rate_hz
         # At least one tick: a decision rate above the tick rate cannot be met.
@@ -126,6 +136,8 @@ class AgentManager:
         self._demands.clear()
         self._last_decision_tick.clear()
         self._decision_sequence = 0
+        self.tasks_applied = 0
+        self.tasks_refused = 0
 
     @property
     def decision_sequence(self) -> int:
@@ -176,14 +188,51 @@ class AgentManager:
         else:
             observation = build_observation(agent, entity, world)
 
-        if self.datalink is not None:
+        # Exactly one drain of this unit's inbox per cycle. With a message
+        # router that is its job; without one the datalink still does it, so a
+        # bare engine (tests, the training environment) behaves as before.
+        if self.messages is not None:
+            self.messages.deliver(entity.id)
+        elif self.datalink is not None:
             self.datalink.collect(entity.id)
+
+        if self.datalink is not None:
             observation = self.datalink.merge(observation, entity)
 
         return observation
 
+    def _take_orders(self, agent: BaseAgent, simulation_time: float) -> None:
+        """Apply any task orders that have arrived for this unit.
+
+        Orders are applied at the start of the unit's decision cycle, so the
+        decision it then makes is the first one under the new task rather than
+        one cycle late.
+        """
+        if self.messages is None or self.tasks is None:
+            return
+
+        applier = getattr(agent, "apply_task", None)
+        for message in self.messages.take_orders(agent.entity_id):
+            try:
+                task = Task.from_dict(message.payload)
+            except (KeyError, ValueError):
+                log.warning(
+                    "malformed task order",
+                    extra={"event": "TASK_ORDER_MALFORMED", "entity_id": agent.entity_id},
+                )
+                continue
+
+            if applier is None or not applier(task):
+                self.tasks_refused += 1
+                self.tasks.fail(task.task_id, simulation_time, "the unit could not take up this task")
+                continue
+
+            self.tasks_applied += 1
+            self.tasks.activate(task.task_id, simulation_time)
+
     def _run_agent(self, agent: BaseAgent, entity: EntityState, world: WorldState, tick: int) -> None:
         observation = self._observe(agent, entity, world)
+        self._take_orders(agent, world.simulation_time)
 
         try:
             decision, action = agent.step(observation)

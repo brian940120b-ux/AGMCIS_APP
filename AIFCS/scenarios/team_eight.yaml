@@ -1,0 +1,131 @@
+# TEAM_EIGHT — eight fictional units, two teams of four (PHASE 14).
+#
+# Everything here is FICTIONAL and abstract. This is a transit exercise used to
+# test coordination at scale: each team has two leaders flying separate
+# circuits, each with a wingman holding station. Nothing models weapons,
+# engagement or targeting.
+#
+# Why eight: the plan calls for scaling 1 -> 2 -> 4 -> 8 agents, and eight is
+# where the commander has something to actually allocate — two pairs per team,
+# so losing a leader leaves a real choice about who takes over.
+#
+# The two teams are separated in altitude (BLUE 6 km, RED 8 km) and the pairs
+# are separated laterally, so nothing is on a collision course by construction.
+#
+# Coordinates are metres in a local tangent plane: +X east, +Y north, +Z up.
+
+scenario:
+  name: team_eight
+  description: >
+    Eight fictional flight units in two teams of four. Each team flies two
+    two-ship elements on separate circuits. Used to exercise the commander,
+    the task layer and the datalink at scale.
+  version: "1.0"
+  duration: 600
+  seed: 20260501
+
+environment:
+  gravity_mps2: 9.80665
+  air_density_kgpm3: 1.225
+  wind: [0.0, 0.0, 0.0]
+
+entities:
+  # --- BLUE element 1, northern circuit at 6.0 km -------------------------
+  - id: BLUE-01
+    type: fictional_aircraft
+    team: BLUE
+    position: [-9000.0, 4000.0, 6000.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    waypoints:
+      - [9000.0, 4000.0, 6000.0]
+      - [9000.0, 12000.0, 6000.0]
+      - [-9000.0, 12000.0, 6000.0]
+      - [-9000.0, 4000.0, 6000.0]
+
+  - id: BLUE-02
+    type: fictional_aircraft
+    team: BLUE
+    position: [-9600.0, 3400.0, 6000.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    formation: {leader: BLUE-01, offset: [-600.0, -600.0, 0.0]}
+
+  # --- BLUE element 2, southern circuit at 6.5 km -------------------------
+  - id: BLUE-03
+    type: fictional_aircraft
+    team: BLUE
+    position: [-9000.0, -12000.0, 6500.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    waypoints:
+      - [9000.0, -12000.0, 6500.0]
+      - [9000.0, -4000.0, 6500.0]
+      - [-9000.0, -4000.0, 6500.0]
+      - [-9000.0, -12000.0, 6500.0]
+
+  - id: BLUE-04
+    type: fictional_aircraft
+    team: BLUE
+    position: [-9600.0, -12600.0, 6500.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    formation: {leader: BLUE-03, offset: [-600.0, -600.0, 0.0]}
+
+  # --- RED element 1, northern circuit at 8.0 km, flying the other way ----
+  - id: RED-01
+    type: fictional_aircraft
+    team: RED
+    position: [9000.0, 12000.0, 8000.0]
+    velocity: [-220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    waypoints:
+      - [-9000.0, 12000.0, 8000.0]
+      - [-9000.0, 4000.0, 8000.0]
+      - [9000.0, 4000.0, 8000.0]
+      - [9000.0, 12000.0, 8000.0]
+
+  - id: RED-02
+    type: fictional_aircraft
+    team: RED
+    position: [9600.0, 12600.0, 8000.0]
+    velocity: [-220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    formation: {leader: RED-01, offset: [600.0, 600.0, 0.0]}
+
+  # --- RED element 2, southern circuit at 8.5 km --------------------------
+  - id: RED-03
+    type: fictional_aircraft
+    team: RED
+    position: [9000.0, -4000.0, 8500.0]
+    velocity: [-220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    waypoints:
+      - [-9000.0, -4000.0, 8500.0]
+      - [-9000.0, -12000.0, 8500.0]
+      - [9000.0, -12000.0, 8500.0]
+      - [9000.0, -4000.0, 8500.0]
+
+  - id: RED-04
+    type: fictional_aircraft
+    team: RED
+    position: [9600.0, -3400.0, 8500.0]
+    velocity: [-220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]
+    controls: {throttle: 0.26}
+    agent: rule
+    formation: {leader: RED-03, offset: [600.0, 600.0, 0.0]}

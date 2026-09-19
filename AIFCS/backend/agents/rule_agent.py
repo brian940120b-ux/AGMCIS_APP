@@ -116,6 +116,64 @@ class RuleAgent(BaseAgent):
         self._hold_heading_deg: float | None = None
         self._target: dict[str, float] = {}
         self._guidance = GuidanceState()
+        # The task this unit is currently carrying out (PHASE 15). None means
+        # it is flying whatever the scenario declared.
+        self.current_task_id: str | None = None
+
+    # ----------------------------------------------------------------- tasks
+
+    def apply_task(self, task: Any) -> bool:
+        """Take up a high-level task. Returns False if it cannot be flown.
+
+        A task changes *what* this unit is trying to do. It never sets a
+        control surface: the agent still works out how to fly it, and the
+        flight controller still decides what actually reaches the aircraft.
+        """
+        from agents.tasks import TaskType
+
+        parameters = task.parameters or {}
+
+        if task.type is TaskType.PATROL:
+            points = parameters.get("waypoints") or []
+            if not points:
+                return False
+            self.route = RouteAssignment(
+                waypoints=[np.asarray(p, dtype=np.float64) for p in points],
+                loop=bool(parameters.get("loop", True)),
+            )
+            self.formation = None
+
+        elif task.type is TaskType.TRANSIT:
+            point = parameters.get("to")
+            if point is None:
+                return False
+            # A transit is a one-waypoint route that does not repeat; on
+            # arrival the route completes and the agent holds.
+            self.route = RouteAssignment(waypoints=[np.asarray(point, dtype=np.float64)], loop=False)
+            self.formation = None
+
+        elif task.type is TaskType.ESCORT:
+            leader = parameters.get("leader")
+            if not leader:
+                return False
+            self.formation = FormationAssignment(
+                leader_id=str(leader),
+                offset=np.asarray(parameters.get("offset", [0.0, 0.0, 0.0]), dtype=np.float64),
+            )
+            self.route = RouteAssignment()
+
+        elif task.type is TaskType.HOLD:
+            self.route = RouteAssignment()
+            self.formation = None
+            # Hold where the unit is now, not where it was when it spawned.
+            self._hold_altitude_m = None
+            self._hold_heading_deg = None
+
+        else:
+            return False
+
+        self.current_task_id = task.task_id
+        return True
 
     # ------------------------------------------------------------- thinking
 
@@ -343,6 +401,7 @@ class RuleAgent(BaseAgent):
 
     def reset(self) -> None:
         super().reset()
+        self.current_task_id = None
         self.route.reset()
         self._hold_altitude_m = None
         self._hold_heading_deg = None

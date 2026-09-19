@@ -26,7 +26,11 @@ from typing import Any
 import numpy as np
 
 from agents.agent_manager import AgentManager
+from agents.commander_agent import CommanderAgent, StandingOrder
 from agents.factory import build_agents
+from agents.task_manager import TaskManager
+from agents.tasks import Task
+from agents.team_manager import TeamManager
 from controllers.flight_controller import FlightController
 from controllers.limits import SafetyLimits, ViolationType
 from core.clock import ClockState, SimulationClock
@@ -34,7 +38,8 @@ from core.config import Settings, get_settings
 from core.event_bus import EventBus, EventType
 from core.integrator import Integrator, clamp_to_bounds
 from core.logging_config import get_logger
-from core.world_state import EntityStatus, WorldState
+from core.world_state import EntityStatus, Team, WorldState
+from simulation.communication_manager import CommunicationManager
 from simulation.communications import CommsConfig, CommunicationModel
 from simulation.datalink import DatalinkService
 from simulation.physics import Simple6DOFModel
@@ -74,6 +79,16 @@ class SimulationEngine:
 
         self.comms = CommunicationModel(config=self._comms_config(), seed=self.settings.simulation.seed)
         self.datalink = DatalinkService(self.comms, tick_rate_hz=self.settings.simulation.tick_rate_hz)
+        # One reader per inbox, dispatching by message type (PHASE 14). Without
+        # it a task order is swallowed by the datalink's position-report drain.
+        self.messages = CommunicationManager(self.comms, self.datalink)
+
+        # PHASE 15. Commanders allocate tasks; they never write controls, and
+        # they are deliberately not registered with the AgentManager, so they
+        # are never asked for an Action.
+        self.tasks = TaskManager()
+        self.team_manager = TeamManager(self.datalink)
+        self.commanders: list[CommanderAgent] = []
 
         self.agents = AgentManager(
             event_bus=self.events,
@@ -81,6 +96,7 @@ class SimulationEngine:
             decision_rate_hz=self.settings.agents.decision_rate_hz,
             sensor_model=self.sensors,
             datalink=self.datalink,
+            messages=self.messages,
         )
 
         self.controller = FlightController(
@@ -135,6 +151,11 @@ class SimulationEngine:
         self.agents.clear()
         for agent in build_agents(scenario, self.settings):
             self.agents.register(agent)
+        self.agents.tasks = self.tasks
+
+        self.tasks.reset()
+        self.messages.reset()
+        self._build_commanders(scenario)
 
         self.sensors.reset(seed=self.seed)
 
@@ -142,6 +163,10 @@ class SimulationEngine:
         self.comms.clear_participants()
         for entity in self.world.entities.values():
             self.comms.register(entity.id, entity.team.value)
+        # A commander is a participant on its team's net: its orders are
+        # subject to the same latency, loss and blackout as anything else.
+        for commander in self.commanders:
+            self.comms.register(commander.commander_id, commander.team.value)
         self.datalink.reset()
 
         # Actuators start where the scenario trimmed them, not at neutral.
@@ -191,6 +216,45 @@ class SimulationEngine:
         self.clock.reset()
         self._end_reason = None
         log.info("scenario unloaded", extra={"event": "SCENARIO_UNLOADED", "scenario": name})
+
+    def _build_commanders(self, scenario: Scenario) -> None:
+        """One commander per team that has an agent-flown unit.
+
+        A commander is given the mission plan — what the scenario says each
+        unit is for. It is never registered with the AgentManager, so nothing
+        ever asks it for an Action, and there is no path from it to a control
+        surface.
+        """
+        self.commanders = []
+        if not self.settings.agents.commander_enabled:
+            return
+
+        by_team: dict[str, list[StandingOrder]] = {}
+        for declared in scenario.entities:
+            agent_type = declared.agent or self.settings.agents.default_type
+            if agent_type == "none":
+                continue
+            by_team.setdefault(declared.team.value, []).append(
+                StandingOrder(
+                    entity_id=declared.id,
+                    waypoints=[list(p) for p in declared.waypoints],
+                    route_loop=declared.route_loop,
+                    leader_id=declared.formation_leader,
+                    formation_offset=list(declared.formation_offset),
+                )
+            )
+
+        for team_value, orders in sorted(by_team.items()):
+            commander = CommanderAgent(
+                commander_id=f"CMD-{team_value}",
+                team=Team(team_value),
+                task_manager=self.tasks,
+                team_manager=self.team_manager,
+                comms=self.comms,
+                decision_interval_s=1.0 / max(self.settings.agents.commander_rate_hz, 1e-6),
+            )
+            commander.set_plan(orders)
+            self.commanders.append(commander)
 
     def _sensor_config(self) -> SensorConfig:
         sensors = self.settings.sensors
@@ -248,6 +312,13 @@ class SimulationEngine:
         self.comms.update(self.clock.simulation_time)
         self._track_blackout()
 
+        # Commanders allocate tasks before the units decide, so an order that
+        # arrives this tick is acted on this tick. They emit tasks only — no
+        # commander touches a control surface.
+        for commander in self.commanders:
+            for task in commander.update(self.world):
+                self._announce_task(task)
+
         # Agents decide at their own slower rate and leave a standing demand.
         self.agents.update(self.world, self.clock.tick_count)
 
@@ -296,6 +367,18 @@ class SimulationEngine:
                 )
                 with contextlib.suppress(ValueError):
                     self.tick_observers.remove(observer)
+
+    def _announce_task(self, task: Task) -> None:
+        """Publish an allocation so the decision feed shows who was told what."""
+        self.events.emit(
+            EventType.TASK_ASSIGNED,
+            simulation_time=self.clock.simulation_time,
+            tick=self.clock.tick_count,
+            entity_id=task.entity_id,
+            agent_id=task.issued_by,
+            message=f"{task.entity_id}: {task.type.value}",
+            data=task.to_dict(),
+        )
 
     def _track_blackout(self) -> None:
         """Publish an event when the datalink drops or comes back."""
@@ -477,6 +560,10 @@ class SimulationEngine:
         self.clock.reset()
         self.rng = np.random.default_rng(self.seed)
         self.agents.reset()
+        self.tasks.reset()
+        self.messages.reset()
+        for commander in self.commanders:
+            commander.reset()
         self.sensors.reset(seed=self.seed)
         self.comms.reset(seed=self.seed)
         self.datalink.reset()
@@ -527,4 +614,8 @@ class SimulationEngine:
             "sensors": self.sensors.status(),
             "communications": self.comms.status(self.clock.simulation_time),
             "datalink": self.datalink.status(),
+            "messages": self.messages.status(),
+            "tasks": self.tasks.status(),
+            "commanders": [c.status() for c in self.commanders],
+            "teams": self.team_manager.status(self.world)["teams"],
         }

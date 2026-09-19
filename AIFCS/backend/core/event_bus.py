@@ -45,6 +45,10 @@ class EventType(StrEnum):
     # Communication (PHASE 6+)
     COMMUNICATION_EVENT = "COMMUNICATION_EVENT"
 
+    # Coordination (PHASE 15)
+    TASK_ASSIGNED = "TASK_ASSIGNED"
+    TASK_COMPLETED = "TASK_COMPLETED"
+
     # Scoring / training (PHASE 9+ / PHASE 11+)
     SCORE_CHANGED = "SCORE_CHANGED"
     REWARD_UPDATED = "REWARD_UPDATED"

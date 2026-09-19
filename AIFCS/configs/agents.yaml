@@ -7,6 +7,14 @@ agents:
   decision_rate_hz: 10
   # Reject/clamp any action that fails validation instead of trusting the agent.
   strict_action_validation: true
+  # Coordination (PHASE 15). A commander allocates high-level tasks — patrol
+  # this route, hold station on that unit — and never touches a control
+  # surface. Its orders travel over the simulated datalink, so they can be
+  # delayed or lost like anything else.
+  commander_enabled: true
+  # Deliberately slow: re-allocating faster than an order can arrive and be
+  # acted on only produces churn.
+  commander_rate_hz: 0.5
 
 rule_agent:
   # Abstract behaviour tuning for the rule-based pilot (PHASE 3).

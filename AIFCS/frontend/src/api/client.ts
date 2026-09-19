@@ -27,7 +27,10 @@ import type {
   ScenarioDocument,
   ScenariosResponse,
   ScenarioValidation,
+  CommandersResponse,
   ScoringWeights,
+  TasksResponse,
+  TeamPicture,
   TrainedModel,
   TrainingEnvironmentSpec,
   TrainingReward,
@@ -167,6 +170,12 @@ export const api = {
   trainingStatus: () => request<TrainingStatus>('/api/training/status'),
   trainingEnvironment: () => request<TrainingEnvironmentSpec>('/api/training/environment'),
   trainingReward: () => request<TrainingReward>('/api/training/reward'),
+  // Teams, tasks and commanders (PHASE 14-15). Read-only: allocation happens
+  // inside the tick, and a second source of orders would disagree with it.
+  teams: () => request<{ count: number; teams: TeamPicture[] }>('/api/teams'),
+  tasks: () => request<TasksResponse>('/api/tasks'),
+  commanders: () => request<CommandersResponse>('/api/commanders'),
+
   trainingModels: () =>
     request<{ available: boolean; count: number; models: TrainedModel[]; install_hint?: string }>(
       '/api/training/models',

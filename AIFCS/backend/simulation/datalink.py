@@ -22,7 +22,7 @@ import numpy as np
 
 from agents.base_agent import ContactView, Observation
 from core.world_state import EntityState, Team
-from simulation.communications import CommunicationModel, MessageType
+from simulation.communications import CommunicationModel, Message, MessageType
 
 
 @dataclass
@@ -93,20 +93,38 @@ class DatalinkService:
 
     # -------------------------------------------------------------- receiving
 
-    def collect(self, entity_id: str) -> None:
-        """Drain this unit's inbox into its datalink picture."""
+    def accept(self, entity_id: str, message: Message) -> None:
+        """Fold one delivered position report into this unit's picture.
+
+        Routing is the CommunicationManager's job (PHASE 14): a unit's inbox
+        has exactly one reader, because draining it twice would mean whichever
+        consumer ran second saw nothing.
+        """
+        if message.type is not MessageType.POSITION_REPORT:
+            return
+        payload = message.payload
         tracks = self._tracks.setdefault(entity_id, {})
+        tracks[message.sender_id] = DatalinkTrack(
+            entity_id=message.sender_id,
+            team=Team(payload["team"]),
+            position=np.asarray(payload["position"], dtype=np.float64),
+            velocity=np.asarray(payload["velocity"], dtype=np.float64),
+            reported_time=message.sent_time,
+        )
+
+    def collect(self, entity_id: str) -> None:
+        """Drain this unit's inbox into its datalink picture.
+
+        Kept for callers that have no CommunicationManager — tests and the
+        Gymnasium environment's bare engine. It still consumes the whole
+        inbox, so anything that also expects task orders must use the manager.
+        """
         for message in self.comms.receive(entity_id):
-            if message.type is not MessageType.POSITION_REPORT:
-                continue
-            payload = message.payload
-            tracks[message.sender_id] = DatalinkTrack(
-                entity_id=message.sender_id,
-                team=Team(payload["team"]),
-                position=np.asarray(payload["position"], dtype=np.float64),
-                velocity=np.asarray(payload["velocity"], dtype=np.float64),
-                reported_time=message.sent_time,
-            )
+            self.accept(entity_id, message)
+
+    def tracks_for(self, entity_id: str) -> dict[str, DatalinkTrack]:
+        """The datalink picture one unit is holding. Read-only to callers."""
+        return dict(self._tracks.get(entity_id, {}))
 
     def merge(self, observation: Observation, observer: EntityState) -> Observation:
         """Fold datalink tracks into an observation.

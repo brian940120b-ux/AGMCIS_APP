@@ -55,6 +55,10 @@ try {
   // The 3D view is the default stage since PHASE 8.
   await page.getByText('Tactical View').first().waitFor({ timeout: 20000 })
 
+  // Pick the scenario this test asserts against. Another suite may have left a
+  // different one loaded, and the assertions below count its four units.
+  await page.getByRole('button', { name: 'demo_alpha', exact: true }).click()
+
   // --- START: simulation time must advance ---
   await page.getByRole('button', { name: /^START$/ }).click()
   await page.waitForTimeout(2000)

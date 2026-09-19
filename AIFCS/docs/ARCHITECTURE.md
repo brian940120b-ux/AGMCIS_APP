@@ -59,6 +59,11 @@
 | `training/environment.py` | `AIFCSCombatEnv`, the Gymnasium environment | 11 |
 | `training/reward.py` | Weighted, per-term explainable reward | 12 |
 | `training/pipeline.py` | PPO/SAC training, evaluation, model cards | 13 |
+| `simulation/communication_manager.py` | Drains each inbox once and routes by message type | 14 |
+| `agents/team_manager.py` | A team's picture, built only from datalink reports | 14 |
+| `agents/tasks.py` | `Task`, `TaskType`, reason codes | 15 |
+| `agents/task_manager.py` | The only record of who was told what | 15 |
+| `agents/commander_agent.py` | Allocates tasks; holds no aircraft and no controls | 15 |
 
 ## Determinism
 
@@ -114,6 +119,45 @@ environment drives it through the ordinary `step()` and agent registration.
 Reward is computed outside the engine, from measured state, and every term is
 reported separately. Like scoring, it can be changed without any risk of
 changing how an aircraft flies.
+
+## A commander commands, it does not fly
+
+`CommanderAgent` is deliberately **not** a `BaseAgent`. It has no entity, no
+observation of its own and no reference that reaches a control surface. Its
+whole output is `Task` objects:
+
+```
+datalink reports → TeamManager picture → CommanderAgent → Task
+                                                            │
+                                                            ▼
+                                            TaskManager (the record)
+                                                            │
+                                                            ▼
+                             RuleAgent.apply_task() → accepted or refused
+                                                            │
+                                                            ▼
+                                    the ordinary agent → controller → physics
+```
+
+Three properties hold this apart from the flight path:
+
+**A task is a request.** `apply_task()` returns a reason code whichever way it
+goes, and a unit that cannot carry out an order keeps flying what it had. The
+commander cannot make an aircraft do anything; it can only ask.
+
+**A commander sees what the link delivered.** `TeamManager` builds its picture
+from `datalink.tracks_for()` alone, so every position it reasons about is as
+late, as lossy and as blackout-prone as any other message. It has no access to
+`WorldState`. A commander that could read truth would be a second, privileged
+observer, and coordination measured against it would mean nothing.
+
+**Silence is not information.** Before the first report arrives — which latency
+guarantees at t=0 — the commander trusts the plan rather than concluding its
+leaders are gone. Absence of a report and evidence of a loss are different
+things, and the code says which one it is looking at.
+
+The flight controller remains the sole writer of entity controls. Adding a layer
+of command above the agents did not change that, and a test asserts it.
 
 ## Scenarios are written through one door
 

@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.agents import router as agents_router
+from api.coordination import router as coordination_router
 from api.health import router as health_router
 from api.replay import router as replay_router
 from api.scenarios import router as scenarios_router
@@ -165,6 +166,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(simulation_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
+    app.include_router(coordination_router, prefix="/api")
     app.include_router(replay_router, prefix="/api")
     app.include_router(scenarios_router, prefix="/api")
     app.include_router(training_router, prefix="/api")

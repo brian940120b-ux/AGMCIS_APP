@@ -75,3 +75,22 @@ def test_openapi_schema_is_generated(client):
     schema = client.get("/openapi.json").json()
     assert "/api/health" in schema["paths"]
     assert "/api/system/status" in schema["paths"]
+
+
+def test_reported_phase_matches_the_last_completed_phase_in_the_docs():
+    """The header's phase label must not drift behind what has been built.
+
+    It was a literal in `health.py` and went stale twice — the dashboard still
+    said PHASE 9 after PHASE 10 and PHASE 11-13 had shipped. The docs are the
+    record of what is done, so the label is checked against them.
+    """
+    import re
+    from pathlib import Path
+
+    from api.health import BUILD_PHASE
+
+    phases_md = Path(__file__).resolve().parents[2] / "docs" / "PHASES.md"
+    completed = re.findall(r"^## (PHASE [^—]+?) — .*\*\*Complete\*\*", phases_md.read_text(), re.M)
+    assert completed, "docs/PHASES.md lists no completed phase"
+    # The headings use an en dash, the constant a plain hyphen.
+    assert completed[-1].replace("\u2013", "-") == BUILD_PHASE

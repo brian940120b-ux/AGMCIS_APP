@@ -502,11 +502,120 @@ commanding full deflection every step still leaves the applied controls inside
 their bounds, proving the safety layer is still in the path. PPO and SAC both
 train, save, reload and evaluate to the same numbers. 468 backend tests.
 
-## PHASE 14–15 — Multi-agent and commander — **Next**
+## PHASE 14–15 — Multi-agent and commander — **Complete**
 
-Scale 1 → 2 → 4 → 8 agents. `AgentManager`, `TeamManager`, `CommunicationManager`,
-`TaskManager`. `CommanderAgent` allocating high-level tasks only — it never touches
-control surfaces.
+Eight units, two teams, and a commander per team that decides *what each unit
+should be doing* — and nothing else.
+
+**A commander has no aircraft and no path to a control surface.** `CommanderAgent`
+is not a `BaseAgent`: it produces `Task` objects and hands them to `TaskManager`,
+which is the only thing that records who was told what. A unit's `RuleAgent` then
+decides whether it can carry the task out. The flight controller remains the sole
+writer of entity controls, exactly as it has been since PHASE 4, and a test
+asserts a commander cannot reach one.
+
+**A unit may refuse.** `apply_task()` returns a reason code either way —
+`ROUTE_AVAILABLE`, `LEADER_AVAILABLE`, `NO_ROUTE`, `LEADER_UNKNOWN`. An order is
+a request, not a write into the world; the Coordination panel shows the refusals
+next to the acceptances, so a team that is not doing what it was told is visible
+rather than silent.
+
+**A commander only knows what the datalink told it.** `TeamManager` builds its
+picture from `datalink.tracks_for()` and nothing else, so every position it
+reasons about carries a `report_age_s` and is subject to the same latency, loss
+and blackout as any other message. It cannot read truth. During a blackout the
+picture simply ages, which is the correct behaviour and is what a test checks.
+
+**Tasks are flight tasks.** `TaskType` is `PATROL`, `TRANSIT`, `ESCORT`, `HOLD`.
+Nothing models weapons, engagement or targeting, and a test asserts the member
+names.
+
+### Routing, at last
+
+`CommunicationManager` was added because the inbox had become a place where
+different kinds of message were drained by whoever got there first. It drains
+each unit's inbox exactly once per tick and routes by type — `POSITION_REPORT`
+to the datalink, `TASK_ORDER` to the order queue, `STATUS` to the status queue —
+and counts anything it does not recognise as `unrouted` rather than dropping it
+quietly.
+
+### Four defects worth recording
+
+*The commander declared every leader lost at t=0.* Coverage is computed from
+datalink tracks, and at the first tick no position report has been delivered yet
+— latency alone guarantees that. Coverage was therefore 0.00, every leader
+looked missing, and the commander promoted wingmen before the simulation had
+produced a single message. Silence before the first report is not evidence of a
+loss. The commander now trusts the plan until it has heard from the team at
+least once:
+
+```python
+member = picture.member(leader_id)
+if member is None or not member.heard_from:
+    # Trust the plan until the team has actually been heard from once.
+    return not self._heard_anything
+```
+
+*Eight tasks in one allocation pass got the same id.* `new_task_id()` was built
+from a millisecond timestamp, and eight tasks issued inside one pass land in the
+same millisecond — measured: **one unique id out of eight**. The `TaskManager`
+records overwrote each other and the register showed BLUE-01 escorting itself.
+A process-wide counter now makes the id unique regardless of clock resolution.
+The clock part is kept only so ids sort roughly by age.
+
+*A panel painted over the one below it.* Not a coordination bug, but found by
+running the app to look at the new panel: a `Panel` sizes itself to its content,
+so dropping one into a `flex-[3]` slot let it spill — with eight agents the
+decision feed rendered **6080 px tall inside a slot that had collapsed to 0**,
+over the training panel. The rails now scroll and floor their feeds, as the
+telemetry rail already did.
+
+The new layout check then found a second instance nobody had seen: in replay
+mode at 1280×720 the taller transport panel left the tactical view 171 px, and
+the view's own 320 px floor pushed it 149 px past the bottom of the window, over
+the footer. `e2e/coordination.mjs` measures every panel against its slot at two
+viewport sizes in all three stage modes, which is what caught it.
+
+*The dashboard header said PHASE 9 after three phases had shipped.* A literal in
+`health.py` that nobody remembered to bump. Bumping it again would only have
+reset the clock on the same mistake, so it is now checked against the last phase
+marked **Complete** in this file.
+
+### Scaling, measured
+
+3000 ticks per point, after a 200-tick warm-up, on this container:
+
+| agents | µs / tick | ticks / s | × real time | cost vs 1 agent |
+|-------:|----------:|----------:|-------------:|----------------:|
+| 1 | 254 | 3934 | 65.6× | 1.00× |
+| 2 | 500 | 2000 | 33.3× | 1.97× |
+| 4 | 1023 | 977 | 16.3× | 4.03× |
+| 8 | 2080 | 481 | 8.0× | 8.18× |
+
+Linear in the agent count, and eight agents still run at eight times real time.
+The agent loop is not what will limit this.
+
+The datalink is. Transmissions grow linearly — one report per unit per cycle —
+but each transmission is copied into every teammate's inbox, so the copies grow
+with the *team* size:
+
+| agents | transmissions / cycle | inbox copies / cycle |
+|-------:|----------------------:|---------------------:|
+| 1 | 1.0 | 1.0 |
+| 2 | 1.9 | 3.9 |
+| 4 | 3.9 | 15.4 |
+| 8 | 7.8 | 30.8 |
+
+(Eight units in two teams of four, so each report reaches four recipients, not
+seven — which is why the last row is not four times the one above it.) A single
+team of 32 would be the first thing to hurt, and the fix when it does is a
+per-team fan-out rather than a per-recipient copy.
+
+**Verified:** recording eight agents leaves `state_hash` identical run to run;
+a leader going DISABLED is followed within 2 s by the commander moving BLUE-02
+onto the leader's four-waypoint route while RED-02 keeps escorting, confirmed
+against the agent's own state and not just the register; a commander holds no
+reference that can reach a control surface. 497 backend tests.
 
 ## PHASE 16 — JSBSim adapter
 

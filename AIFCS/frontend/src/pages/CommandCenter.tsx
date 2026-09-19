@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState } from 'react'
 import { Activity, Cpu, Film, LayoutGrid, PencilRuler, Radio as RadioIcon } from 'lucide-react'
 import { DecisionFeed } from '@/components/DecisionFeed'
+import { CoordinationPanel } from '@/components/CoordinationPanel'
 import { DatalinkPanel } from '@/components/DatalinkPanel'
 import { EntityList } from '@/components/EntityList'
 import { EventFeed } from '@/components/EventFeed'
@@ -38,6 +39,14 @@ function ViewerLoading() {
     </div>
   )
 }
+
+/**
+ * A Panel sizes itself to its content, so dropping one straight into a sized
+ * flex slot lets it spill out and paint over whatever sits below it. Making the
+ * slot a flex column and stretching the panel inside keeps it in its box, where
+ * its own scrollable body takes over.
+ */
+const FILL_SLOT = 'flex flex-col [&>*]:min-h-0 [&>*]:flex-1'
 
 type MobileTab = 'view' | 'status' | 'units' | 'replay' | 'edit' | 'intel'
 
@@ -151,10 +160,14 @@ export function CommandCenter() {
             <EntityList />
             <PerceptionPanel />
             <DatalinkPanel />
+            <CoordinationPanel />
             <SafetyPanel />
           </div>
 
-          <div className="flex min-h-0 flex-col gap-3">
+          {/* The transport panel is taller in replay and edit mode, and the
+              tactical view will not go below 320 px — on a short screen the
+              column scrolls rather than letting the view spill over the footer. */}
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto [&>*]:shrink-0">
             {stageMode === 'replay' ? (
               <ReplayPanel />
             ) : stageMode === 'edit' ? (
@@ -162,7 +175,7 @@ export function CommandCenter() {
             ) : (
               <SimulationControls />
             )}
-            <div className="min-h-0 flex-1">
+            <div className="min-h-[320px] flex-1">
               {view === '3d' ? (
                 <Suspense fallback={<ViewerLoading />}>
                   <SimulationViewer3D onSwitchTo2D={() => setView('2d')} />
@@ -173,23 +186,26 @@ export function CommandCenter() {
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-col gap-3">
+          {/* Like the telemetry rail: the feeds get the spare height but never
+              less than their floor, and the rail scrolls once the fixed panels
+              leave nothing to share. */}
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 [&>*]:shrink-0">
             {stageMode === 'edit' ? (
-              <div className="min-h-0 flex-1">
+              <div className={`min-h-[320px] flex-1 ${FILL_SLOT}`}>
                 <ScenarioEditor />
               </div>
             ) : stageMode === 'replay' ? (
-              <div className="min-h-0 flex-1">
+              <div className={`min-h-[320px] flex-1 ${FILL_SLOT}`}>
                 <ScoreboardPanel />
               </div>
             ) : (
               <>
                 <IntelPanel />
                 {/* The decision feed carries more per entry, so it gets the larger share. */}
-                <div className="min-h-0 flex-[3]">
+                <div className={`min-h-[240px] flex-[3] ${FILL_SLOT}`}>
                   <DecisionFeed />
                 </div>
-                <div className="min-h-0 flex-[2]">
+                <div className={`min-h-[180px] flex-[2] ${FILL_SLOT}`}>
                   <EventFeed />
                 </div>
                 {/* Read-only: the environment and pipelines are real, but a run
@@ -229,6 +245,7 @@ export function CommandCenter() {
               <SystemStatusPanel />
               <PerceptionPanel />
               <DatalinkPanel />
+              <CoordinationPanel />
               <SafetyPanel />
             </>
           )}

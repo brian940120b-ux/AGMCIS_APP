@@ -27,6 +27,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Replay, scoring and run history](#replay-scoring-and-run-history)
 - [Editing scenarios](#editing-scenarios)
 - [Reinforcement learning](#reinforcement-learning)
+- [Teams, tasks and the commander](#teams-tasks-and-the-commander)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -312,9 +313,14 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `POST` | `/api/scenarios/{name}/clone` | Copy it under a new name |
 | `POST` | `/api/scenarios/import` | Store pasted or uploaded YAML |
 | `DELETE` | `/api/scenarios/{name}` | Delete a scenario |
+| `GET` | `/api/teams` | Every team, its members and how much of it the link covers |
+| `GET` | `/api/teams/{team}` | One team's picture, with the age of each report |
+| `GET` | `/api/tasks` | Every task issued, its status and the reason behind it |
+| `GET` | `/api/tasks/{entity_id}` | What one unit was told to do, and its history |
+| `GET` | `/api/commanders` | Each commander, its standing order and what it allocated |
 
-Training endpoints arrive in their respective phases and are documented as they
-land.
+Endpoints for phases not yet built are absent rather than stubbed — this API
+never answers for a capability the backend does not have.
 
 ### Flight model
 
@@ -518,13 +524,71 @@ it amber when the host cannot sustain the requested speed. Selecting 50x on a
 machine that can only manage 15x runs at 15x and says so — the result is
 identical either way, because speed changes pacing and never the timestep.
 
+### Teams, tasks and the commander
+
+Each team has a **commander** that decides what its units should be doing. It has
+no aircraft of its own, and no path to a control surface. Its whole output is a
+task:
+
+| Task | Meaning |
+|---|---|
+| `PATROL` | Fly your assigned circuit |
+| `TRANSIT` | Fly to a point and hold there |
+| `ESCORT` | Hold station on another unit |
+| `HOLD` | Maintain what you have; no new objective |
+
+Nothing here models weapons, engagement or targeting, and a test asserts the
+list.
+
+**A task is a request, not a write.** The unit's agent answers with a reason code
+whichever way it goes — `ROUTE_AVAILABLE` and `LEADER_AVAILABLE` when it takes
+the order, `NO_ROUTE` and `LEADER_UNKNOWN` when it cannot. A refused order leaves
+the unit flying what it had. The Coordination panel shows both, so a team that is
+not doing what it was told is visible rather than silent.
+
+**A commander only knows what the link delivered.** Its picture of the team is
+built from datalink reports alone, and every position it reasons about carries
+the age of the report it came from. It cannot read the truth state. Cut the link
+with a `blackout_windows` entry and the picture ages instead of updating — which
+is the honest result, not a bug.
+
+Run `team_eight` to see it: eight units in two teams of four, two two-ship
+elements per team.
+
+```
+curl -X POST http://127.0.0.1:8000/api/simulation/start \
+     -H 'Content-Type: application/json' -d '{"scenario":"team_eight"}'
+curl http://127.0.0.1:8000/api/teams
+curl http://127.0.0.1:8000/api/tasks
+```
+
+Disable a leader and the commander reallocates: within about two seconds its
+wingman is on the leader's route, while the other element carries on escorting.
+Set `commander_enabled: false` in `configs/agents.yaml` to fly the same scenario
+with no commander at all.
+
+**Eight agents cost eight times one agent** — measured, 3000 ticks per point:
+
+| agents | µs / tick | ticks / s | × real time |
+|-------:|----------:|----------:|------------:|
+| 1 | 254 | 3934 | 65.6× |
+| 2 | 500 | 2000 | 33.3× |
+| 4 | 1023 | 977 | 16.3× |
+| 8 | 2080 | 481 | 8.0× |
+
+Linear, and eight agents still run at eight times real time. What will limit
+larger runs is the datalink rather than the agents: each report is copied into
+every teammate's inbox, so the copies grow with the size of a *team* (1.0, 3.9,
+15.4 and 30.8 per report cycle for the rows above).
+
 ### Scenarios
 
 Scenarios are YAML files in `scenarios/`. `demo_alpha` is the reference
 scenario: four fictional units (`BLUE-01`, `BLUE-02`, `RED-01`, `RED-02`) on
-converging transit tracks. Add a scenario by dropping a new `.yaml` file beside
-it — it is validated on load, and a malformed file is rejected with a clear
-error rather than silently producing a wrong run.
+converging transit tracks. `team_eight` exercises the commander at scale and
+`training_navigation` is sized for RL episodes. Add a scenario by dropping a new
+`.yaml` file beside them — it is validated on load, and a malformed file is
+rejected with a clear error rather than silently producing a wrong run.
 
 ---
 
@@ -865,7 +929,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `306 passed`.
+**Success looks like:** `497 passed`.
 
 ### End-to-end dashboard test
 
@@ -879,7 +943,11 @@ npm run test:e2e:sim    # start / pause / step / reset drive the real engine
 npm run test:e2e:3d     # 3D view renders, every camera mode works
 npm run test:e2e:replay # record a run, then load, play, scrub and score it
 npm run test:e2e:editor # build a scenario in the UI, save it, then fly it
+npm run test:e2e:coordination  # eight units, two commanders, and no panel overlaps
 ```
+
+Each suite sets up the scenario it asserts against, so they can be run in any
+order against the same pair of servers.
 
 On a headless machine without a GPU, run the 3D suite with a software renderer:
 
@@ -972,8 +1040,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 8 | 3D Command Center (Three.js) | **Complete** |
 | 9 | Replay, scoring, database | **Complete** |
 | 10 | Scenario editor | **Complete** |
-| 11–13 | Gymnasium environment, PPO, SAC | Planned |
-| 14–15 | Multi-agent, commander agent | Planned |
+| 11–13 | Gymnasium environment, PPO, SAC | **Complete** |
+| 14–15 | Multi-agent, commander agent | **Complete** |
 | 16 | JSBSim adapter (swappable physics backend) | Planned |
 | 17–19 | Analytics, training centre, model centre | Planned |
 | 20 | Production hardening | Planned |

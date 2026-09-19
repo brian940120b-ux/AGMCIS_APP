@@ -16,6 +16,12 @@ router = APIRouter(tags=["health"])
 # Process start time, used for uptime reporting.
 _STARTED_AT = time.time()
 
+# The build's phase, shown in the Command Center header. It went stale twice by
+# being a literal nobody remembered to bump, so `test_health_api.py` now asserts
+# it matches the last phase marked Complete in docs/PHASES.md. Written with a
+# plain hyphen; the docs use an en dash and the test compares them accordingly.
+BUILD_PHASE = "PHASE 14-15"
+
 
 @router.get("/health")
 def health(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
@@ -41,7 +47,7 @@ def system_status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     registry = get_status_registry()
     return {
         "operational": registry.operational,
-        "phase": "PHASE 9",
+        "phase": BUILD_PHASE,
         "config_hash": settings.config_hash,
         "subsystems": registry.to_list(),
     }
