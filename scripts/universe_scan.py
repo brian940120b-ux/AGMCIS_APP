@@ -61,13 +61,26 @@ def main() -> int:
         print(f"\n  ✗ 篩選失敗:{type(e).__name__}: {e}")
         return 1
 
+    # 第三關是**逐幣查日線**,一趟要幾分鐘。下面第四關原本呼叫
+    # screened_universe(),而它會把整個 screen() 再跑一次 ——
+    # 白等一倍的時間,而且兩次的結果可能不一樣(成交額一直在動),
+    # 於是印出來的「過前三關 49」與「資料齊全 49」講的其實是兩批幣。
+    # 直接拿這一趟的結果往下走。
+    monkey = picked
+
     print(f"\n{LINE}\n  過前三關的 {len(picked)} 個\n{LINE}")
     for i in range(0, len(picked), 6):
         print("  " + "  ".join(f"{s:<16}" for s in picked[i:i + 6]))
 
     print(f"\n{LINE}\n  第四關:資料齊全到可以誠實記帳嗎\n{LINE}")
     print("  (逐幣補抓資金費歷史 —— 這一關是 73.7 小時那次的教訓)\n")
-    final = screened_universe()
+    import portfolio.universe as _uni
+    _orig = _uni.screen
+    _uni.screen = lambda **kw: monkey          # 重用上面那一趟的結果
+    try:
+        final = screened_universe()
+    finally:
+        _uni.screen = _orig
 
     print(f"\n{LINE}\n  結果\n{LINE}")
     print(f"  過前三關      {len(picked)}")

@@ -1198,6 +1198,8 @@ def block_sim() -> str:
                '它們不是即時的,也不該是:回撤與進出次數本來就是'
                '一段時間累積出來的東西。</p>')
 
+    out.append(_cohort_row())
+
     if s.backtest:
         train, test, test_dd, as_of = s.backtest
         f = lambda v: "—" if v is None else f"{float(v):.2f}"
@@ -1218,6 +1220,62 @@ def block_sim() -> str:
                    '訓練/驗證數字。跑一次 '
                    '<code>python scripts/research.py</code>。</div>')
     return "".join(out) + '</div>'
+
+
+def _cohort_row() -> str:
+    """測試組(動態交易池)跟主城的對照。
+
+    2026-09-19 執政官:「有一種篩選機制。」
+    測試組跟主城唯一的差別是交易池:主城七幣寫死,它每天重篩
+    (972 個合約 -> 49 個過四道結構性關卡)。
+
+    **只印能比的東西。** 兩邊起始金都是 10,000,同一份 plan()/tick(),
+    同一段真實價格 —— 所以報酬直接可比,不需要任何換算。
+    """
+    def _compute():
+        try:
+            from portfolio.account import Account
+            from portfolio.paper import SCREENED
+            from portfolio.scorecard import live, score
+            card = score(SCREENED.curve_path)
+            a = Account.load(SCREENED.state_path)
+            marks = all_prices().get("px") or {}
+            lv = live(a, {k: v[0] for k, v in marks.items()
+                          if k in a.positions or k in (a.bench_start or {})})
+            return {"card": card, "live": lv, "pool": len(a.positions)}
+        except Exception as e:                       # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    got = _cached("cohort", 60, _compute)
+    head = ('<div class="sect-h">測試組 · 動態交易池</div>')
+    if got.get("error"):
+        return (head + '<div class="flag">算不出來:'
+                + html.escape(got["error"]) + '</div>')
+
+    card, lv = got["card"], got["live"]
+    if not card.days:
+        return (head + '<div class="flag">交易池篩選<b>已經接上</b>,'
+                '但測試組還沒記過帳 —— 它跟主城一起每天 00:30 跑。<br>'
+                '想現在就看:<code>python -c "from portfolio.paper import '
+                'tick, SCREENED; print(tick(cfg=SCREENED))"</code><br>'
+                '2026-09-19 實測篩選:972 個合約 → 可交易 971 → '
+                '成交額≥1000萬 <b>73</b> → 歷史≥1000天 <b>49</b> → '
+                '資料齊全 <b>49</b>。<br>'
+                '⚠️ 當年害死測試組的 <code>1000PEPE-USDT</code> 這次'
+                '通過了第四關(資金費歷史抓得到)—— 那一關就是為它加的。'
+                '</div>')
+
+    cells = [kv("測試組報酬",
+                _n(lv.return_pct, "+.2f") + "%", tone(lv.return_pct or 0)),
+             kv("交易池", f"{got['pool']} 檔在倉"),
+             kv("記帳天數", f"{card.days} 天"),
+             kv("走完的進出", f"{card.round_trips} 次")]
+    return (head + f'<div class="grid">{"".join(cells)}</div>'
+            + '<p class="note">跟主城<b>唯一的差別是交易池</b> —— 策略、'
+            '波動目標、槓桿、回看期完全相同,所以差異只能來自選幣。'
+            '主城不受影響。<br>'
+            '⚠️ <b>幾天的資料比不出高下。</b> 上面那個報酬現在只是'
+            '兩條剛開始的曲線,不是結論。</p>')
 
 
 def _sim_rows(lv) -> str:
