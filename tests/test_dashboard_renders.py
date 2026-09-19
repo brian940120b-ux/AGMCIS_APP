@@ -288,3 +288,26 @@ def test_a_shorts_stop_is_described_as_above_the_price():
               exit_rule="站上 50 日均線", now=NOW)
     text = " ".join(str(x) for r in t.exit_plan() for x in r)
     assert "上方" in text
+
+
+# ══════════════════════════════════════════════════════════
+# 五、「空清單」不准被講成「沒有倉」· 2026-09-19
+# ══════════════════════════════════════════════════════════
+def test_an_empty_position_query_is_not_reported_as_no_positions():
+    """2026-09-19 17:21 實測:App 上是「持倉 (3)」,而 allPosition
+    同一時間回空,面板照樣寫「交易所端 **0 筆持倉**」。
+
+    **那是最危險的一種假話**:對齊單會據此叫人去開一個他已經持有的
+    倉。系統不是不知道,是它以為自己知道。
+
+    空清單只能講一件事:我問到的是空的。
+    """
+    import scripts.dashboard as dash
+    import time as _t
+    dash._CACHE["exchange"] = (_t.time(), {
+        "balances": {}, "positions": [], "orders": [],
+        "host": "open-api-vst.bingx.com", "who": "fc43…SGDw", "live": False})
+    html_ = dash.block_exchange()
+    assert "0 筆持倉" not in html_
+    assert "空清單不等於沒有倉" in html_
+    assert "probe_positions_raw" in html_

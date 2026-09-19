@@ -77,9 +77,15 @@ def main() -> int:
         rows = []
 
     if not rows:
-        print("  **目前沒有持倉**,所以看不到欄位長什麼樣。")
-        print("  請在 App 開一個小倉(可以是 VST 模擬倉),"
-              "設好止損,再跑一次這支。")
+        # ⚠️ 2026-09-19 修:這裡原本印「**目前沒有持倉**」——
+        # 那是**結論**,不是證據,而且它是錯的:同一時刻 App 上
+        # 有 3 筆倉。空清單只能說「我問到的是空的」。
+        print("  這個查詢回了**空清單**。")
+        print("  ⚠️ **空清單不等於沒有倉。** 2026-09-19 實測:"
+              "App 上有 3 筆倉,")
+        print("     而 allPosition 同一時間回空。原因還沒查清楚 ——")
+        print("     跑 `python scripts/probe_positions_raw.py`,"
+              "它會把原始信封貼出來。")
     for i, row in enumerate(rows, 1):
         print(f"\n  ── 第 {i} 筆 ──")
         if not isinstance(row, dict):
