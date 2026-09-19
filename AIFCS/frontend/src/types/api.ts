@@ -545,3 +545,70 @@ export interface ScenarioCatalogue {
 export type ScenarioValidation =
   | { valid: true; scenario: ScenarioDetail }
   | { valid: false; error: string }
+
+/* ------------------------------------------------------------ PHASE 11-13 */
+
+export interface TrainingStatus {
+  available: boolean
+  install_hint: string | null
+  how_to_run: string
+  /** False until the training centre phase: a long job needs progress,
+   *  cancellation and reload survival before a button can honestly exist. */
+  browser_control: boolean
+  browser_control_note: string
+  device: string
+  configured_device: string
+  algorithms: string[]
+  scenario: string
+  entity_id: string | null
+  max_episode_seconds: number
+  output_directory: string
+  hyperparameters: Record<string, Record<string, number | null>>
+}
+
+export interface TrainingEnvironmentSpec {
+  id: string
+  scenario: string
+  entity_id: string | null
+  observation_size: number
+  observation_layout_version: number
+  action_channels: string[]
+  decision_rate_hz: number
+  ticks_per_step: number
+  step_seconds: number
+  max_episode_steps: number
+  reward_weights: Record<string, number>
+  notice: string
+}
+
+export interface TrainingReward {
+  terms: string[]
+  weights: Record<string, number>
+  notice: string
+}
+
+export interface TrainedModel {
+  model_id: string
+  path: string
+  size_bytes: number
+  created_at: number
+  algorithm: string
+  card: {
+    training_id?: string
+    algorithm?: string
+    seed?: number
+    total_timesteps?: number
+    elapsed_s?: number
+    device?: string
+    environment?: { scenario?: string; observation_layout_version?: number }
+    evaluation?: {
+      episodes: number
+      mean_reward: number
+      std_reward: number
+      mean_episode_steps: number
+      mean_goals_reached: number
+      endings: Record<string, number>
+    }
+  } | null
+  card_error?: string
+}

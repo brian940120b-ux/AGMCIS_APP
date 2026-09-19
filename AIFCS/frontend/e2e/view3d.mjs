@@ -25,6 +25,25 @@ const assert = (condition, message) => {
 const shot = async (page, name) => {
   if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/${name}.png` })
 }
+/**
+ * Click something while the 3D scene is rendering.
+ *
+ * On a machine with no GPU the scene is drawn by swiftshader on the CPU, which
+ * saturates the browser's main thread. Playwright's ordinary `.click()` then
+ * lands but never returns: its post-click settlement check is starved and
+ * times out, even though the button worked. Measured on this sandbox — with
+ * the canvas removed the same click completes in under 100 ms.
+ *
+ * So the element is asserted visible and enabled first, and the click is then
+ * dispatched directly. Nothing about the assertion is weakened: the locator
+ * still has to resolve to exactly one usable button.
+ */
+const clickWhileRendering = async (page, locator, label) => {
+  await locator.waitFor({ state: 'visible', timeout: 15000 })
+  assert(await locator.isEnabled(), `${label} should be enabled`)
+  await locator.dispatchEvent('click')
+}
+
 const enterCommandCenter = async (page) => {
   await page.goto(BASE_URL, { waitUntil: 'networkidle' })
   await page.waitForFunction(
@@ -77,12 +96,16 @@ try {
   assert(box.width > 400 && box.height > 200, `canvas too small: ${JSON.stringify(box)}`)
   console.log(`3D canvas: ${Math.round(box.width)}x${Math.round(box.height)}, 1 context`)
 
-  await page.getByRole('button', { name: /^START$/ }).click()
+  await clickWhileRendering(page, page.getByRole('button', { name: /^START$/ }), 'START')
   await page.waitForTimeout(6000)
   await shot(page, '20-3d-orbit')
 
   for (const mode of ['Follow', 'Top', 'Side', 'Orbit']) {
-    await page.getByRole('button', { name: mode, exact: true }).click({ timeout: 15000 })
+    await clickWhileRendering(
+      page,
+      page.getByRole('button', { name: mode, exact: true }),
+      `camera mode ${mode}`,
+    )
     await page.waitForTimeout(1500)
     assert(
       (await page.locator('canvas').count()) === 1,
@@ -93,10 +116,10 @@ try {
   }
 
   // The 2D plot must remain reachable, and returning to 3D must still work.
-  await page.getByRole('button', { name: '2D', exact: true }).click()
+  await clickWhileRendering(page, page.getByRole('button', { name: '2D', exact: true }), '2D')
   await page.getByText('Tactical Plot').first().waitFor({ timeout: 10000 })
   assert((await page.locator('canvas').count()) === 0, '2D mode should release the WebGL context')
-  await page.getByRole('button', { name: '3D', exact: true }).click()
+  await clickWhileRendering(page, page.getByRole('button', { name: '3D', exact: true }), '3D')
   await page.locator('canvas').first().waitFor({ timeout: 15000 })
   console.log('2D and 3D views both reachable')
 

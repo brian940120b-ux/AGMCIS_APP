@@ -166,6 +166,32 @@ class SimulationEngine:
         )
         return scenario
 
+    def unload(self) -> None:
+        """Let go of the loaded scenario and empty the world.
+
+        Needed when the scenario file is deleted while it is loaded. Without
+        this the engine keeps pointing at a file that no longer exists, the
+        dashboard goes on offering it as the loaded scenario, and START fails
+        with "scenario file not found" for no reason the operator can see.
+
+        Refuses while running: a scenario in use is guarded further up, and
+        pulling the world out from under a running loop would be worse than
+        the stale pointer this exists to clear.
+        """
+        if self.clock.state is ClockState.RUNNING:
+            raise SimulationError("cannot unload a scenario while the simulation is running")
+
+        name = self.scenario.name if self.scenario else None
+        self.scenario = None
+        self.world = WorldState()
+        self.agents.clear()
+        self.comms.clear_participants()
+        self.datalink.reset()
+        self.controller.reset()
+        self.clock.reset()
+        self._end_reason = None
+        log.info("scenario unloaded", extra={"event": "SCENARIO_UNLOADED", "scenario": name})
+
     def _sensor_config(self) -> SensorConfig:
         sensors = self.settings.sensors
         return SensorConfig(

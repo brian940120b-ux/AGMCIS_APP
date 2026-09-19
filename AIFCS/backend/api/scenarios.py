@@ -201,4 +201,13 @@ def scenario_delete(
         raise _bad_request(exc) from exc
     if not removed:
         raise HTTPException(status_code=404, detail=f"no such scenario: {name}")
-    return {"name": name, "deleted": True}
+
+    # The engine may still be pointing at the file that has just gone. Left
+    # alone it keeps reporting it as loaded, the dashboard pre-selects it, and
+    # the next START fails with "scenario file not found".
+    unloaded = False
+    if engine.scenario is not None and engine.scenario.name == name:
+        engine.unload()
+        unloaded = True
+
+    return {"name": name, "deleted": True, "unloaded_from_engine": unloaded}

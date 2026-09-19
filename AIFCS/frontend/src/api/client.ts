@@ -28,6 +28,10 @@ import type {
   ScenariosResponse,
   ScenarioValidation,
   ScoringWeights,
+  TrainedModel,
+  TrainingEnvironmentSpec,
+  TrainingReward,
+  TrainingStatus,
   SensorStatus,
   SimEvent,
   SimulationStatus,
@@ -157,4 +161,14 @@ export const api = {
     request<{ name: string; deleted: boolean }>(`/api/scenarios/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+
+  // Training (PHASE 11-13). Read-only: runs are started from the command line
+  // until the training centre can report progress and be cancelled.
+  trainingStatus: () => request<TrainingStatus>('/api/training/status'),
+  trainingEnvironment: () => request<TrainingEnvironmentSpec>('/api/training/environment'),
+  trainingReward: () => request<TrainingReward>('/api/training/reward'),
+  trainingModels: () =>
+    request<{ available: boolean; count: number; models: TrainedModel[]; install_hint?: string }>(
+      '/api/training/models',
+    ),
 }

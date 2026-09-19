@@ -352,17 +352,59 @@ class StorageSettings(BaseModel):
 
 
 class RewardWeights(BaseModel):
-    """Reward terms are weights, never hard-coded constants inside the engine."""
+    """Reward terms are weights, never hard-coded constants inside the engine.
 
-    survival: float = 1.0
+    The per-step terms are deliberately small. Measuring a 400-step episode
+    showed survival, coordination, information and smoothness contributing a
+    near-constant 760 of ~780 total reward while navigation — the only term the
+    policy could actually change — moved by +/-40. A policy cannot learn from
+    5% signal, so the terms it cannot influence are worth little per step and
+    the ones it can are worth a lot.
+    """
+
+    survival: float = 0.05
     navigation: float = 1.0
     formation: float = 0.5
-    mission: float = 2.0
-    coordination: float = 0.5
-    information: float = 0.25
+    mission: float = 5.0
+    coordination: float = 0.05
+    information: float = 0.05
+    # Terminal, not per-step: paid once if the episode ends in a crash, leaving
+    # the world, or being disabled.
+    crash_penalty: float = -50.0
     collision_penalty: float = -5.0
     energy_penalty: float = -0.1
-    control_smoothness: float = 0.2
+    control_smoothness: float = 0.05
+
+
+class AlgorithmSettings(BaseModel):
+    """Hyperparameters for one algorithm. Tuning lives in YAML, never in code."""
+
+    total_timesteps: int = 200_000
+    learning_rate: float = 3e-4
+    gamma: float = 0.99
+    batch_size: int = 64
+    n_steps: int | None = None  # PPO only; SAC has no rollout length
+
+    @field_validator("total_timesteps", "batch_size")
+    @classmethod
+    def _positive_int(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("must be greater than zero")
+        return v
+
+    @field_validator("learning_rate")
+    @classmethod
+    def _positive_rate(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("learning_rate must be greater than zero")
+        return v
+
+    @field_validator("gamma")
+    @classmethod
+    def _is_a_discount(cls, v: float) -> float:
+        if not 0.0 < v <= 1.0:
+            raise ValueError("gamma must be in (0, 1]")
+        return v
 
 
 class TrainingSettings(BaseModel):
@@ -370,6 +412,13 @@ class TrainingSettings(BaseModel):
     output_directory: str = "models"
     log_directory: str = "data/training"
     reward_weights: RewardWeights = Field(default_factory=RewardWeights)
+    ppo: AlgorithmSettings = Field(default_factory=AlgorithmSettings)
+    sac: AlgorithmSettings = Field(default_factory=lambda: AlgorithmSettings(batch_size=256))
+    # The task the environment trains on. demo_alpha's legs are three minutes
+    # long, so an episode would end before a single waypoint was reached.
+    scenario: str = "training_navigation"
+    entity_id: str | None = None
+    max_episode_seconds: float = 120.0
 
     @field_validator("device")
     @classmethod
@@ -445,6 +494,11 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
     reward_section = training_doc.get("reward", {})
     if isinstance(reward_section, dict) and "weights" in reward_section:
         training_section["reward_weights"] = reward_section["weights"]
+    # ppo: and sac: are top-level sections in training.yaml, not nested under
+    # training:, because that is how they read.
+    for algorithm in ("ppo", "sac"):
+        if algorithm in training_doc:
+            training_section[algorithm] = training_doc[algorithm]
 
     agents_section = dict(agents_doc.get("agents", {}))
     if "rule_agent" in agents_doc:

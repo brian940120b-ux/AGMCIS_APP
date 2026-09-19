@@ -4,14 +4,15 @@ A research, education and AI-training platform for **multi-agent flight simulati
 Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstract**
 (`BLUE-01`, `RED-02`, …). See [Safety Scope](#safety-scope).
 
-> **Current status: PHASE 10 complete.** Scenarios can now be **written from the
-> dashboard**: create, edit, clone, delete, import and export, with a live 3D
-> preview of where the units start and validation by the same parser the
-> simulation uses — so the editor cannot save a scenario the engine would refuse.
-> Runs are recorded, stored and scored (PHASE 9), and REPLAY mode plays them back
-> with real transport controls and per-term score breakdowns. Training is **not
-> implemented yet**; the dashboard reports it as `NOT_IMPLEMENTED` rather than
-> faking it.
+> **Current status: PHASE 13 complete.** A flight policy can now be **trained by
+> reinforcement learning** against the real simulation — same 6DOF physics, same
+> noisy sensors, same safety layer. `AIFCSCombatEnv` is a Gymnasium environment,
+> PPO and SAC run through Stable-Baselines3, and every reward term is weighted
+> from YAML and reported separately. Runs are recorded, stored and scored
+> (PHASE 9), scenarios are editable from the dashboard (PHASE 10), and REPLAY
+> mode plays runs back with per-term score breakdowns. Training itself is
+> started from the command line; the dashboard shows what is trained and says
+> so, rather than offering a button that cannot report progress or be cancelled.
 
 ---
 
@@ -25,6 +26,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Configuration](#configuration)
 - [Replay, scoring and run history](#replay-scoring-and-run-history)
 - [Editing scenarios](#editing-scenarios)
+- [Reinforcement learning](#reinforcement-learning)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -295,6 +297,11 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `POST` | `/api/runs/{id}/score` | Recompute the score from the recording |
 | `DELETE` | `/api/runs/{id}` | Delete a run, its rows and its recording |
 | `GET` | `/api/scoring/weights` | The standard runs are judged against |
+| `GET` | `/api/training/status` | Device, algorithms, and how to start a run |
+| `GET` | `/api/training/environment` | The environment a policy is trained against |
+| `GET` | `/api/training/reward` | Every reward term and its weight |
+| `GET` | `/api/training/models` | Trained policies with their cards |
+| `GET` | `/api/training/runs` | Recorded training runs |
 | `GET` | `/api/scenarios` | Every scenario, with a reason for any that will not load |
 | `GET` | `/api/scenarios/template` | A minimal valid scenario to start from |
 | `GET` | `/api/scenarios/{name}` | One scenario, plus the document the editor edits |
@@ -728,6 +735,119 @@ is atomic: a crash or a full disk leaves the previous file intact rather than a
 truncated one. The temporary file's permissions are corrected before the rename
 — Python creates it at `0600`, and a scenario only its writer can read would
 stop loading the moment the backend ran as a different user.
+
+---
+
+## Reinforcement learning
+
+A flight policy can be trained against the simulation itself — not a reduced
+model of it. The same fixed-timestep 6DOF physics, the same sensor model with
+its noise and dropout, the same datalink, and the same safety layer between the
+policy's output and the control surfaces. That costs speed and buys the only
+thing that matters: a policy trained here has been trained against the system it
+will actually fly.
+
+**Nothing in this models weapons, engagement or targeting.** The task is flight
+and navigation, and the reward has no term for anything else. A test asserts it.
+
+### Install the stack
+
+The RL dependencies are large and optional, so they are kept out of the default
+install. Everything else works without them.
+
+```bash
+.venv/bin/pip install -r requirements-ml.txt
+```
+
+### Train
+
+```bash
+cd backend
+../.venv/bin/python train.py --algorithm ppo --timesteps 200000 --evaluate 5
+../.venv/bin/python train.py --list          # what has been trained
+```
+
+Training is CLI-only for now. A long job needs progress reporting, cancellation
+and survival across a page reload; a START button in the dashboard that cannot
+do those things would be a control that does not do what it appears to. The
+dashboard's Training panel shows the device, the environment, the reward and
+every trained policy, and gives the command.
+
+### The environment
+
+| | |
+|---|---|
+| Id | `AIFCSCombatEnv-v0` |
+| Observation | 46 bounded floats: 12 ego, 3 contacts x 9, 7 goal |
+| Action | 4 channels in −1..1 — aileron, elevator, rudder, throttle |
+| Step | One agent decision (6 physics ticks at 60 Hz / 10 Hz) |
+| Task scenario | `training_navigation` |
+
+One unit is flown by the policy; every other unit keeps its rule agent, so the
+policy learns in traffic rather than in an empty sky.
+
+The observation is what the **sensor model and datalink gave the agent** — noisy,
+delayed, sometimes missing — never the truth state. Encoding truth would train a
+policy that cannot fly once it meets the real perception pipeline. Every element
+is normalised and clipped: an unbounded input is how a policy learns to exploit
+one enormous number, and a NaN is how training dies twenty minutes in.
+
+`training_navigation` exists because demo_alpha's first leg is 40 km — three
+minutes at cruise — so a two-minute episode would end before the aircraft
+reached a single waypoint and the navigation reward would never fire. Its legs
+are about 5 km.
+
+### The reward
+
+Ten terms, each weighted from `configs/training.yaml` and reported separately,
+so a reward is always explainable:
+
+```json
+{"total": 2.02, "terms": {"survival": 1.0, "navigation": 0.109, ...},
+ "weighted": {"survival": 0.05, "navigation": 0.109, ...},
+ "notes": {"goal_distance_m": 26772.5, "teammates_held": "1/1"}}
+```
+
+#### Why the per-step weights are small
+
+The first trained policy scored **worse** than an untrained one: 704 against
+782, and it reached no waypoints at all. Reading the term breakdown showed why.
+Of ~780 total reward, survival contributed 400, coordination 200, information 85
+and smoothness 78 — all nearly constant. Navigation, the only term the policy
+could actually change, moved by ±40. **Five percent signal.**
+
+Two changes fixed it, both in the measurement rather than the algorithm:
+
+- **The terminal crash penalty was split out of the per-step survival term.**
+  One term was doing two jobs: paying for each step alive, and punishing the
+  loss of the aircraft. Rolling them together made a constant that paid every
+  step regardless of behaviour.
+- **The terms a policy cannot influence are now worth little per step, and the
+  ones it can are worth a lot.** Survival 0.05, navigation 1.0, mission 5.0.
+
+Retrained on the same seed and budget, navigation went from 36.6 to **241.7**,
+and the policy beat both the untrained network and a hand-trimmed baseline:
+
+| | reward | waypoints reached |
+|---|---|---|
+| Untrained network | 98.4 | 1.00 |
+| Trimmed, no policy | 203.8 | 1.00 |
+| **PPO, 60k steps** | **306.5** | 1.00 |
+
+Also calibrated: `progress_scale_m` is derived from cruise speed x step
+duration (about 22 m), not left at a round 200 m. At 200 m the navigation term
+could never exceed 0.11 while survival paid 1.0.
+
+### Saved policies
+
+Every model is saved with a card naming the scenario, seed, hyperparameters,
+observation layout version and reward weights. A `.zip` alone does not say which
+environment shaped it, and a policy run against a different observation layout
+is silently wrong rather than loudly broken — so loading one whose layout has
+moved on logs a warning.
+
+Training runs and models are recorded in the PHASE 9 database, so training
+history is queryable the same way run history is.
 
 ---
 

@@ -38,6 +38,10 @@ class Behaviour(StrEnum):
     PATROL = "PATROL"
     FORMATION = "FORMATION"
     AVOID = "AVOID"
+    # A learned policy chose the controls directly (PHASE 11). Kept distinct
+    # from the rule behaviours so the decision feed never implies a policy
+    # reasoned its way to NAVIGATE when it did not.
+    POLICY = "POLICY"
 
 
 class ReasonCode(StrEnum):
@@ -57,6 +61,12 @@ class ReasonCode(StrEnum):
     HEADING_ERROR_LARGE = "HEADING_ERROR_LARGE"
     SPEED_BELOW_TARGET = "SPEED_BELOW_TARGET"
     SPEED_ABOVE_TARGET = "SPEED_ABOVE_TARGET"
+
+    # PHASE 11. A policy's controls come from a network, not from a rule, and
+    # saying so is the honest reason code. The measured codes above are still
+    # emitted alongside it, so the feed shows the conditions the policy acted
+    # under even though they did not cause the action.
+    POLICY_ACTION = "POLICY_ACTION"
 
 
 @dataclass(frozen=True)

@@ -188,6 +188,34 @@ def test_a_scenario_in_use_cannot_be_changed(client, template):
     assert client.delete("/api/scenarios/probe_running").status_code == 200
 
 
+def test_deleting_a_loaded_scenario_releases_it(client, template):
+    """Left pointing at a deleted file, the engine goes on reporting it as
+    loaded, the dashboard pre-selects it, and the next START fails with
+    "scenario file not found" for no reason the operator can see."""
+    client.post("/api/scenarios", json=_named(template, "probe_loaded"))
+    client.post("/api/simulation/start", json={"scenario": "probe_loaded"})
+    client.post("/api/simulation/stop")
+    assert client.get("/api/scenarios").json()["loaded"]["name"] == "probe_loaded"
+
+    body = client.delete("/api/scenarios/probe_loaded").json()
+    assert body["unloaded_from_engine"] is True
+    assert client.get("/api/scenarios").json()["loaded"] is None
+
+    # And the default scenario still starts cleanly afterwards.
+    assert client.post("/api/simulation/start", json={"scenario": "demo_alpha"}).status_code == 200
+    client.post("/api/simulation/stop")
+
+
+def test_deleting_an_unloaded_scenario_leaves_the_engine_alone(client, template):
+    client.post("/api/scenarios", json=_named(template, "probe_spare"))
+    client.post("/api/simulation/start", json={"scenario": "demo_alpha"})
+    client.post("/api/simulation/stop")
+
+    body = client.delete("/api/scenarios/probe_spare").json()
+    assert body["unloaded_from_engine"] is False
+    assert client.get("/api/scenarios").json()["loaded"]["name"] == "demo_alpha"
+
+
 def test_a_scenario_made_through_the_api_actually_runs(client, template):
     """The point of the editor: what it writes must fly."""
     document = _named(template, "probe_flyable")

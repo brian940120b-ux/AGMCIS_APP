@@ -20,6 +20,7 @@ from api.replay import router as replay_router
 from api.scenarios import router as scenarios_router
 from api.simulation import router as simulation_router
 from api.telemetry import router as telemetry_router
+from api.training import router as training_router
 from core.config import APP_TITLE, Settings, get_settings
 from core.logging_config import configure_logging, get_logger
 from core.runtime import get_broadcaster, get_engine, get_run_manager, get_status_registry
@@ -92,6 +93,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ),
     )
 
+    # PHASE 11-13. The environment and the pipelines are real; starting a run
+    # from the browser is not, and the detail says so rather than implying a
+    # button exists somewhere.
+    from training.pipeline import resolve_device, rl_available
+
+    if rl_available():
+        registry.set_state(
+            "training",
+            SubsystemState.ONLINE,
+            "Gymnasium env, PPO and SAC on "
+            f"{resolve_device(settings.training.device)} - run from backend/train.py",
+        )
+    else:
+        registry.set_state(
+            "training",
+            SubsystemState.OFFLINE,
+            "RL stack not installed: pip install -r requirements-ml.txt",
+        )
+
     # Opening the database here means a broken path fails at startup with a
     # clear message, rather than on the first run hours later.
     get_run_manager()
@@ -147,6 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(agents_router, prefix="/api")
     app.include_router(replay_router, prefix="/api")
     app.include_router(scenarios_router, prefix="/api")
+    app.include_router(training_router, prefix="/api")
     app.include_router(telemetry_router)
 
     @app.get("/", tags=["meta"])

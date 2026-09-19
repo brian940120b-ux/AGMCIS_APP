@@ -14,6 +14,7 @@ import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
 import { SystemStatusPanel } from '@/components/SystemStatusPanel'
+import { TrainingPanel } from '@/components/TrainingPanel'
 import { TacticalPlot } from '@/components/TacticalPlot'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { useSimulationPolling } from '@/hooks/useSimulationPolling'
@@ -191,6 +192,9 @@ export function CommandCenter() {
                 <div className="min-h-0 flex-[2]">
                   <EventFeed />
                 </div>
+                {/* Read-only: the environment and pipelines are real, but a run
+                    is started from the command line. */}
+                <TrainingPanel />
               </>
             )}
           </div>
@@ -247,7 +251,12 @@ export function CommandCenter() {
               <ScenarioYamlPanel />
             </>
           )}
-          {tab === 'intel' && <IntelPanel />}
+          {tab === 'intel' && (
+            <>
+              <IntelPanel />
+              <TrainingPanel />
+            </>
+          )}
         </main>
       )}
 

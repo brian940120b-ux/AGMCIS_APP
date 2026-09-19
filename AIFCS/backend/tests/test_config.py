@@ -76,5 +76,17 @@ def test_rejects_malformed_yaml_document(tmp_path):
 
 def test_reward_weights_load_from_training_config(settings):
     weights = settings.training.reward_weights
-    assert weights.mission == pytest.approx(2.0)
+    assert weights.mission == pytest.approx(5.0)
     assert weights.collision_penalty < 0, "penalties must be negative"
+    assert weights.crash_penalty < 0, "losing the aircraft must cost, not pay"
+
+
+def test_the_learnable_reward_terms_outweigh_the_constant_ones(settings):
+    """PHASE 12: survival, coordination, information and smoothness are nearly
+    constant for a competent policy. If their combined per-step weight rivals
+    navigation's, the signal a policy can act on is drowned by one it cannot —
+    which is exactly why the first trained policy scored worse than an
+    untrained one."""
+    weights = settings.training.reward_weights
+    constant = weights.survival + weights.coordination + weights.information + weights.control_smoothness
+    assert constant < weights.navigation

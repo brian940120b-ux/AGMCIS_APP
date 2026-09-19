@@ -1,0 +1,65 @@
+# TRAINING_NAVIGATION — the reinforcement-learning task scenario (PHASE 11).
+#
+# Everything here is FICTIONAL and abstract. The task is flight and navigation:
+# hold the aircraft inside its envelope and fly a short circuit. Nothing in this
+# scenario models weapons, engagement or targeting, and nothing rewards them.
+#
+# Why the legs are short: demo_alpha's first leg is 40 km, about three minutes
+# at cruise, so a two-minute training episode would end before the aircraft
+# reached a single waypoint and the navigation reward would never fire. These
+# legs are roughly 5 km — about 23 seconds each — so one episode covers several
+# waypoints and the policy gets a usable signal.
+#
+# Coordinates are metres in a local tangent plane: +X east, +Y north, +Z up.
+
+scenario:
+  name: training_navigation
+  description: >
+    Two fictional flight units on short circuits, used as the reinforcement
+    learning task. BLUE-01 is the unit under training; BLUE-02 flies its own
+    circuit under the rule agent, so the policy learns in traffic rather than
+    in an empty sky.
+  version: "1.0"
+  duration: 600
+  seed: 20260401
+
+environment:
+  gravity_mps2: 9.80665
+  air_density_kgpm3: 1.225
+  wind: [0.0, 0.0, 0.0]
+
+entities:
+  # The unit under training. The environment replaces its rule agent with the
+  # policy; the waypoints below become the navigation goal.
+  - id: BLUE-01
+    type: fictional_aircraft
+    team: BLUE
+    position: [-2500.0, 0.0, 6000.0]
+    velocity: [220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 1.5708]      # yaw = +90 deg (east)
+    controls:
+      throttle: 0.26                     # trimmed for level flight at 220 m/s
+    agent: rule
+    waypoints:
+      - [2500.0, 0.0, 6000.0]
+      - [2500.0, 5000.0, 6000.0]
+      - [-2500.0, 5000.0, 6000.0]
+      - [-2500.0, 0.0, 6000.0]
+
+  # Traffic. Flies a separate circuit 1 km higher, under the ordinary rule
+  # agent, so the trainee has a teammate to hold in its picture and separation
+  # to keep without being on a collision course by construction.
+  - id: BLUE-02
+    type: fictional_aircraft
+    team: BLUE
+    position: [2500.0, 2500.0, 7000.0]
+    velocity: [-220.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, -1.5708]     # yaw = -90 deg (west)
+    controls:
+      throttle: 0.26
+    agent: rule
+    waypoints:
+      - [-2500.0, 2500.0, 7000.0]
+      - [-2500.0, -2500.0, 7000.0]
+      - [2500.0, -2500.0, 7000.0]
+      - [2500.0, 2500.0, 7000.0]

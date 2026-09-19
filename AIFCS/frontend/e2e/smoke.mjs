@@ -15,6 +15,7 @@
 import { chromium } from 'playwright'
 
 const BASE_URL = process.env.AIFCS_UI_URL ?? 'http://127.0.0.1:5173'
+const API_URL = process.env.AIFCS_API_URL ?? 'http://127.0.0.1:8000'
 const SHOT_DIR = process.env.AIFCS_SHOT_DIR ?? null
 const EXECUTABLE = process.env.PLAYWRIGHT_CHROMIUM ?? undefined
 
@@ -76,10 +77,22 @@ try {
     await page.getByText('60 Hz').first().isVisible(),
     'runtime configuration shows the real tick rate',
   )
-  // Subsystems that are still unbuilt must keep saying so.
+  // Every subsystem must report its real state. As of PHASE 13 they are all
+  // built, so there is no longer a NOT_IMPLEMENTED row to look for — what
+  // matters now is that none of them is broken and none is lying about being
+  // available. The training row is the one that can legitimately differ: the
+  // RL stack is an optional dependency, so it follows what is installed.
+  const subsystems = await (await page.request.get(`${API_URL}/api/system/status`)).json()
+  const states = Object.fromEntries(subsystems.subsystems.map((s) => [s.key, s.state]))
+  const valid = ['ONLINE', 'READY', 'WARNING', 'OFFLINE', 'NOT_IMPLEMENTED']
+  for (const [key, state] of Object.entries(states)) {
+    assert(valid.includes(state), `subsystem ${key} reports an invalid state: ${state}`)
+    assert(state !== 'ERROR', `subsystem ${key} is in ERROR`)
+  }
+  const training = await (await page.request.get(`${API_URL}/api/training/status`)).json()
   assert(
-    await page.getByText('NOT_IMPLEMENTED').first().isVisible(),
-    'unbuilt subsystems still report NOT_IMPLEMENTED',
+    states.training === (training.available ? 'ONLINE' : 'OFFLINE'),
+    `training says ${states.training} but the stack reports available=${training.available}`,
   )
   await shot(page, '02-command-center')
 

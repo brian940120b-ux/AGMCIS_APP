@@ -54,7 +54,11 @@
 | `storage/repository.py` | The only module that knows SQL | 9 |
 | `simulation/scenario.py` | Parsing and validating a scenario | 1 |
 | `simulation/scenario_store.py` | The only module that writes scenario files | 10 |
-| `training/*` | Gymnasium env, rewards, PPO/SAC, evaluation | 11–13 |
+| `training/policy_agent.py` | A BaseAgent flown by a learned policy | 11 |
+| `training/observation_encoder.py` | Observation to a bounded fixed-size vector | 11 |
+| `training/environment.py` | `AIFCSCombatEnv`, the Gymnasium environment | 11 |
+| `training/reward.py` | Weighted, per-term explainable reward | 12 |
+| `training/pipeline.py` | PPO/SAC training, evaluation, model cards | 13 |
 
 ## Determinism
 
@@ -85,6 +89,30 @@ Truth → Observation → Decision → Action → Physics → World Update
 Everything below the world update only reads. The scoring engine takes a
 finished recording and returns numbers; it cannot be reached from a tick. That
 is what makes it safe to change a weight, or add a term, without any risk of
+changing how an aircraft flies.
+
+## A policy is just another agent
+
+`PolicyAgent` is a `BaseAgent`, so a learned policy flies the same path a rule
+agent does:
+
+```
+sensor model → datalink → agent → action validation → envelope protection
+→ actuator rate limiting → physics
+```
+
+Nothing is bypassed for training. The policy sees the delayed, noisy,
+sometimes-missing picture the sensor model produced, never the truth state, and
+its controls are validated and clamped like anyone else's. Encoding truth would
+train a policy that cannot fly once it meets the real perception pipeline;
+skipping the safety layer would train one that relies on commands the aircraft
+will not accept.
+
+The simulation engine needed no changes to support any of this — the
+environment drives it through the ordinary `step()` and agent registration.
+
+Reward is computed outside the engine, from measured state, and every term is
+reported separately. Like scoring, it can be changed without any risk of
 changing how an aircraft flies.
 
 ## Scenarios are written through one door

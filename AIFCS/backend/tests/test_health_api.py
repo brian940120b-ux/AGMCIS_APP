@@ -37,8 +37,14 @@ def test_system_status_lists_subsystems(client):
     assert states["sensors"] == "ONLINE"
     assert states["communications"] == "ONLINE"
     assert states["websocket"] == "ONLINE"
-    # Not built yet — must be reported honestly, never as ONLINE.
-    assert states["training"] == "NOT_IMPLEMENTED"
+    assert states["replay"] == "ONLINE"
+    assert states["scoring"] == "ONLINE"
+    assert states["storage"] == "ONLINE"
+    # PHASE 11-13 built the training stack, but it is an optional dependency:
+    # the state must follow what is actually installed, never assume it.
+    from training.pipeline import rl_available
+
+    assert states["training"] == ("ONLINE" if rl_available() else "OFFLINE")
 
 
 def test_every_subsystem_has_a_valid_state(client):

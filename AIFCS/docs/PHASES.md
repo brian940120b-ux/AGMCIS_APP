@@ -409,13 +409,100 @@ engine reaches a positive tick count with the units the editor declared. 420
 backend tests, including round-tripping, every unsafe name, a failed write
 leaving no temporary file behind, and the in-use and protected refusals.
 
-## PHASE 11–13 — RL — **Next**
+## PHASE 11–13 — Reinforcement learning — **Complete**
 
-`AIFCSCombatEnv` (Gymnasium), configurable and explainable reward engine with a
-per-term breakdown, then PPO and SAC training pipelines with evaluation and model
-save/load.
+A flight policy can be trained against the simulation itself. Same 6DOF physics,
+same sensor noise and dropout, same datalink, same safety layer between the
+policy's output and the control surfaces. Nothing is bypassed for training.
 
-## PHASE 14–15 — Multi-agent and commander
+**The policy is an ordinary agent.** `PolicyAgent` is a `BaseAgent` like any
+other, so a network flies through the identical pipeline a rule agent does. It
+sees the observation the sensor model produced — never truth — and its controls
+are validated, envelope-protected and rate-limited on the way to the physics. A
+policy that learns to fly here has learned to fly the aircraft, not to exploit a
+shortcut.
+
+**Nothing models weapons, engagement or targeting.** The task is flight and
+navigation, and the reward has no term for anything else; a test asserts the
+term names.
+
+The engine needed no changes for any of this. The environment drives it through
+`step()` and the existing agent registration, which is the payoff for the
+one-way pipeline having been kept honest since PHASE 1.
+
+### The defect that stopped it learning
+
+The first trained policy scored **worse than an untrained one** — 704 against
+782, reaching no waypoints. That is the kind of result that is easy to explain
+away as "needs more timesteps". Reading the per-term breakdown showed it was not
+that.
+
+Of roughly 780 total reward: survival 400, coordination 200, information 85,
+smoothness 78 — all nearly constant whatever the policy did. Navigation, the
+only term it could influence, moved by about ±40. **Five percent signal**, and
+PPO was fitting a value function dominated by a constant.
+
+Two fixes, both in what was being measured rather than in the algorithm:
+
+*The terminal crash penalty was split out of per-step survival.* One term was
+doing two jobs — paying for each step alive and punishing the loss of the
+aircraft. Rolled together they made a constant that paid every step regardless
+of behaviour, while the thing it was supposed to deter was buried inside it.
+Exactly the same shape of mistake as PHASE 9's clamp-versus-rejection defect.
+
+*Terms a policy cannot influence became cheap, and ones it can became dear.*
+Survival 1.0 → 0.05, mission 2.0 → 5.0, navigation left at 1.0.
+
+Retrained on the same seed and budget: navigation 36.6 → **241.7**, and the
+policy beat both the untrained network and a hand-trimmed constant baseline
+(306.5 against 98.4 and 203.8), with no crashes.
+
+A third calibration came from the same reading: `progress_scale_m` was a round
+200 m while a step at cruise covers 22 m, so navigation could never exceed 0.11
+against survival's 1.0. It is now derived from cruise speed times step duration.
+
+### A scenario for the task
+
+`training_navigation` was added because demo_alpha's first leg is 40 km — three
+minutes at cruise — so a two-minute episode ended before the aircraft reached a
+single waypoint and the navigation reward never fired. Its legs are about 5 km,
+and a second unit flies its own circuit so the policy learns in traffic.
+
+### Training is CLI-only, and the dashboard says so
+
+`backend/train.py` runs PPO or SAC. The dashboard shows the device, the
+environment, every reward term and every trained policy, and prints the command
+— but has no START button. A long job needs progress reporting, cancellation and
+survival across a page reload; a button that cannot do those things would be a
+control that does not do what it appears to. That belongs to the training centre.
+
+Every model saves a card naming the scenario, seed, hyperparameters, observation
+layout version and reward weights. Loading a model whose layout version has
+moved on logs a warning rather than silently feeding it inputs that no longer
+mean what they meant.
+
+### Two things found by running the whole suite
+
+*Deleting a loaded scenario broke START.* The PHASE 10 delete guard covered the
+scenario a run was *flying*, but not one merely loaded. Deleting it left the
+engine pointing at a file that no longer existed, the dashboard went on offering
+it, and the next START failed with "scenario file not found" for no visible
+reason. The engine now releases it.
+
+*Every Playwright click hung once the 3D scene was rendering.* Not a product
+bug: with no GPU the scene is drawn by swiftshader on the CPU, which saturates
+the browser's main thread, and Playwright's post-click settlement check starves.
+Measured — with the canvas removed the same click completes in under 100 ms, and
+a direct DOM click always worked. The 3D suite now asserts the button is visible
+and enabled and dispatches the click, which loses none of the assertion.
+
+**Verified:** `gymnasium.utils.env_checker.check_env` passes; the same seed
+reproduces a rollout exactly; the policy cannot act faster than a rule agent;
+commanding full deflection every step still leaves the applied controls inside
+their bounds, proving the safety layer is still in the path. PPO and SAC both
+train, save, reload and evaluate to the same numbers. 468 backend tests.
+
+## PHASE 14–15 — Multi-agent and commander — **Next**
 
 Scale 1 → 2 → 4 → 8 agents. `AgentManager`, `TeamManager`, `CommunicationManager`,
 `TaskManager`. `CommanderAgent` allocating high-level tasks only — it never touches

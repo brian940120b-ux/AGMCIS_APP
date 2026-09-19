@@ -3,6 +3,12 @@ training:
   device: auto            # auto | cpu | cuda
   output_directory: models
   log_directory: data/training
+  # The task the environment trains on. demo_alpha's first leg is 40 km — about
+  # three minutes at cruise — so an episode would end before the aircraft
+  # reached a single waypoint and the navigation reward would never fire.
+  scenario: training_navigation
+  entity_id: null         # null = the first agent-flown unit in the scenario
+  max_episode_seconds: 120.0
 
 ppo:
   total_timesteps: 200000
@@ -19,13 +25,21 @@ sac:
 
 reward:
   # Every reward term is weighted and logged separately so totals stay explainable.
+  #
+  # The per-step terms are small on purpose. Measured over a 400-step episode,
+  # survival, coordination, information and smoothness contributed a nearly
+  # constant 760 out of ~780 total reward, while navigation — the only term the
+  # policy could actually change — moved by about +/-40. A policy cannot learn
+  # from 5% signal. So the terms a policy cannot influence are worth little per
+  # step, and the ones it can are worth a lot.
   weights:
-    survival: 1.0
-    navigation: 1.0
-    formation: 0.5
-    mission: 2.0
-    coordination: 0.5
-    information: 0.25
-    collision_penalty: -5.0
-    energy_penalty: -0.1
-    control_smoothness: 0.2
+    survival: 0.05          # per step alive and inside the altitude band
+    navigation: 1.0         # progress towards the active goal
+    formation: 0.5          # station keeping, for a unit with a leader
+    mission: 5.0            # reaching a waypoint
+    coordination: 0.05      # teammates currently held in the picture
+    information: 0.05       # confidence and freshness of that picture
+    crash_penalty: -50.0    # paid once, when the aircraft is lost
+    collision_penalty: -5.0 # grows as separation closes
+    energy_penalty: -0.1    # throttle actually used
+    control_smoothness: 0.05
