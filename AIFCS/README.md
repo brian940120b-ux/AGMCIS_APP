@@ -29,6 +29,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Reinforcement learning](#reinforcement-learning)
 - [Teams, tasks and the commander](#teams-tasks-and-the-commander)
 - [Swapping the physics](#swapping-the-physics)
+- [Analytics](#analytics)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -321,6 +322,8 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/commanders` | Each commander, its standing order and what it allocated |
 | `GET` | `/api/physics` | Which physics backend is configured, which is running, what else exists |
 | `GET` | `/api/physics/airframes` | The fictional platforms both backends fly |
+| `GET` | `/api/analytics/runs/{id}` | Every chart for one run, in the shape a chart draws |
+| `GET` | `/api/analytics/compare` | Team and per-term scores for several runs side by side |
 
 Endpoints for phases not yet built are absent rather than stubbed — this API
 never answers for a capability the backend does not have.
@@ -350,6 +353,47 @@ All airframe parameters are fictional and live in
 `backend/simulation/aircraft.py`. They are sized so the platform is stable and
 flyable: full elevator commands roughly 19° angle of attack, full aileron rolls
 at about 200°/s, and `demo_alpha` is trimmed to fly level hands-off at 220 m/s.
+
+### Analytics
+
+Press **ANALYTICS** in the header. It is a fourth stage beside LIVE, REPLAY and
+EDIT, and the only one with no tactical view — it is about *runs* rather than
+about a run.
+
+Pick a run on the left and you get, all measured from what that run stored:
+
+| Chart | What it is |
+|---|---|
+| Altitude, Speed | one line per unit, against simulation time |
+| Units flying | how many of each team were still active, from the sampled status |
+| Units in formation | how many were coordinating, read from what the agents decided |
+| Score | a heatmap of every unit against every scoring term |
+| Behaviour | what share of its own decisions each unit spent in each behaviour |
+
+Tick two or more runs and press **COMPARE** for their team scores side by side.
+The comparison carries each run's scoring `weights_hash` and says plainly when
+they differ — two runs judged by different rulers are not comparable totals.
+
+**A run with nothing stored says so.** Recording can be switched off, and a run
+shorter than a second was never sampled. Those charts print the reason instead
+of drawing a flat line at zero, because an empty chart is a claim about the run.
+
+**The aggregation is the backend's.** A run holds thousands of samples; the
+dashboard would otherwise download them all to group them, and two clients could
+disagree about the same run.
+
+#### About the chart colours
+
+They were not chosen by eye. Each set was checked against the panel surface for
+lightness, chroma, colour-vision separation and contrast, and two results
+changed the charts:
+
+- **Six scoring terms are a heatmap, not six colours.** No six-hue set survives
+  an all-pairs colour-vision check — blue and violet land ΔE 0.3 apart under
+  deuteranopia however they are stepped. One hue light-to-dark also suits the
+  question better: *where did this unit lose points* is magnitude, not identity.
+- **Eight units are coloured by team, not one hue each,** with a direct label on
+  the end of every line. Two hues are safe on every pair; eight are not.
 
 ### Swapping the physics
 
@@ -990,7 +1034,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `537 passed`, or `528 passed, 9 skipped` without the
+**Success looks like:** `551 passed`, or `542 passed, 9 skipped` without the
 optional JSBSim backend installed.
 
 ### End-to-end dashboard test
@@ -1006,6 +1050,7 @@ npm run test:e2e:3d     # 3D view renders, every camera mode works
 npm run test:e2e:replay # record a run, then load, play, scrub and score it
 npm run test:e2e:editor # build a scenario in the UI, save it, then fly it
 npm run test:e2e:coordination  # eight units, two commanders, and no panel overlaps
+npm run test:e2e:analytics     # record a run, then chart it
 ```
 
 Each suite sets up the scenario it asserts against, so they can be run in any
@@ -1105,7 +1150,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 11–13 | Gymnasium environment, PPO, SAC | **Complete** |
 | 14–15 | Multi-agent, commander agent | **Complete** |
 | 16 | JSBSim adapter (swappable physics backend) | **Complete** |
-| 17–19 | Analytics, training centre, model centre | Planned |
+| 17 | Analytics: run charts and comparison | **Complete** |
+| 18–19 | Training centre, model centre | Planned |
 | 20 | Production hardening | Planned |
 
 Detail: [`docs/PHASES.md`](docs/PHASES.md).

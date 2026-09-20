@@ -22,6 +22,44 @@
   --color-ink-dim: #8ea3c4;
   --color-ink-faint: #5a6f92;
 
+  /*
+   * CHART STEPS (PHASE 17).
+   *
+   * Chart marks are dense in a way a badge or an aircraft symbol is not, so
+   * they get their own steps rather than reusing the HUD tokens above. Each set
+   * was checked with the dataviz validator against the panel surface #0c1322 —
+   * lightness band, chroma floor, CVD separation, normal-vision separation and
+   * contrast — and the hue families match the tokens above, so a team keeps its
+   * colour wherever it appears.
+   */
+
+  /* Teams. Two series, safe on every pair: worst ΔE 24.1 (protan). */
+  --color-chart-blue: #2694fd;
+  --color-chart-red: #fd3e5e;
+
+  /*
+   * Behaviours. Five series, validated in THIS stacking order — the check is on
+   * adjacent pairs, so a chart that reorders them breaks the guarantee.
+   * HOLD, NAVIGATE, PATROL, FORMATION, AVOID. Worst adjacent ΔE 15.6 (deutan).
+   */
+  --color-chart-hold: #ad7c0e;
+  --color-chart-navigate: #1292c0;
+  --color-chart-patrol: #0fa05c;
+  --color-chart-formation: #ab48fd;
+  --color-chart-avoid: #f70e43;
+
+  /*
+   * Sequential ramp for the score heatmap: one hue, light to dark, monotone in
+   * lightness. Six scoring terms cannot be six categorical hues — no six-hue set
+   * survives an all-pairs CVD check — and the reader's question there is "where
+   * did this unit lose points", which is magnitude, not identity.
+   */
+  --color-ramp-1: #055764;
+  --color-ramp-2: #04798b;
+  --color-ramp-3: #009db4;
+  --color-ramp-4: #19c2de;
+  --color-ramp-5: #67e5fe;
+
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 

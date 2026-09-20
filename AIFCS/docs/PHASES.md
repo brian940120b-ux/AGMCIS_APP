@@ -725,10 +725,93 @@ inside their bounds, so the safety layer is still in the path; teleporting an
 aircraft mid-run leaves JSBSim following the world rather than overwriting it.
 537 backend tests, 9 of which skip when JSBSim is not installed.
 
-## PHASE 17–19 — Analytics, training centre, model centre
+## PHASE 17 — Analytics — **Complete**
 
-Reward/score/survival/coordination charts, model comparison, live training metrics,
-model lifecycle (load, unload, evaluate, compare, archive).
+Charts of a finished run: altitude and speed per unit, how many of each team
+were still flying, how many were coordinating, where every unit's score came
+from, and what each one spent its decisions doing. Plus a side-by-side
+comparison of several runs.
+
+A fourth stage mode, **ANALYTICS**, sits beside LIVE, REPLAY and EDIT. It is the
+only one with no tactical view, because it is about *runs* rather than about a
+run.
+
+### Aggregation belongs in the backend
+
+A run holds thousands of telemetry samples and up to five thousand stored
+decisions. Shipping those to a dashboard so it could group them would make every
+chart a download, and two clients grouping the same rows differently would
+disagree about the same run. So `analytics/series.py` answers in the shape a
+chart consumes — named series of points, one matrix, one set of shares — and the
+browser only draws.
+
+The layer takes rows and returns numbers. It cannot reach a tick, and a test
+asserts it does not even import the engine, which is what makes it safe to add a
+chart without any risk of changing how an aircraft flies. Analysis is downstream
+of truth in exactly the sense scoring has been since PHASE 9.
+
+### A run with nothing stored says so
+
+Recording can be switched off, and a run shorter than a second was never
+sampled. Returning empty series would draw a flat line at zero — which is a
+*claim about the run*, not an absence of data. Every chart carries whether it
+has anything and why not, and the panel prints the reason where the chart would
+have been.
+
+The first capture of the new stage landed on exactly this case: it opened the
+newest run, which was one tick long, and showed three charts explaining their
+own emptiness. Honest, but a poor front door. It now opens the newest run that
+flew for at least `tick_rate_hz` ticks, which is the shortest run that can have
+been sampled at all.
+
+### What the colour work turned up
+
+The palette was not chosen by eye. Each set was put through the dataviz
+validator against the panel surface — lightness band, chroma floor,
+colour-vision separation, normal-vision separation, contrast — and two results
+changed the charts themselves:
+
+**No six-hue categorical set survives an all-pairs check.** Blue and violet come
+out ΔE 0.3 apart under deuteranopia however they are stepped, and constraining
+the search to avoid the two team hues returned nothing at all. So the six
+scoring terms are **not** six colours: they are a heatmap on one hue, light to
+dark. That also suits the question better — *where did this unit lose points* is
+magnitude, not identity.
+
+**Eight units cannot each have a hue either.** Unit lines are coloured by team,
+two hues that are safe on every pair (worst ΔE 24.1 under protanopia), and
+identity rides a direct label at the end of each line.
+
+The five behaviour colours were validated *in their stacking order*, because the
+check is on adjacent pairs — so the backend emits behaviours in that order and a
+test pins it. Reordering the stack would quietly void the separation the palette
+was picked for.
+
+Chart marks also got their own steps rather than reusing the HUD tokens: a 2px
+line is dense in a way a badge is not, and the bright neon tokens sit above the
+lightness band for dark surfaces. Same hue families, so a team keeps its colour
+everywhere.
+
+### Two drawing defects, both found by looking at it
+
+*End labels collided into unreadable overprints* — the speed chart rendered
+`BEDE001` where `BLUE-01` and `RED-01` had been drawn on top of each other. The
+labels were sorted by data value while the nudge that separates them pushes down
+the screen, and the y axis is inverted, so the sort walked one way while the
+nudge walked the other. Sorting by screen position fixed it.
+
+*A single-sample series drew nothing at all.* A `polyline` through one point has
+no length. One sample is a real measurement, so it gets a marker instead.
+
+**Verified:** four charts drawn from a real recorded run, ten lines, a heatmap
+cell for every unit against every term, the crosshair reading a real time off
+the series, a two-run comparison, and a run too short to be sampled reported as
+unavailable rather than charted as zero. 551 backend tests.
+
+## PHASE 18–19 — Training centre, model centre
+
+Live training metrics, model comparison, model lifecycle (load, unload,
+evaluate, compare, archive).
 
 ## PHASE 20 — Production hardening
 

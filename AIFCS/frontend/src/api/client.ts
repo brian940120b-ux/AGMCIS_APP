@@ -29,6 +29,8 @@ import type {
   ScenarioValidation,
   CommandersResponse,
   PhysicsStatus,
+  RunAnalytics,
+  RunComparison,
   ScoringWeights,
   TasksResponse,
   TeamPicture,
@@ -179,6 +181,11 @@ export const api = {
   // Which physics model is flying (PHASE 16). Read-only: the backend is a
   // configuration choice, because a run is only reproducible from its hash.
   physics: () => request<PhysicsStatus>('/api/physics'),
+  // Analytics (PHASE 17). The aggregation is the backend's job: a run holds
+  // thousands of samples, and two clients grouping them would disagree.
+  runAnalytics: (runId: string) => request<RunAnalytics>(`/api/analytics/runs/${runId}`),
+  compareRuns: (runIds: string[]) =>
+    request<RunComparison>(`/api/analytics/compare?runs=${encodeURIComponent(runIds.join(','))}`),
 
   trainingModels: () =>
     request<{ available: boolean; count: number; models: TrainedModel[]; install_hint?: string }>(

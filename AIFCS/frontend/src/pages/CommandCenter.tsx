@@ -1,5 +1,6 @@
 import { Suspense, lazy, useState } from 'react'
 import { Activity, Cpu, Film, LayoutGrid, PencilRuler, Radio as RadioIcon } from 'lucide-react'
+import { AnalyticsPanel } from '@/components/AnalyticsPanel'
 import { DecisionFeed } from '@/components/DecisionFeed'
 import { CoordinationPanel } from '@/components/CoordinationPanel'
 import { DatalinkPanel } from '@/components/DatalinkPanel'
@@ -96,7 +97,7 @@ export function CommandCenter() {
           {/* LIVE / REPLAY. The views draw one source or the other, never a
               mix of the two. */}
           <div className="flex items-center border border-edge">
-            {(['live', 'replay', 'edit'] as const).map((value) => (
+            {(['live', 'replay', 'edit', 'analytics'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -149,9 +150,17 @@ export function CommandCenter() {
         </div>
       </header>
 
+      {/* Analytics is about runs rather than a run, so it has no tactical view
+          and takes the whole stage instead of a column of it. */}
+      {stageMode === 'analytics' && (
+        <div className="flex min-h-0 flex-1 flex-col p-3">
+          <AnalyticsPanel />
+        </div>
+      )}
+
       {/* Desktop / tablet. Rendered only when it applies, so the 3D view
           never creates a second, invisible WebGL context. */}
-      {isDesktop && (
+      {isDesktop && stageMode !== 'analytics' && (
         <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[300px_1fr_330px]">
           {/* Telemetry rail. Panels keep their natural height and the rail
             scrolls, rather than every panel being squeezed as more are added. */}
@@ -218,7 +227,7 @@ export function CommandCenter() {
       )}
 
       {/* Mobile: one focused panel, controls always reachable on the view tab */}
-      {!isDesktop && (
+      {!isDesktop && stageMode !== 'analytics' && (
         <main className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
           {tab === 'view' && (
             <>
@@ -277,7 +286,7 @@ export function CommandCenter() {
         </main>
       )}
 
-      {!isDesktop && (
+      {!isDesktop && stageMode !== 'analytics' && (
         <nav className="grid shrink-0 grid-cols-6 border-t border-edge bg-deck">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button

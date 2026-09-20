@@ -67,6 +67,7 @@
 | `core/physics_backend.py` | Builds the configured integrator; reports what is available | 16 |
 | `simulation/jsbsim_airframe.py` | Writes a fictional airframe out as JSBSim XML | 16 |
 | `simulation/jsbsim_adapter.py` | JSBSim behind the Integrator protocol, one FDM per entity | 16 |
+| `analytics/series.py` | Stored rows to chart-ready series; cannot reach a tick | 17 |
 
 ## Determinism
 
@@ -198,6 +199,37 @@ exactly the same sense the scoring engine is.
 files are generated from `AircraftParameters`, not written by hand, so the two
 models cannot drift apart into two different invented platforms. JSBSim's own
 bundled aircraft are never on the search path.
+
+## Charts are the far end of the same one-way pipeline
+
+`analytics/series.py` takes rows a finished run wrote and returns series. It
+holds no reference to the engine, and `test_analytics.py` asserts it does not
+even import one:
+
+```
+Truth → … → World Update → Recording → Storage
+                                          │
+                                          ▼
+                                 analytics/series.py
+                                          │
+                                          ▼
+                              /api/analytics → charts
+```
+
+That is what makes a chart cheap to add. Changing how a run is drawn, or adding
+a whole new measurement, carries no risk of changing how an aircraft flies —
+the same property that let PHASE 9 rebalance scoring weights safely.
+
+Two consequences worth stating:
+
+**The aggregation is server-side.** A run holds thousands of telemetry samples
+and up to five thousand decisions. A dashboard that downloaded them to group
+them would make every chart a transfer, and two clients grouping the same rows
+differently would disagree about the same run.
+
+**Empty is a fact, not a chart.** A run that recorded nothing returns
+`available: false` with the reason, never empty series. Drawing a flat line at
+zero would be a claim about the run rather than an absence of data.
 
 ## Scenarios are written through one door
 

@@ -700,3 +700,88 @@ export interface PhysicsStatus {
   install_hint?: string
   backend_status?: Record<string, unknown>
 }
+
+/* --------------------------------------------------------------- PHASE 17 */
+
+/** One point is [simulation time, value]. */
+export type ChartPoint = [number, number]
+
+export interface ChartSeries {
+  key: string
+  label: string
+  /** Which colour family the series belongs to — a team, not a per-series hue. */
+  group: string
+  points: ChartPoint[]
+}
+
+export interface Chart {
+  key: string
+  title: string
+  x_label: string
+  y_label: string
+  unit: string
+  /** False means the run stored nothing for this chart, and `detail` says why. */
+  available: boolean
+  detail: string
+  series: ChartSeries[]
+}
+
+export interface ScoreCell {
+  fraction: number
+  points: number
+  weight: number
+  /** 0 when the term did not apply to this unit — which is not a zero score. */
+  applicable: number
+}
+
+export interface ScoreMatrix {
+  entities: string[]
+  terms: string[]
+  cells: Record<string, Record<string, ScoreCell>>
+  totals: Record<string, number>
+  available_points: number
+  available: boolean
+  detail: string
+}
+
+export interface BehaviourShares {
+  entities: string[]
+  behaviours: string[]
+  shares: Record<string, Record<string, number>>
+  counts: Record<string, number>
+  available: boolean
+  detail: string
+}
+
+export interface RunAnalytics {
+  run: RunSummary
+  charts: Chart[]
+  scores: ScoreMatrix
+  behaviours: BehaviourShares
+  sampled: {
+    telemetry_samples: number
+    decisions: number
+    decision_limit: number
+    decisions_truncated: boolean
+  }
+  notice: string
+}
+
+export interface RunComparison {
+  count: number
+  runs: {
+    run_id: string
+    scenario: string | null
+    seed: number | null
+    integrator: string | null
+    config_hash: string | null
+    ticks: number | null
+    end_reason: string | null
+    teams: Record<string, number>
+    scores: ScoreMatrix
+  }[]
+  /** False when the runs were scored against different weights. */
+  comparable: boolean
+  weights_hashes: string[]
+  detail: string
+}
