@@ -345,3 +345,58 @@ def live(account, marks: dict, now: datetime | None = None) -> Live:
         realized_pnl=account.realized_pnl, unrealized_pnl=unreal,
         exposure=(account.exposure(ok) if held and ok else None),
         legs=legs, missing=missing)
+
+
+# ══════════════════════════════════════════════════════════
+# 兩組要從**同一天**起算 · 2026-09-20
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-20 的實際數字:
+#
+#   主城   12 天  +4.24%   ← 從 09-08 開始
+#   測試組  1 天  -0.03%   ← 從 09-19 開始
+#
+# 並排放在同一張卡上,任何人都會去比。而比出來的東西**沒有意義** ——
+# 主城那 4.24% 裡有 11 天是測試組還不存在的時候賺的。
+#
+# 不能靠重開主城來對齊(那會毀掉 12 天的前向樣本,而前向樣本正是
+# 這整套東西唯一沒有後見之明的證據)。所以改成:**兩邊都從後開始的
+# 那一組的起點重新起算。**
+#
+# 這件事要在數字出現在畫面上之前做好,不是等人比錯了再解釋。
+
+
+def _curve(path) -> list:
+    return _rows(path)
+
+
+def since(path_a, path_b) -> tuple:
+    """兩條權益曲線從**共同起點**起算的報酬。回 (起點, a%, b%, 天數)。
+
+    算不出來回 (None, None, None, 0) —— 而呼叫端必須因此**不顯示**
+    那個比較,不是顯示一個看起來能比的數字。
+    """
+    ra, rb = _curve(path_a), _curve(path_b)
+    if not ra or not rb:
+        return None, None, None, 0
+
+    def day_of(row) -> str:
+        return str(row.get("signal_day") or "")[:10]
+
+    days_a = {day_of(r): r for r in ra if day_of(r)}
+    days_b = {day_of(r): r for r in rb if day_of(r)}
+    common = sorted(set(days_a) & set(days_b))
+    if len(common) < 2:
+        # 只有一天重疊 -> 沒有「期間」可言,報酬無從算起。
+        return (common[0] if common else None), None, None, len(common)
+
+    start, end = common[0], common[-1]
+
+    def pct(days: dict) -> float | None:
+        e0 = days[start].get("equity")
+        e1 = days[end].get("equity")
+        if not e0 or not e1:
+            return None
+        return float(e1) / float(e0) * 100.0 - 100.0
+
+    return start, pct(days_a), pct(days_b), len(common)

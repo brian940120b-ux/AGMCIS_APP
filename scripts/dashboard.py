@@ -1265,17 +1265,52 @@ def _cohort_row() -> str:
                 '通過了第四關(資金費歷史抓得到)—— 那一關就是為它加的。'
                 '</div>')
 
-    cells = [kv("測試組報酬",
-                _n(lv.return_pct, "+.2f") + "%", tone(lv.return_pct or 0)),
-             kv("交易池", f"{got['pool']} 檔在倉"),
+    # ── 兩組必須從**同一天**起算 ──────────────────────
+    # 2026-09-20:主城 12 天 +4.24%(從 09-08),測試組 1 天 -0.03%
+    # (從 09-19)。並排放著,任何人都會去比 —— 而比出來的東西沒有
+    # 意義:主城那 4.24% 裡有 11 天是測試組還不存在的時候賺的。
+    #
+    # 不能靠重開主城來對齊(那會毀掉 12 天的前向樣本,而前向樣本正是
+    # 這整套東西唯一沒有後見之明的證據)。所以兩邊都從後開始的那一組
+    # 的起點重新起算。
+    from portfolio.paper import MAIN, SCREENED
+    from portfolio.scorecard import since
+    start, main_pct, cohort_pct, n = since(MAIN.curve_path,
+                                           SCREENED.curve_path)
+
+    cells = [kv("交易池", f"{got['pool']} 檔在倉"),
              kv("記帳天數", f"{card.days} 天"),
              kv("走完的進出", f"{card.round_trips} 次")]
-    return (head + f'<div class="grid">{"".join(cells)}</div>'
-            + '<p class="note">跟主城<b>唯一的差別是交易池</b> —— 策略、'
-            '波動目標、槓桿、回看期完全相同,所以差異只能來自選幣。'
-            '主城不受影響。<br>'
-            '⚠️ <b>幾天的資料比不出高下。</b> 上面那個報酬現在只是'
-            '兩條剛開始的曲線,不是結論。</p>')
+    out = [head, f'<div class="grid">{"".join(cells)}</div>']
+
+    if main_pct is None or cohort_pct is None:
+        # **不顯示一個看起來能比的數字。** 重疊不到兩天就沒有「期間」
+        # 可言,那時候唯一誠實的話是「還沒得比」。
+        out.append('<div class="flag">⚠️ <b>還沒得比。</b> 兩組的起算日'
+                   '不同(主城 09-08、測試組 09-19),重疊'
+                   f'{n} 天 —— 不足以算出同期間的報酬。<br>'
+                   '在那之前<b>不會</b>並排顯示兩個報酬:主城的數字裡'
+                   '有一段是測試組還不存在的時候賺的,擺在一起比,'
+                   '比的是起跑時間,不是選幣。</div>')
+    else:
+        gap = cohort_pct - main_pct
+        out.append(
+            f'<div class="grid">'
+            + kv("主城 · 同期間", f"{main_pct:+.2f}%", tone(main_pct))
+            + kv("測試組 · 同期間", f"{cohort_pct:+.2f}%", tone(cohort_pct))
+            + kv("差", f"{gap:+.2f}%", tone(gap))
+            + '</div>'
+            f'<p class="note">兩邊都從 <b>{html.escape(start)}</b> 起算'
+            f'(重疊 {n} 天)—— 那是測試組開始記帳的日子。'
+            '主城全期的報酬更高,但那裡面有一段是測試組還不存在的時候'
+            '賺的,不能算進這個比較。</p>')
+
+    out.append('<p class="note">跟主城<b>唯一的差別是交易池</b> —— 策略、'
+               '波動目標、槓桿、回看期完全相同,所以差異只能來自選幣。'
+               '主城不受影響。<br>'
+               '⚠️ <b>幾天的資料比不出高下。</b> 這兩條曲線現在只是'
+               '剛開始,不是結論。</p>')
+    return "".join(out)
 
 
 def _sim_rows(lv) -> str:

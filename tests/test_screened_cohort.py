@@ -129,3 +129,65 @@ def test_tick_reports_which_universe_it_traded():
     """交易池的大小本身就是「篩選有沒有在動」的證據。"""
     src = Path(paper.__file__).read_text(encoding="utf-8")
     assert '"symbols": list(p.get("symbols") or [])' in src
+
+
+# ══════════════════════════════════════════════════════════
+# 兩組要從同一天起算 · 2026-09-20
+# ══════════════════════════════════════════════════════════
+#
+# 2026-09-20 的實際數字:
+#   主城   12 天  +4.24%   ← 從 09-08
+#   測試組  1 天  -0.03%   ← 從 09-19
+#
+# 並排放著,任何人都會去比。而那個比較**比的是起跑時間,不是選幣** ——
+# 主城那 4.24% 裡有 11 天是測試組還不存在的時候賺的。
+
+def _curve(tmp_path, name, rows):
+    import json
+    p = tmp_path / name
+    p.write_text("\n".join(json.dumps(
+        {"signal_day": d, "equity": e}) for d, e in rows), encoding="utf-8")
+    return p
+
+
+def test_both_cohorts_are_measured_from_the_day_they_overlap(tmp_path):
+    """主城全期 +5%,但**同期間**只有 +0.96% —— 那才是能比的數字。"""
+    from portfolio.scorecard import since
+    a = _curve(tmp_path, "a.jsonl", [("2026-09-08", 10000),
+                                     ("2026-09-18", 10300),
+                                     ("2026-09-19", 10400),
+                                     ("2026-09-20", 10500)])
+    b = _curve(tmp_path, "b.jsonl", [("2026-09-19", 10000),
+                                     ("2026-09-20", 10120)])
+    start, main_pct, cohort_pct, n = since(a, b)
+    assert start == "2026-09-19"
+    assert round(main_pct, 2) == 0.96, "主城該用同期間算,不是全期"
+    assert round(cohort_pct, 2) == 1.20
+    assert n == 2
+
+
+def test_one_overlapping_day_is_refused_rather_than_shown_as_zero(tmp_path):
+    """重疊一天沒有「期間」可言。**回 None,不是回 0%** ——
+    0% 看起來像一個結論,而那裡根本還沒有結論。"""
+    from portfolio.scorecard import since
+    a = _curve(tmp_path, "a.jsonl", [("2026-09-08", 10000),
+                                     ("2026-09-19", 10400)])
+    b = _curve(tmp_path, "b.jsonl", [("2026-09-19", 10000)])
+    start, main_pct, cohort_pct, n = since(a, b)
+    assert (main_pct, cohort_pct) == (None, None)
+    assert n == 1
+
+
+def test_the_card_refuses_to_print_two_returns_it_cannot_compare():
+    """**不顯示一個看起來能比的數字。**
+
+    這是 2026-09-20 當下的真實狀態:主城 12 天、測試組 1 天,
+    重疊不到兩天。那時候唯一誠實的話是「還沒得比」。
+    """
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1]
+           / "scripts/dashboard.py").read_text(encoding="utf-8")
+    body = src[src.index("def _cohort_row("):src.index("def _sim_rows(")]
+    assert "還沒得比" in body
+    assert "比的是起跑時間,不是選幣" in body
+    assert "since(" in body
