@@ -59,8 +59,7 @@ DORMANT = {
     "coinm_open_orders": "幣本位實盤路徑,目前不做幣本位",
     "load_orders": "實盤訂單持久化;紙上交易不經過它",
     # ── 研究用:由 scripts/ 的分析工具按需呼叫 ────────────
-    "indicator_rule": "指標策略族,研究迴路還沒納入(§23~25)",
-    "top_half_by_momentum_strength": "動能篩選假說,未納入網格",
+
     "scaled": "回撤契約縮放;目前由 vol_target 直接封頂",
     "measure_contract_size": "規格反推的量測工具,由探針腳本呼叫",
     "current_funding": "標準合約資金費查詢,成本模型尚未實測接上",

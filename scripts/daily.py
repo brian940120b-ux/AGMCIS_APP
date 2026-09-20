@@ -281,6 +281,24 @@ def main() -> int:
     except Exception as e:
         log.warning(f"契約更新失敗:{e}")
 
+    print("③b 獵場(預先登記的指標與動量假說)")
+    # 2026-09-20 執政官:「不管用任何指標…你就是要幫我提高盈利的機率。」
+    # 唯一真的能提高機率的做法是**誠實地試更多假說,而且付多重比較的帳**。
+    # 13 個假說的程式碼 2026-09-08 就寫好了,驗收條件當時就定死,
+    # 而研究迴路從來沒試過它們 —— 那是 2026-09-19 反查死碼時抓到的。
+    #
+    # 跟研究迴路同一條規則:失敗不得拖垮記帳。
+    try:
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, str(BASE / "scripts/hunt.py")],
+            capture_output=True, text=True, timeout=1800)
+        tail = [ln for ln in (r.stdout or "").splitlines() if ln.strip()]
+        print("   " + (tail[-1] if tail else "沒有輸出"))
+    except Exception as e:                           # noqa: BLE001
+        log.warning(f"獵場跑失敗(不影響記帳):{type(e).__name__}: {e}")
+        print(f"   獵場例外(記帳不受影響):{type(e).__name__}: {e}")
+
     print("④ 研究迴路")
     # 執政官要的是「**不斷地**經過多次的模擬交易之後發現該怎麼調整」。
     # 所以它跟記帳一起每天跑,而不是等人想到才跑一次。
