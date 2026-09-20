@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from core.clock import ClockState
 from core.config import get_settings
 from core.run_manager import RunManager
 from core.simulation_engine import SimulationEngine
 from core.system_status import SystemStatusRegistry, build_default_registry
 from core.telemetry import TelemetryBroadcaster
 from replay.player import ReplayPlayer
+from training.jobs import TrainingJobRunner
 
 
 @lru_cache(maxsize=1)
@@ -52,6 +54,20 @@ def get_replay_player() -> ReplayPlayer:
     return ReplayPlayer(allowed_speeds=tuple(get_settings().simulation.allowed_speeds))
 
 
+@lru_cache(maxsize=1)
+def get_training_runner() -> TrainingJobRunner:
+    """The one training job that may be running (PHASE 18).
+
+    One runner process-wide, because there is one set of cores. It is wired to
+    ask the engine whether a simulation is running, so a job cannot be started
+    on top of one and quietly halve both their speeds — a callable rather than
+    an engine reference, so the training module stays clear of the simulation.
+    """
+    runner = TrainingJobRunner(get_settings(), repository=get_run_manager().repository)
+    runner.simulation_is_running = lambda: get_engine().clock.state is ClockState.RUNNING
+    return runner
+
+
 def reset_runtime() -> None:
     """Drop cached singletons — used by tests to get a clean engine."""
     get_status_registry.cache_clear()
@@ -59,3 +75,4 @@ def reset_runtime() -> None:
     get_broadcaster.cache_clear()
     get_run_manager.cache_clear()
     get_replay_player.cache_clear()
+    get_training_runner.cache_clear()

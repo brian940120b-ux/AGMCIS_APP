@@ -20,7 +20,7 @@ _STARTED_AT = time.time()
 # being a literal nobody remembered to bump, so `test_health_api.py` now asserts
 # it matches the last phase marked Complete in docs/PHASES.md. Written with a
 # plain hyphen; the docs use an en dash and the test compares them accordingly.
-BUILD_PHASE = "PHASE 17"
+BUILD_PHASE = "PHASE 18"
 
 
 @router.get("/health")

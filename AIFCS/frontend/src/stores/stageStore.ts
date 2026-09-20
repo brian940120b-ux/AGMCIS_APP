@@ -1,13 +1,14 @@
 /**
  * What the tactical views are showing (PHASE 10).
  *
- * Four sources, and only ever one at a time:
+ * Five stages, and only ever one at a time:
  *
  *   live       the telemetry stream from a running simulation
  *   replay     a recording being read back
  *   edit       the starting positions of the scenario being edited
- *   analytics  charts of a finished run (PHASE 17) — the one mode with no
- *              tactical view at all, because it is about runs rather than a run
+ *   analytics  charts of a finished run (PHASE 17) — no tactical view at all,
+ *              because it is about runs rather than a run
+ *   training   starting and watching a training job (PHASE 18)
  *
  * Kept in its own store because it is not a replay concern, nor an editor
  * concern — it is the question "which of these is on stage", and exactly one
@@ -18,7 +19,7 @@ import { create } from 'zustand'
 import { useReplayStore } from '@/stores/replayStore'
 import { useScenarioStore } from '@/stores/scenarioStore'
 
-export type StageMode = 'live' | 'replay' | 'edit' | 'analytics'
+export type StageMode = 'live' | 'replay' | 'edit' | 'analytics' | 'training'
 
 interface StageState {
   mode: StageMode

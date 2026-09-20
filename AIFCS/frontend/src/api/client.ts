@@ -30,12 +30,15 @@ import type {
   CommandersResponse,
   PhysicsStatus,
   RunAnalytics,
+  StartTrainingRequest,
   RunComparison,
   ScoringWeights,
   TasksResponse,
   TeamPicture,
   TrainedModel,
   TrainingEnvironmentSpec,
+  TrainingJob,
+  TrainingJobs,
   TrainingReward,
   TrainingStatus,
   SensorStatus,
@@ -69,7 +72,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    throw new ApiError(`${init?.method ?? 'GET'} ${path} failed (${response.status})`, response.status)
+    // Surface the backend's own reason. Every refusal in this API explains
+    // itself — "a simulation is running", "above the configured cap" — and
+    // swallowing that for a status code would leave the operator guessing.
+    let detail = ''
+    try {
+      const body = (await response.json()) as { detail?: unknown }
+      if (typeof body?.detail === 'string') detail = body.detail
+    } catch {
+      // A non-JSON error body is not itself an error; fall back to the status.
+    }
+    throw new ApiError(
+      detail || `${init?.method ?? 'GET'} ${path} failed (${response.status})`,
+      response.status,
+    )
   }
   return (await response.json()) as T
 }
@@ -173,6 +189,11 @@ export const api = {
   trainingStatus: () => request<TrainingStatus>('/api/training/status'),
   trainingEnvironment: () => request<TrainingEnvironmentSpec>('/api/training/environment'),
   trainingReward: () => request<TrainingReward>('/api/training/reward'),
+  // Training control (PHASE 18). A job runs in the server, one at a time.
+  trainingJobs: () => request<TrainingJobs>('/api/training/jobs'),
+  trainingJob: (jobId: string) => request<TrainingJob>(`/api/training/jobs/${jobId}`),
+  startTraining: (body: StartTrainingRequest) => post<TrainingJob>('/api/training/start', body),
+  stopTraining: () => post<TrainingJob>('/api/training/stop'),
   // Teams, tasks and commanders (PHASE 14-15). Read-only: allocation happens
   // inside the tick, and a second source of orders would disagree with it.
   teams: () => request<{ count: number; teams: TeamPicture[] }>('/api/teams'),

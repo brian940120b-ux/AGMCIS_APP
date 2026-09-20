@@ -16,12 +16,13 @@ import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
 import { SystemStatusPanel } from '@/components/SystemStatusPanel'
+import { TrainingCentre } from '@/components/TrainingCentre'
 import { TrainingPanel } from '@/components/TrainingPanel'
 import { TacticalPlot } from '@/components/TacticalPlot'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { useSimulationPolling } from '@/hooks/useSimulationPolling'
 import { useTelemetrySocket } from '@/hooks/useTelemetrySocket'
-import { useStageStore } from '@/stores/stageStore'
+import { useStageStore, type StageMode } from '@/stores/stageStore'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useSystemStore } from '@/stores/systemStore'
 
@@ -48,6 +49,9 @@ function ViewerLoading() {
  * its own scrollable body takes over.
  */
 const FILL_SLOT = 'flex flex-col [&>*]:min-h-0 [&>*]:flex-1'
+
+/** Stages that take the whole window instead of a column of the tactical layout. */
+const FULL_STAGE = new Set<StageMode>(['analytics', 'training'])
 
 type MobileTab = 'view' | 'status' | 'units' | 'replay' | 'edit' | 'intel'
 
@@ -86,18 +90,20 @@ export function CommandCenter() {
 
   return (
     <div className="flex h-dvh flex-col bg-void">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-edge bg-deck px-3 py-2 sm:px-4">
+      {/* Wraps rather than overflowing: the stage switcher grew to five and no
+          longer fits beside the transport badge on a phone. */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-edge bg-deck px-3 py-2 sm:px-4">
         <div className="flex min-w-0 items-baseline gap-3">
           <span className="text-sm tracking-[0.3em] text-cyan-hud">AIFCS</span>
           <span className="hidden truncate text-[10px] tracking-[0.15em] text-ink-faint sm:inline">
             COMMAND CENTER
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {/* LIVE / REPLAY. The views draw one source or the other, never a
               mix of the two. */}
           <div className="flex items-center border border-edge">
-            {(['live', 'replay', 'edit', 'analytics'] as const).map((value) => (
+            {(['live', 'replay', 'edit', 'analytics', 'training'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -150,17 +156,23 @@ export function CommandCenter() {
         </div>
       </header>
 
-      {/* Analytics is about runs rather than a run, so it has no tactical view
-          and takes the whole stage instead of a column of it. */}
+      {/* Analytics and the training centre are about runs and jobs rather than
+          about a run, so they have no tactical view and take the whole stage. */}
       {stageMode === 'analytics' && (
         <div className="flex min-h-0 flex-1 flex-col p-3">
           <AnalyticsPanel />
         </div>
       )}
 
+      {stageMode === 'training' && (
+        <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col p-3">
+          <TrainingCentre />
+        </div>
+      )}
+
       {/* Desktop / tablet. Rendered only when it applies, so the 3D view
           never creates a second, invisible WebGL context. */}
-      {isDesktop && stageMode !== 'analytics' && (
+      {isDesktop && !FULL_STAGE.has(stageMode) && (
         <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[300px_1fr_330px]">
           {/* Telemetry rail. Panels keep their natural height and the rail
             scrolls, rather than every panel being squeezed as more are added. */}
@@ -227,7 +239,7 @@ export function CommandCenter() {
       )}
 
       {/* Mobile: one focused panel, controls always reachable on the view tab */}
-      {!isDesktop && stageMode !== 'analytics' && (
+      {!isDesktop && !FULL_STAGE.has(stageMode) && (
         <main className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
           {tab === 'view' && (
             <>
@@ -286,7 +298,7 @@ export function CommandCenter() {
         </main>
       )}
 
-      {!isDesktop && stageMode !== 'analytics' && (
+      {!isDesktop && !FULL_STAGE.has(stageMode) && (
         <nav className="grid shrink-0 grid-cols-6 border-t border-edge bg-deck">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button

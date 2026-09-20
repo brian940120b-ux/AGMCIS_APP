@@ -785,3 +785,50 @@ export interface RunComparison {
   weights_hashes: string[]
   detail: string
 }
+
+/* --------------------------------------------------------------- PHASE 18 */
+
+export interface TrainingMetricPoint {
+  timesteps: number
+  elapsed_s: number
+  /** Null until the first episode has ended — there is nothing to average yet. */
+  episode_reward_mean: number | null
+  episode_length_mean: number | null
+}
+
+export interface TrainingJob {
+  job_id: string
+  algorithm: string
+  requested_timesteps: number
+  /** What it actually trained for. PPO collects in blocks, so it can overshoot. */
+  timesteps: number
+  fraction: number
+  seed: number
+  evaluate_episodes: number
+  state: 'PENDING' | 'RUNNING' | 'STOPPING' | 'COMPLETED' | 'CANCELLED' | 'FAILED'
+  started_at: number
+  ended_at: number | null
+  elapsed_s: number
+  cancel_requested: boolean
+  metrics: TrainingMetricPoint[]
+  error: string | null
+  result: Record<string, unknown> | null
+  finished: boolean
+}
+
+export interface TrainingJobs {
+  available: boolean
+  busy: boolean
+  current: TrainingJob | null
+  history: TrainingJob[]
+  max_timesteps: number
+  algorithms: string[]
+  notice: string
+}
+
+export interface StartTrainingRequest {
+  algorithm?: string
+  timesteps?: number
+  seed?: number
+  evaluate_episodes?: number
+}

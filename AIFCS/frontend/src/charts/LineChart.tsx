@@ -21,6 +21,8 @@ interface Props {
   /** Force the y axis to start at zero — right for counts, wrong for altitude. */
   zeroBased?: boolean
   height?: number
+  /** Unit written after an x tick. Simulation time here, timesteps elsewhere. */
+  xSuffix?: string
 }
 
 const PAD = { top: 12, right: 64, bottom: 24, left: 46 }
@@ -39,7 +41,14 @@ function niceTicks(min: number, max: number, count = 4): number[] {
 const format = (value: number) =>
   Math.abs(value) >= 1000 ? value.toLocaleString('en-US', { maximumFractionDigits: 0 }) : String(Number(value.toFixed(1)))
 
-export function LineChart({ series, yLabel, unit, zeroBased = false, height = 200 }: Props) {
+export function LineChart({
+  series,
+  yLabel,
+  unit,
+  zeroBased = false,
+  height = 200,
+  xSuffix = 's',
+}: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverX, setHoverX] = useState<number | null>(null)
   const width = 640
@@ -153,7 +162,8 @@ export function LineChart({ series, yLabel, unit, zeroBased = false, height = 20
             textAnchor="middle"
             className="fill-ink-faint text-[9px]"
           >
-            {format(tick)}s
+            {format(tick)}
+            {xSuffix}
           </text>
         ))}
 
@@ -224,7 +234,9 @@ export function LineChart({ series, yLabel, unit, zeroBased = false, height = 20
             sx(hoverX) > width / 2 ? 'left-12' : 'right-16'
           }`}
         >
-          <p className="text-[9px] text-ink-faint">t+{readings[0].at.toFixed(1)}s</p>
+          <p className="text-[9px] text-ink-faint">
+            {xSuffix === 's' ? `t+${readings[0].at.toFixed(1)}s` : `${format(readings[0].at)}${xSuffix}`}
+          </p>
           {readings.map((r) => (
             <p key={r.key} className="flex items-baseline gap-1.5 text-[10px] whitespace-nowrap">
               <span

@@ -9,6 +9,10 @@ training:
   scenario: training_navigation
   entity_id: null         # null = the first agent-flown unit in the scenario
   max_episode_seconds: 120.0
+  # Ceiling on a job started from the dashboard (PHASE 18). A browser request
+  # should not be able to commit the server to a week of compute. The command
+  # line has no cap — a long run belongs there, where it can be watched.
+  max_timesteps_per_job: 500000
 
 ppo:
   total_timesteps: 200000

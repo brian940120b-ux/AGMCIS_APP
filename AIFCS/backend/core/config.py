@@ -463,6 +463,10 @@ class TrainingSettings(BaseModel):
     scenario: str = "training_navigation"
     entity_id: str | None = None
     max_episode_seconds: float = 120.0
+    # Ceiling on a job started from the dashboard (PHASE 18). A browser request
+    # should not be able to commit the server to a week of compute; the command
+    # line is still there for a long run.
+    max_timesteps_per_job: int = Field(default=500_000, ge=1)
 
     @field_validator("device")
     @classmethod

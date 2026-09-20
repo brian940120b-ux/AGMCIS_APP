@@ -152,8 +152,15 @@ class TrainingPipeline:
         seed: int | None = None,
         evaluate_episodes: int = 0,
         progress: bool = False,
+        callback: Any | None = None,
     ) -> TrainingResult:
-        """Train a policy and save it with its card."""
+        """Train a policy and save it with its card.
+
+        ``callback`` is handed straight to Stable-Baselines3. A job runner uses
+        it to watch progress and to stop cleanly: an SB3 callback that returns
+        False ends ``learn`` at the next step boundary, which leaves the model
+        in a state worth saving rather than killing a thread mid-update.
+        """
         sb3 = _require_rl()
         hyper = self.algorithm_settings(algorithm)
         steps = total_timesteps or hyper.total_timesteps
@@ -194,11 +201,18 @@ class TrainingPipeline:
 
         started = time.perf_counter()
         try:
-            model.learn(total_timesteps=steps, progress_bar=progress)
+            model.learn(total_timesteps=steps, progress_bar=progress, callback=callback)
         finally:
             elapsed = time.perf_counter() - started
 
-        model_path, card_path, card = self._save(model, training_id, algorithm, seed, steps, device, elapsed)
+        # What the model was actually trained for, not what was asked for. A
+        # cancelled job stops early and SB3 overshoots a little by stepping in
+        # blocks, so the requested figure is the one number that is never right.
+        trained_steps = int(getattr(model, "num_timesteps", steps) or steps)
+
+        model_path, card_path, card = self._save(
+            model, training_id, algorithm, seed, trained_steps, device, elapsed
+        )
 
         evaluation = None
         if evaluate_episodes > 0:
@@ -207,13 +221,14 @@ class TrainingPipeline:
             Path(card_path).write_text(json.dumps(card, indent=2), encoding="utf-8")
 
         env.close()
-        self._record_finish(training_id, steps, model_path, algorithm)
+        self._record_finish(training_id, trained_steps, model_path, algorithm)
         log.info(
             "training finished",
             extra={
                 "event": "TRAINING_COMPLETED",
                 "training_id": training_id,
                 "elapsed_s": round(elapsed, 2),
+                "timesteps": trained_steps,
                 "model": model_path,
             },
         )
@@ -223,7 +238,7 @@ class TrainingPipeline:
             algorithm=algorithm,
             model_path=model_path,
             card_path=card_path,
-            total_timesteps=steps,
+            total_timesteps=trained_steps,
             elapsed_s=elapsed,
             device=device,
             scenario=self.settings.training.scenario,
@@ -426,6 +441,44 @@ class TrainingPipeline:
         except Exception:
             # Losing the history entry must not lose the training run.
             log.exception("could not record training start", extra={"event": "TRAINING_RECORD_FAILED"})
+
+    def record_status(self, training_id: str, status: str, notes: str = "") -> None:
+        """Mark a training run's outcome when it did not complete.
+
+        A run can now be cancelled from the dashboard, or be left behind by a
+        server restart. Leaving either as RUNNING for ever would make the
+        history claim a job is still going when nothing is.
+        """
+        if self.repository is None:
+            return
+        try:
+            with self.repository.db.transaction() as conn:
+                conn.execute(
+                    "UPDATE training_runs SET ended_at = ?, status = ?, notes = ? WHERE training_id = ?",
+                    (time.time(), status, notes, training_id),
+                )
+        except Exception:
+            log.exception("could not record training status", extra={"event": "TRAINING_RECORD_FAILED"})
+
+    def reconcile_interrupted(self) -> int:
+        """Close out runs the last process was in the middle of.
+
+        Training happens in this process. If it stops — a restart, a crash —
+        every RUNNING row is stale by definition, because a job cannot outlive
+        the server that was running it.
+        """
+        if self.repository is None:
+            return 0
+        try:
+            with self.repository.db.transaction() as conn:
+                cursor = conn.execute(
+                    "UPDATE training_runs SET ended_at = ?, status = ?, notes = ? WHERE status = ?",
+                    (time.time(), "INTERRUPTED", "the server stopped while this was training", "RUNNING"),
+                )
+                return int(cursor.rowcount or 0)
+        except Exception:
+            log.exception("could not reconcile training runs", extra={"event": "TRAINING_RECORD_FAILED"})
+            return 0
 
     def _record_finish(self, training_id: str, steps: int, model_path: str, algorithm: str) -> None:
         if self.repository is None:

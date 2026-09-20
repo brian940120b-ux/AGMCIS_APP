@@ -30,6 +30,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Teams, tasks and the commander](#teams-tasks-and-the-commander)
 - [Swapping the physics](#swapping-the-physics)
 - [Analytics](#analytics)
+- [The training centre](#the-training-centre)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -324,6 +325,10 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/physics/airframes` | The fictional platforms both backends fly |
 | `GET` | `/api/analytics/runs/{id}` | Every chart for one run, in the shape a chart draws |
 | `GET` | `/api/analytics/compare` | Team and per-term scores for several runs side by side |
+| `GET` | `/api/training/jobs` | The training job running now, and the ones this server has run |
+| `GET` | `/api/training/jobs/{id}` | One job, with its progress curve |
+| `POST` | `/api/training/start` | Start a training job in the background |
+| `POST` | `/api/training/stop` | Stop it at the next step boundary, keeping what it trained |
 
 Endpoints for phases not yet built are absent rather than stubbed — this API
 never answers for a capability the backend does not have.
@@ -919,6 +924,37 @@ will actually fly.
 **Nothing in this models weapons, engagement or targeting.** The task is flight
 and navigation, and the reward has no term for anything else. A test asserts it.
 
+### The training centre
+
+Press **TRAINING** in the header. Pick an algorithm and a budget, press **START
+TRAINING**, and watch the reward curve while it learns. **STOP** ends it at the
+next step boundary.
+
+Three things had to be true before the dashboard was allowed that button, and
+`train.py` had said so since PHASE 13:
+
+| | |
+|---|---|
+| **Progress** | timesteps and mean episode reward, reported by the trainer |
+| **Cancellation** | stops cleanly, and **keeps the policy trained so far** |
+| **Surviving a reload** | the job lives in the server, so refreshing rejoins it |
+
+**What it refuses, and why.** Each refusal names its reason and the page prints
+it:
+
+- *A simulation is running* — both would contend for the same cores and
+  neither's timings would mean anything. Stop the simulation first.
+- *A job is already running* — one at a time. A silent queue would leave you
+  watching someone else's progress bar.
+- *Above the cap* — `max_timesteps_per_job` in `configs/training.yaml`, 500,000
+  by default.
+
+**A job does not survive a server restart.** It runs in the server process, so
+it cannot. That is said on the panel rather than discovered: a run interrupted
+by a restart is recorded as INTERRUPTED at the next startup instead of being
+left looking like it is still going. A long run still belongs on the command
+line, where it outlives the dashboard.
+
 ### Install the stack
 
 The RL dependencies are large and optional, so they are kept out of the default
@@ -1034,7 +1070,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `551 passed`, or `542 passed, 9 skipped` without the
+**Success looks like:** `570 passed`, or `561 passed, 9 skipped` without the
 optional JSBSim backend installed.
 
 ### End-to-end dashboard test
@@ -1051,6 +1087,7 @@ npm run test:e2e:replay # record a run, then load, play, scrub and score it
 npm run test:e2e:editor # build a scenario in the UI, save it, then fly it
 npm run test:e2e:coordination  # eight units, two commanders, and no panel overlaps
 npm run test:e2e:analytics     # record a run, then chart it
+npm run test:e2e:training      # train a real policy from the browser
 ```
 
 Each suite sets up the scenario it asserts against, so they can be run in any
@@ -1151,7 +1188,8 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 14–15 | Multi-agent, commander agent | **Complete** |
 | 16 | JSBSim adapter (swappable physics backend) | **Complete** |
 | 17 | Analytics: run charts and comparison | **Complete** |
-| 18–19 | Training centre, model centre | Planned |
+| 18 | Training centre: start, watch and cancel a job | **Complete** |
+| 19 | Model centre | Planned |
 | 20 | Production hardening | Planned |
 
 Detail: [`docs/PHASES.md`](docs/PHASES.md).

@@ -808,10 +808,92 @@ cell for every unit against every term, the crosshair reading a real time off
 the series, a two-run comparison, and a run too short to be sampled reported as
 unavailable rather than charted as zero. 551 backend tests.
 
-## PHASE 18–19 — Training centre, model centre
+## PHASE 18 — Training centre — **Complete**
 
-Live training metrics, model comparison, model lifecycle (load, unload,
-evaluate, compare, archive).
+`train.py` wrote the specification for this phase in PHASE 13, in the docstring
+explaining why there was no button:
+
+> Training is CLI-only for now. Driving a long job from the browser needs job
+> management — progress, cancellation, surviving a reload — which is the
+> training centre's work in a later phase. Rather than put a button in the
+> dashboard that cannot do those things, the dashboard says training is run
+> from here.
+
+All three exist now, so the button does too. A fifth stage, **TRAINING**, starts
+a real job, follows it, and stops it.
+
+**Progress** comes from an SB3 callback reporting timesteps and the running mean
+episode reward. It is sampled rather than recorded per step, and the series is
+thinned when it outgrows its budget, so a long job keeps a readable curve
+instead of a million points.
+
+**Cancellation** returns False from that callback, which ends `learn` at the
+next step boundary. Nothing is killed mid-update: the policy trained so far is
+saved and usable, and the run is recorded as CANCELLED rather than quietly filed
+as a completed one that happens to be short. Measured: stopped at 1,429 of
+200,000 steps with the model on disk.
+
+**Surviving a reload** falls out of the job living in the server rather than the
+page — the e2e test reloads mid-job and rejoins it. Surviving a *server restart*
+is a different claim and is **not** made: a job cannot outlive its process, so
+every run left RUNNING by a restart is reconciled to INTERRUPTED at startup
+rather than left looking like it is still going.
+
+### What it refuses, and why it says so
+
+A refusal that does not explain itself is worse than no button. Each one names
+its reason, and the dashboard prints what the backend said:
+
+* **A simulation is running.** Both would contend for the same cores and
+  neither's timings would mean anything. Stop the simulation first.
+* **A job is already running.** One at a time. Queueing silently would leave the
+  operator watching a progress bar belonging to somebody else's job.
+* **Above the cap.** `max_timesteps_per_job` in `configs/training.yaml`, 500,000
+  by default. A browser request should not be able to commit the server to a
+  week of compute; the command line has no cap, which is where a long run
+  belongs.
+
+That last one needed a change in the API client too. `ApiError` was throwing
+away the backend's `detail` and reporting only a status code, so every one of
+these carefully-worded refusals would have reached the operator as "POST
+/api/training/start failed (400)".
+
+### Three defects, one of them caught by its own test
+
+*A request for zero timesteps started a 200,000-step job.* `timesteps or
+configured_default` treats an explicit zero as an omission. An expected-refusal
+test failed by not raising, and left a real 200k job running behind it. Zero is
+a mistake to refuse, not a gap to fill in — `is None` now.
+
+The same line had a second bug beside it: the default budget was always PPO's,
+whatever algorithm was asked for.
+
+*The metric budget was computed from the wrong number.* The sampling interval
+came from the requested timesteps, but PPO collects in whole blocks and
+overshoots — a 600-step request ran 2,048 steps and produced 683 points against
+a 200-point target. The curve is now thinned when it exceeds its cap, halving
+the resolution rather than dropping the newest progress.
+
+*The training clock started before the environment existed.* The callback's
+stopwatch began when it was constructed, which is before `train()` builds the
+env, so the first sample carried about 15 seconds of setup as if it were
+training time. It starts at `_on_training_start` now.
+
+### What is still true and still said
+
+A job runs **in this server process**. That is stated on the panel, in the API
+and in the job status, because it is the thing that makes the feature honest:
+one job at a time, no restart survival, and a long run belongs on the command
+line where it can outlive the dashboard.
+
+**Verified:** a real PPO policy trained from the browser — 4,096 steps, 274
+progress samples, a reward curve climbing from -82 to -58 — followed across a
+page reload, refused on top of a running simulation with the reason on screen,
+and cancelled part way with the partial policy saved. 570 backend tests.
+
+## PHASE 19 — Model centre
+
+Model comparison and lifecycle: load, unload, evaluate, compare, archive.
 
 ## PHASE 20 — Production hardening
 

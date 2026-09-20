@@ -1,14 +1,13 @@
-"""Training and model endpoints (PHASE 11-13).
+"""Training endpoints (PHASE 11-13, control added in PHASE 18).
 
-Read-only. Training itself is started from the command line
-(``backend/train.py``), not from here: a long job needs progress reporting,
-cancellation and survival across a page reload, and that job management is the
-training centre's work in a later phase. Putting a START TRAINING button in the
-dashboard now would be a control that cannot do what it appears to.
+Until PHASE 18 this router was read-only and said so: a START button that could
+not report progress, could not be cancelled and could not survive a reload would
+have been a control that did not do what it appeared to. Those three things now
+exist, so the button does.
 
-So this router answers what *is* true today: which device is available, what
-the environment looks like, what the reward weights are, which policies have
-been trained, and how they scored.
+What is still true, and still stated rather than hidden: a job runs **in this
+server process**, one at a time, and does not survive a restart. The command
+line remains the right place for a long run.
 
 The RL stack is an optional dependency. Every endpoint works without it and
 says plainly that it is missing, rather than failing to import.
@@ -19,12 +18,24 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from core.config import Settings, get_settings
 from core.logging_config import get_logger
 from core.run_manager import RunManager
-from core.runtime import get_run_manager
-from training.pipeline import ALGORITHMS, TrainingPipeline, resolve_device, rl_available
+from core.runtime import get_run_manager, get_training_runner
+from training.jobs import (
+    TrainingBusyError,
+    TrainingJobRunner,
+    TrainingRefusedError,
+)
+from training.pipeline import (
+    ALGORITHMS,
+    TrainingPipeline,
+    TrainingUnavailableError,
+    resolve_device,
+    rl_available,
+)
 from training.reward import TERM_NAMES
 
 log = get_logger("api.training")
@@ -47,12 +58,12 @@ def training_status(settings: Settings = Depends(get_settings)) -> dict[str, Any
         "available": available,
         "install_hint": None if available else INSTALL_HINT,
         "how_to_run": CLI_HINT,
-        "browser_control": False,
+        "browser_control": available,
         "browser_control_note": (
-            "Training is started from the command line. Driving a long job from the "
-            "dashboard needs progress, cancellation and reload survival, which arrives "
-            "with the training centre."
+            "A job can be started here. It runs in this server process, one at a time, "
+            "and does not survive a restart — a long run belongs on the command line."
         ),
+        "max_timesteps_per_job": training.max_timesteps_per_job,
         "device": resolve_device(training.device) if available else "unavailable",
         "configured_device": training.device,
         "algorithms": list(ALGORITHMS),
@@ -119,3 +130,71 @@ def training_runs(
         raise HTTPException(status_code=503, detail="run storage is disabled")
     rows = runs.repository.db.query("SELECT * FROM training_runs ORDER BY started_at DESC LIMIT ?", (limit,))
     return {"count": len(rows), "runs": [dict(r) for r in rows]}
+
+
+# ------------------------------------------------------------------- PHASE 18
+
+
+class StartTrainingRequest(BaseModel):
+    """What to train. Everything has a default from configs/training.yaml."""
+
+    algorithm: str = Field(default="ppo", description="ppo or sac")
+    timesteps: int | None = Field(default=None, ge=1, description="Defaults to the configured budget")
+    seed: int | None = Field(default=None, description="Defaults to the simulation seed")
+    evaluate_episodes: int = Field(default=0, ge=0, le=50, description="Episodes to evaluate after")
+
+
+@router.get("/training/jobs")
+def training_jobs(runner: TrainingJobRunner = Depends(get_training_runner)) -> dict[str, Any]:
+    """The job running now, if any, and the ones this server has run."""
+    return runner.status()
+
+
+@router.get("/training/jobs/{job_id}")
+def training_job(job_id: str, runner: TrainingJobRunner = Depends(get_training_runner)) -> dict[str, Any]:
+    """One job, with its progress curve."""
+    job = runner.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"no such training job: {job_id}")
+    return job.to_dict()
+
+
+@router.post("/training/start")
+def training_start(
+    request: StartTrainingRequest,
+    runner: TrainingJobRunner = Depends(get_training_runner),
+) -> dict[str, Any]:
+    """Start a training job in the background.
+
+    Refused rather than queued when one is already running, when a simulation
+    is running, or when the budget is above the configured cap. Each refusal
+    says which it was — a silent queue would leave the operator watching a
+    progress bar that belongs to somebody else's job.
+    """
+    try:
+        job = runner.start(
+            request.algorithm,
+            timesteps=request.timesteps,
+            seed=request.seed,
+            evaluate_episodes=request.evaluate_episodes,
+        )
+    except TrainingUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except TrainingBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TrainingRefusedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return job.to_dict()
+
+
+@router.post("/training/stop")
+def training_stop(runner: TrainingJobRunner = Depends(get_training_runner)) -> dict[str, Any]:
+    """Ask the running job to stop at the next step boundary.
+
+    The model trained so far is still saved and still usable; the run is
+    recorded as CANCELLED rather than filed as a short completed one.
+    """
+    job = runner.stop()
+    if job is None:
+        raise HTTPException(status_code=409, detail="no training job is running")
+    return job.to_dict()

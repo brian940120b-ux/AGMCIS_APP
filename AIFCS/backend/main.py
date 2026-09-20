@@ -108,17 +108,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ),
     )
 
-    # PHASE 11-13. The environment and the pipelines are real; starting a run
-    # from the browser is not, and the detail says so rather than implying a
-    # button exists somewhere.
+    # PHASE 18. Training happens in this process, so every run left RUNNING in
+    # the database belongs to a process that is gone. Closing them out at
+    # startup stops the history claiming a job is still going when nothing is.
+    startup_log = get_logger("startup")
+    try:
+        from training.pipeline import TrainingPipeline
+
+        pipeline = TrainingPipeline(settings, repository=get_run_manager().repository)
+        interrupted = pipeline.reconcile_interrupted()
+        if interrupted:
+            startup_log.info(
+                "closed out interrupted training runs",
+                extra={"event": "TRAINING_RECONCILED", "count": interrupted},
+            )
+    except Exception:
+        # Never let history bookkeeping stop the backend coming up.
+        startup_log.exception(
+            "could not reconcile training runs", extra={"event": "TRAINING_RECONCILE_FAILED"}
+        )
+
+    # PHASE 11-13 built the stack; PHASE 18 made it startable from the browser,
+    # so the detail says that rather than still pointing at the command line.
     from training.pipeline import resolve_device, rl_available
 
     if rl_available():
         registry.set_state(
             "training",
             SubsystemState.ONLINE,
-            "Gymnasium env, PPO and SAC on "
-            f"{resolve_device(settings.training.device)} - run from backend/train.py",
+            f"Gymnasium env, PPO and SAC on {resolve_device(settings.training.device)} - one job at a time",
         )
     else:
         registry.set_state(

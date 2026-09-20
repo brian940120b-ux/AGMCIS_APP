@@ -68,6 +68,7 @@
 | `simulation/jsbsim_airframe.py` | Writes a fictional airframe out as JSBSim XML | 16 |
 | `simulation/jsbsim_adapter.py` | JSBSim behind the Integrator protocol, one FDM per entity | 16 |
 | `analytics/series.py` | Stored rows to chart-ready series; cannot reach a tick | 17 |
+| `training/jobs.py` | One cancellable training job at a time, with progress | 18 |
 
 ## Determinism
 
