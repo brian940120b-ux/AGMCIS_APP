@@ -191,3 +191,88 @@ def test_the_card_refuses_to_print_two_returns_it_cannot_compare():
     assert "還沒得比" in body
     assert "比的是起跑時間,不是選幣" in body
     assert "since(" in body
+
+
+# ══════════════════════════════════════════════════════════
+# 動態篩選變成「系統」本身 · 2026-09-20
+# ══════════════════════════════════════════════════════════
+#
+# 執政官:「我希望的是動態篩選,模擬 B 是能夠讓系統自己去模擬交易的。」
+# 再問細節:「從這麼多幣種篩選可能八到十個流動性最好的,
+#            然後系統自行去模擬開單。」
+
+def test_the_pool_is_capped_so_a_human_can_actually_execute_it(monkeypatch):
+    """**這是一道「手按得完」的閘,不是一道策略閘。**
+
+    篩完是 49 檔。指令單是人用手在 App 上按的:49 個倉要一個一個開,
+    每個填本金、槓桿、止損,而且每天還要調整。7 已經勉強,49 不可能。
+
+    而一張沒有人按得完的指令單,會讓對帳整個失去意義 ——
+    那時候「模擬與真實的差距」量到的是手速,不是策略。
+    """
+    import portfolio.specs as specs
+    import portfolio.universe as uni
+    monkeypatch.setattr(uni, "screen",
+                        lambda **kw: [f"C{i}-USDT" for i in range(49)])
+    monkeypatch.setattr(specs, "refresh_funding", lambda s, **kw: 1)
+
+    got = paper.screened_universe()
+    assert len(got) == paper.MAX_UNIVERSE == 10
+    # screen() 已經按成交額由大到小排好 —— 取前 N 就是取流動性最好的 N
+    assert got == [f"C{i}-USDT" for i in range(10)]
+
+
+def test_the_cap_ranks_by_liquidity_not_by_recent_moves():
+    """「最有交易機會」我只做到「流動性最好」。
+
+    按成交額排序是**結構性**的(那是事實)。按「最近漲最多 / 最可能動」
+    排是**預測性**的 —— 2026-09-08 實測過一次(按離均線排序挑),
+    驗證段輸給隨機。要加那種排序,得走研究迴路拿證據。
+    """
+    src = Path(paper.__file__).read_text(encoding="utf-8")
+    body = src[src.index("MAX_UNIVERSE = 10") - 1200:
+               src.index("def screened_universe(")]
+    assert "預測性" in body and "2026-09-08" in body
+
+
+def test_the_dynamic_pool_is_the_system_and_the_seven_are_the_control():
+    """指令單從哪一組出,哪一組就是「系統」。"""
+    assert paper.PRIMARY is paper.SCREENED
+    assert paper.CONTROL is paper.MAIN
+    assert paper.PRIMARY.universe_fn is not None
+    assert paper.CONTROL.universe_fn is None
+
+
+def test_every_user_facing_path_reads_the_same_cohort():
+    """**只准有一個開關。**
+
+    如果面板某幾格讀 PRIMARY、某幾格還讀預設的帳本,畫面上就會出現
+    「指令單叫你買 X,而持倉列裡沒有 X」—— 那比完全沒切換更難查。
+
+    這條掃四個真的對使用者說話的地方:指令單、對齊單、持倉、成績單。
+    """
+    src = (Path(paper.__file__).resolve().parents[1]
+           / "scripts/dashboard.py").read_text(encoding="utf-8")
+
+    tickets = src[src.index("def block_tickets("):src.index("def gate_correlation(")]
+    assert "plan(cfg=PRIMARY)" in tickets, "指令單還在用預設的 plan()"
+    assert "Account.load(\n                            PRIMARY.state_path)" \
+        in tickets or "PRIMARY.state_path" in tickets, "對齊單讀錯帳本"
+
+    marks = src[src.index("def sim_marks("):src.index("def sim_snapshot(")]
+    assert "PRIMARY.state_path" in marks, "持倉讀的是預設帳本"
+
+    snap = src[src.index("def sim_snapshot("):src.index("def sim_payload(")]
+    assert "score(PRIMARY.curve_path)" in snap, "成績單讀的是預設曲線"
+
+
+def test_switching_the_pool_invalidates_the_old_backtest_number():
+    """**回測的 Calmar 1.33 是七個幣那一組的數字。**
+
+    換了交易池,那個數字就不再描述現在跑的東西。這件事要寫在原始碼
+    旁邊,不是寫在某次對話裡 —— 幾個月後看到 1.33 的人會以為那是
+    現在這套的成績。
+    """
+    src = Path(paper.__file__).read_text(encoding="utf-8")
+    tail = src[src.index("PRIMARY = SCREENED") - 1500:]
+    assert "1.33" in tail and "不再描述現在跑的東西" in tail

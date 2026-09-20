@@ -43,13 +43,20 @@ def test_being_flat_is_not_reported_as_a_fault():
     而一個會亂喊的警報,久了就會被當成背景雜訊忽略。
     """
     import time as _t
-    from portfolio.account import Account
-    from portfolio.scorecard import Live
+
+    from portfolio.scorecard import Live, Scorecard
+    # ⚠️ 塞快取的測試**要自己收乾淨**。第一版沒收,而且塞的是
+    # `card: None` —— 下一條測試渲染整頁時撿到它,炸在
+    # `'NoneType' object has no attribute 'verdict'`。
+    # 一條測試弄壞另一條,查起來會以為是產品程式碼壞了。
     dash._CACHE["sim"] = (_t.time(), {
-        "live": Live(), "card": None, "age_s": None, "source": "無持倉",
-        "marks": {}})
-    got = dict((n, ok) for n, ok, _ in dash.status_checks())
-    assert got.get("行情") is True, "空手被當成故障了"
+        "live": Live(), "card": Scorecard(), "age_s": None,
+        "source": "無持倉", "marks": {}})
+    try:
+        got = dict((n, ok) for n, ok, _ in dash.status_checks())
+        assert got.get("行情") is True, "空手被當成故障了"
+    finally:
+        dash._CACHE.pop("sim", None)
 
 
 def test_every_check_carries_a_measurable_detail():

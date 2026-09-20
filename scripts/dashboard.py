@@ -627,9 +627,9 @@ def status_checks() -> list:
 
     # 二、兩組模擬有沒有在記帳
     try:
-        from portfolio.paper import MAIN, SCREENED
+        from portfolio.paper import CONTROL, PRIMARY
         from portfolio.scorecard import score
-        for label, cfg in (("主城", MAIN), ("測試組", SCREENED)):
+        for label, cfg in (("系統", PRIMARY), ("對照組", CONTROL)):
             sc = score(cfg.curve_path)
             out.append((label, bool(sc.days) and sc.running,
                         f"{sc.days} 天" if sc.running else
@@ -714,9 +714,11 @@ def block_tickets() -> str:
     def _compute():
         try:
             from exchange.bingx.trade import BACKSTOP_PCT
-            from portfolio.paper import LEVERAGE_CAP, plan
+            from portfolio.paper import LEVERAGE_CAP, PRIMARY, plan
             from portfolio.ticket import make_tickets
-            p = plan()
+            # **指令單從 PRIMARY 出。** 2026-09-20 起 PRIMARY 是動態
+            # 篩選那一組(成交額前 10),不再是七個寫死的幣。
+            p = plan(cfg=PRIMARY)
             if p.get("error"):
                 return {"error": p["error"]}
             if BACKSTOP_PCT is None:
@@ -760,7 +762,8 @@ def block_tickets() -> str:
                         "硬算會叫你去開一個你已經持有的倉。")
 
                 held = {sym: pos.position_amt
-                        for sym, pos in Account.load().positions.items()
+                        for sym, pos in Account.load(
+                            PRIMARY.state_path).positions.items()
                         if abs(pos.position_amt) > 1e-12}
                 catch, catch_refused, catch_notes = catch_up(
                     held, ex_pos,
@@ -1094,7 +1097,11 @@ def sim_marks() -> tuple:
     """
     import time as _t
     from portfolio.account import Account
-    a = Account.load()
+    from portfolio.paper import PRIMARY
+    # **PRIMARY 的帳本**,不是預設的那本。少了這個參數,面板會顯示
+    # 對照組的持倉,而指令單來自 PRIMARY —— 畫面上就會出現
+    # 「叫你買 X,而持倉列裡沒有 X」,比完全沒切換更難查。
+    a = Account.load(PRIMARY.state_path)
     # 持倉 ∪ 基準籃子。**基準籃子不能漏** —— 策略空手的時候,
     # 「不交易的話現在是賺是賠」正是最該看到的那個數字。
     want = sorted({s for s, pos in a.positions.items()
@@ -1160,7 +1167,9 @@ def sim_snapshot() -> dict:
             from portfolio.scorecard import live, score
             a, marks, _, age, src = sim_marks()
             lv = live(a, marks)
-            return {"live": lv, "card": score(), "age_s": age,
+            from portfolio.paper import PRIMARY
+            return {"live": lv, "card": score(PRIMARY.curve_path),
+                    "age_s": age,
                     "source": src, "marks": marks}
         except Exception as e:                       # noqa: BLE001
             return {"error": f"{type(e).__name__}: {e}"}
@@ -1342,22 +1351,22 @@ def block_sim() -> str:
 
 
 def _cohort_row() -> str:
-    """測試組(動態交易池)跟主城的對照。
+    """對照組(固定七幣)跟現在這套系統的對照。
 
-    2026-09-19 執政官:「有一種篩選機制。」
-    測試組跟主城唯一的差別是交易池:主城七幣寫死,它每天重篩
-    (972 個合約 -> 49 個過四道結構性關卡)。
+    ⚠️ 2026-09-20 方向翻過來了:動態篩選那一組**變成系統本身**
+    (PRIMARY),七個寫死的幣退成對照組。所以這一段印的是對照組。
 
-    **只印能比的東西。** 兩邊起始金都是 10,000,同一份 plan()/tick(),
-    同一段真實價格 —— 所以報酬直接可比,不需要任何換算。
+    對照組存在的唯一理由:沒有它,「動態篩選比較好」就是一句**沒有
+    辦法否證**的話。兩組同一份 plan()/tick()、同一段真實價格、
+    同樣 10,000 起始金,唯一的差別是交易池。
     """
     def _compute():
         try:
             from portfolio.account import Account
-            from portfolio.paper import SCREENED
+            from portfolio.paper import CONTROL
             from portfolio.scorecard import live, score
-            card = score(SCREENED.curve_path)
-            a = Account.load(SCREENED.state_path)
+            card = score(CONTROL.curve_path)
+            a = Account.load(CONTROL.state_path)
             marks = all_prices().get("px") or {}
             lv = live(a, {k: v[0] for k, v in marks.items()
                           if k in a.positions or k in (a.bench_start or {})})
@@ -1366,23 +1375,14 @@ def _cohort_row() -> str:
             return {"error": f"{type(e).__name__}: {e}"}
 
     got = _cached("cohort", 60, _compute)
-    head = ('<div class="sect-h">測試組 · 動態交易池</div>')
+    head = ('<div class="sect-h">對照組 · 固定七幣</div>')
     if got.get("error"):
         return (head + '<div class="flag">算不出來:'
                 + html.escape(got["error"]) + '</div>')
 
     card, lv = got["card"], got["live"]
     if not card.days:
-        return (head + '<div class="flag">交易池篩選<b>已經接上</b>,'
-                '但測試組還沒記過帳 —— 它跟主城一起每天 00:30 跑。<br>'
-                '想現在就看:<code>python -c "from portfolio.paper import '
-                'tick, SCREENED; print(tick(cfg=SCREENED))"</code><br>'
-                '2026-09-19 實測篩選:972 個合約 → 可交易 971 → '
-                '成交額≥1000萬 <b>73</b> → 歷史≥1000天 <b>49</b> → '
-                '資料齊全 <b>49</b>。<br>'
-                '⚠️ 當年害死測試組的 <code>1000PEPE-USDT</code> 這次'
-                '通過了第四關(資金費歷史抓得到)—— 那一關就是為它加的。'
-                '</div>')
+        return (head + '<div class="flag">對照組還沒記過帳。</div>')
 
     # ── 兩組必須從**同一天**起算 ──────────────────────
     # 2026-09-20:主城 12 天 +4.24%(從 09-08),測試組 1 天 -0.03%
@@ -1392,12 +1392,12 @@ def _cohort_row() -> str:
     # 不能靠重開主城來對齊(那會毀掉 12 天的前向樣本,而前向樣本正是
     # 這整套東西唯一沒有後見之明的證據)。所以兩邊都從後開始的那一組
     # 的起點重新起算。
-    from portfolio.paper import MAIN, SCREENED
+    from portfolio.paper import CONTROL, PRIMARY
     from portfolio.scorecard import since
-    start, main_pct, cohort_pct, n = since(MAIN.curve_path,
-                                           SCREENED.curve_path)
+    start, main_pct, cohort_pct, n = since(CONTROL.curve_path,
+                                           PRIMARY.curve_path)
 
-    cells = [kv("交易池", f"{got['pool']} 檔在倉"),
+    cells = [kv("對照組在倉", f"{got['pool']} 檔"),
              kv("記帳天數", f"{card.days} 天"),
              kv("走完的進出", f"{card.round_trips} 次")]
     out = [head, f'<div class="grid">{"".join(cells)}</div>']
@@ -1406,7 +1406,7 @@ def _cohort_row() -> str:
         # **不顯示一個看起來能比的數字。** 重疊不到兩天就沒有「期間」
         # 可言,那時候唯一誠實的話是「還沒得比」。
         out.append('<div class="flag">⚠️ <b>還沒得比。</b> 兩組的起算日'
-                   '不同(主城 09-08、測試組 09-19),重疊'
+                   '不同(對照組 09-08、系統 09-19),重疊'
                    f'{n} 天 —— 不足以算出同期間的報酬。<br>'
                    '在那之前<b>不會</b>並排顯示兩個報酬:主城的數字裡'
                    '有一段是測試組還不存在的時候賺的,擺在一起比,'
@@ -1415,8 +1415,8 @@ def _cohort_row() -> str:
         gap = cohort_pct - main_pct
         out.append(
             f'<div class="grid">'
-            + kv("主城 · 同期間", f"{main_pct:+.2f}%", tone(main_pct))
-            + kv("測試組 · 同期間", f"{cohort_pct:+.2f}%", tone(cohort_pct))
+            + kv("對照組 · 同期間", f"{main_pct:+.2f}%", tone(main_pct))
+            + kv("系統 · 同期間", f"{cohort_pct:+.2f}%", tone(cohort_pct))
             + kv("差", f"{gap:+.2f}%", tone(gap))
             + '</div>'
             f'<p class="note">兩邊都從 <b>{html.escape(start)}</b> 起算'
@@ -1424,11 +1424,12 @@ def _cohort_row() -> str:
             '主城全期的報酬更高,但那裡面有一段是測試組還不存在的時候'
             '賺的,不能算進這個比較。</p>')
 
-    out.append('<p class="note">跟主城<b>唯一的差別是交易池</b> —— 策略、'
-               '波動目標、槓桿、回看期完全相同,所以差異只能來自選幣。'
-               '主城不受影響。<br>'
-               '⚠️ <b>幾天的資料比不出高下。</b> 這兩條曲線現在只是'
-               '剛開始,不是結論。</p>')
+    out.append('<p class="note">兩組<b>唯一的差別是交易池</b>:系統每天'
+               '從全市場篩出成交額前 10,對照組是七個寫死的幣。策略、'
+               '波動目標、槓桿、回看期完全相同,所以差異只能來自選幣。<br>'
+               '對照組存在的唯一理由是<b>讓「動態篩選比較好」這句話'
+               '可以被否證</b>。<br>'
+               '⚠️ <b>幾天的資料比不出高下。</b></p>')
     return "".join(out)
 
 
