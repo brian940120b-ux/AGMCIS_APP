@@ -27,6 +27,30 @@ world:
   # Simplified constant-density atmosphere for MVP-01; replaced in later phases.
   air_density_kgpm3: 1.225
 
+physics:
+  # Which motion integrator advances the world (PHASE 16).
+  #   simple_6dof  this platform's own Newton-Euler model, RK4 (default)
+  #   jsbsim       the JSBSim flight dynamics model — optional, `pip install jsbsim`
+  #   kinematic    constant velocity, no forces at all
+  #   null         nothing moves
+  # Selecting jsbsim without the package installed is an error naming what to
+  # install. It never falls back quietly to a different model than the one the
+  # run was configured for.
+  #
+  # The two 6DOF backends fly the SAME fictional airframe: the JSBSim aircraft
+  # files are generated from the very same AircraftParameters. They differ in
+  # the model, most visibly the atmosphere — JSBSim's density falls with
+  # altitude, air_density_kgpm3 above is constant.
+  backend: simple_6dof
+  jsbsim:
+    # Generated airframes are cached here. It is not a directory to edit:
+    # anything in it is rewritten when AircraftParameters changes.
+    data_root: data/jsbsim
+    # Where the flat world plane is pinned on JSBSim's geodetic model.
+    # Fictional and arbitrary — nothing depends on the location.
+    reference_latitude_deg: 0.0
+    reference_longitude_deg: 0.0
+
 sensors:
   # Perception limits between the truth state and an agent (PHASE 5).
   # An agent sees an estimate, never the world itself.

@@ -678,3 +678,25 @@ export interface CommandersResponse {
   commanders: CommanderStatus[]
   notice: string
 }
+
+/* --------------------------------------------------------------- PHASE 16 */
+
+export interface PhysicsBackendInfo {
+  key: string
+  title: string
+  description: string
+  /** False means the package is not installed. The UI says so rather than hiding it. */
+  available: boolean
+  detail: string
+}
+
+export interface PhysicsStatus {
+  requested: string
+  active: string | null
+  available: boolean
+  detail: string
+  backends: PhysicsBackendInfo[]
+  notice: string
+  install_hint?: string
+  backend_status?: Record<string, unknown>
+}

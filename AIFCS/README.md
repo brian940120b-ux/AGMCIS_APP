@@ -28,6 +28,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Editing scenarios](#editing-scenarios)
 - [Reinforcement learning](#reinforcement-learning)
 - [Teams, tasks and the commander](#teams-tasks-and-the-commander)
+- [Swapping the physics](#swapping-the-physics)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -318,6 +319,8 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/tasks` | Every task issued, its status and the reason behind it |
 | `GET` | `/api/tasks/{entity_id}` | What one unit was told to do, and its history |
 | `GET` | `/api/commanders` | Each commander, its standing order and what it allocated |
+| `GET` | `/api/physics` | Which physics backend is configured, which is running, what else exists |
+| `GET` | `/api/physics/airframes` | The fictional platforms both backends fly |
 
 Endpoints for phases not yet built are absent rather than stubbed — this API
 never answers for a capability the backend does not have.
@@ -347,6 +350,64 @@ All airframe parameters are fictional and live in
 `backend/simulation/aircraft.py`. They are sized so the platform is stable and
 flyable: full elevator commands roughly 19° angle of attack, full aileron rolls
 at about 200°/s, and `demo_alpha` is trimmed to fly level hands-off at 220 m/s.
+
+### Swapping the physics
+
+The engine never integrates motion itself — it delegates to an `Integrator`. Which
+one is a configuration choice:
+
+```yaml
+# configs/simulation.yaml
+physics:
+  backend: simple_6dof    # or jsbsim, kinematic, null
+```
+
+| Backend | What it is |
+|---|---|
+| `simple_6dof` | This platform's own Newton-Euler model: quaternion attitude, RK4 at the fixed timestep, constant-density atmosphere from config. The default, and the only one with no extra dependency. |
+| `jsbsim` | [JSBSim](https://github.com/JSBSim-Team/jsbsim), an established open-source flight dynamics model. Optional. |
+| `kinematic` | Constant velocity. Real integration, but no forces at all — for isolating a problem from the aerodynamics. |
+| `null` | Nothing moves. |
+
+The Command Center's **Physics Backend** panel says which one is flying and
+which ones are installed, so you never have to guess from the outside.
+
+#### JSBSim
+
+It is optional and the platform is complete without it. Install it with:
+
+```bash
+.venv/bin/pip install -r requirements-physics.txt
+```
+
+then set `backend: jsbsim` and restart the backend.
+
+**No real aircraft is ever loaded.** JSBSim ships definitions for real airframes.
+AIFCS points it at a data root under `data/jsbsim/` that it generates itself,
+holding exactly the fictional airframes `backend/simulation/aircraft.py`
+describes — same mass, same inertia, same geometry, same aerodynamic
+coefficients. The two backends fly the *same invented platform*, so a difference
+between them is a difference between the models. The generated files are
+regenerated whenever those parameters change, and a test asserts the airframe
+describes no weapon, store or targeting behaviour of any kind.
+
+**Asking for it without it installed is an error, not a fallback.** You get the
+install command, the dashboard marks the backend `NOT INSTALLED`, and the run
+does not start. A run recorded under a model nobody chose is worse than a run
+that refused to begin.
+
+**The two backends do not agree, and should not.** The most visible difference
+is the atmosphere: JSBSim models a standard one, so density falls with altitude,
+while `simple_6dof` uses the constant `air_density_kgpm3`. At 6 km that is
+0.66 against 1.225 kg/m³, and the same airframe at the same throttle will not
+hold level flight under both. The agents fly closed-loop through the flight
+controller and trim themselves — measured on `demo_alpha`, the route followers
+settle back onto their assigned altitudes within about 100 s and hold them to
+within a couple of metres.
+
+**JSBSim is the faster of the two here**, which surprised us: 643 µs per tick
+against 1024 for four aircraft, about 0.63×. Compiled C++ beats four NumPy
+derivative evaluations per RK4 step in the interpreter.
 
 ### Agents
 
@@ -929,7 +990,8 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `497 passed`.
+**Success looks like:** `537 passed`, or `528 passed, 9 skipped` without the
+optional JSBSim backend installed.
 
 ### End-to-end dashboard test
 
@@ -1042,7 +1104,7 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 10 | Scenario editor | **Complete** |
 | 11–13 | Gymnasium environment, PPO, SAC | **Complete** |
 | 14–15 | Multi-agent, commander agent | **Complete** |
-| 16 | JSBSim adapter (swappable physics backend) | Planned |
+| 16 | JSBSim adapter (swappable physics backend) | **Complete** |
 | 17–19 | Analytics, training centre, model centre | Planned |
 | 20 | Production hardening | Planned |
 

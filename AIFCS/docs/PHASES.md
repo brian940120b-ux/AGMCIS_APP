@@ -617,10 +617,113 @@ onto the leader's four-waypoint route while RED-02 keeps escorting, confirmed
 against the agent's own state and not just the register; a commander holds no
 reference that can reach a control surface. 497 backend tests.
 
-## PHASE 16 — JSBSim adapter
+## PHASE 16 — JSBSim adapter — **Complete**
 
-JSBSim as one swappable physics backend behind the `AircraftModel` interface. The
-platform must keep working without it.
+PHASE 1 declared an `Integrator` protocol so the physics could be swapped. This
+is the phase that proves it was worth declaring: JSBSim, an established
+open-source flight dynamics model, now flies the world through that protocol and
+the engine needed no change to let it.
+
+Until now the swap was reachable only by passing an instance to the engine's
+constructor — which is to say, from tests and nowhere else. `physics.backend` in
+`configs/simulation.yaml` now selects between `simple_6dof`, `jsbsim`,
+`kinematic` and `null`, and `/api/physics` and the Command Center report which
+one is actually flying.
+
+### The platform works without it
+
+JSBSim is optional, and that is not a claim — it was **verified by uninstalling
+it and running the whole suite**: 528 passed, 9 skipped. The app starts, the
+dashboard marks the backend `NOT INSTALLED` with the command that installs it,
+and the default backend goes on flying.
+
+Asking for JSBSim when it is absent raises an error naming the package. It does
+**not** fall back to `simple_6dof`. A run recorded under a model nobody chose is
+worse than a run that refused to start, and `config_hash` — which is what makes
+a run reproducible — would then describe physics the run never used.
+
+### No real aircraft, ever
+
+JSBSim ships definitions for real airframes, which would break this platform's
+first rule on the first tick. So the adapter never touches them: it points
+JSBSim at a data root it generates itself, holding only the fictional airframes
+`simulation/aircraft.py` already describes.
+
+Generating rather than hand-writing the XML is what keeps the two backends
+honest about each other. Both read the *same* `AircraftParameters` — mass,
+inertia, reference geometry, every aerodynamic coefficient — so a difference
+between them is a difference between the **models**, never between two airframes
+that drifted apart in separate files. A digest beside each generated file means
+editing a parameter regenerates it rather than leaving a stale airframe flying a
+platform the rest of the system has stopped describing.
+
+Two deliberate choices in that generated airframe. **Thrust is an external force,
+not an engine**: JSBSim's engine types each carry their own spool-up and altitude
+lapse, and our fictional platform's model is `max_thrust_n * throttle` along body
+X, which an external reaction reproduces exactly. **Lift and drag are tables**,
+because `Cl` saturates at `cl_max` to model stall and JSBSim has no clamp inside
+a product. A test asserts the airframe describes no weapon, store, pylon or
+targeting element — checking element and property names, not raw text, because
+the file's own header comment contains the word "weapon" in saying there is none.
+
+### Three boundaries
+
+**Round earth to flat plane.** JSBSim positions a vehicle geodetically; the world
+state is a local tangent plane in metres. The adapter converts through the WGS84
+radii of curvature at a reference latitude. Measured, the round trip is exact to
+better than a micrometre across the entire ±100 km world box.
+
+**Its atmosphere, not ours.** JSBSim models a standard atmosphere; `simple_6dof`
+uses the constant from config. At 6 km that is 0.66 against 1.225 kg/m3, so the
+same airframe at the same throttle does not hold level flight under both. Left
+visible rather than papered over: the agents fly closed-loop and trim themselves,
+and on `demo_alpha` the route followers settle back onto their assigned altitudes
+within about 100 s and hold to within a couple of metres. A test asserts that,
+so if it ever stopped being true it would show as a steady descent rather than as
+nothing.
+
+**Truth stays authoritative.** JSBSim is the one component with a private copy of
+where the aircraft is, which makes it the one that could quietly become the thing
+the world follows. So the adapter records exactly what it last wrote; when the
+truth state no longer matches — a reset, an out-of-bounds clamp, a scenario
+reload — JSBSim is re-initialised from the world rather than the other way round.
+
+### The defect the phase found in itself
+
+*A whole configuration section did nothing.* `physics:` was added to
+`simulation.yaml`, the `Settings` field was declared, the validator worked, the
+tests passed — and editing the file changed nothing, because `load_settings`
+builds `Settings` field by field and the new one was never passed. The field's
+default silently took over and the API cheerfully reported it. Found by running
+the real app and seeing it report `simple_6dof` with `jsbsim` in the file.
+
+The fix is one line. The interesting part is the guard: every top-level section
+in every shipped config file is now checked against what `load_settings`
+actually reads. It immediately found a **second** instance — `rl_agent:` in
+`agents.yaml`, a PHASE 0 placeholder marked "Populated in PHASE 11+" whose
+promise was never kept. PHASE 11-13 loads a policy by the training run that
+produced it; setting `model_path` there did nothing at all. Dead configuration
+reads exactly like live configuration, so it was deleted.
+
+### Measured
+
+Four aircraft, 3000 ticks after a 300-tick warm-up:
+
+| backend | µs / tick | ticks / s | × real time |
+|---|---:|---:|---:|
+| `simple_6dof` | 1024 | 976 | 16.3× |
+| `jsbsim` | 643 | 1509 | 25.1× |
+
+JSBSim is the **faster** of the two, at about 0.63× the cost, which was not the
+expected result. Compiled C++ beats four NumPy derivative evaluations per RK4
+step in the interpreter. The optional, more detailed model is not the slow one.
+
+**Verified:** the same seed reproduces a JSBSim run exactly; the two backends
+produce different state hashes on the same scenario, as two different models
+should; commanding full deflection every tick still leaves the applied controls
+inside their bounds, so the safety layer is still in the path; teleporting an
+aircraft mid-run leaves JSBSim following the world rather than overwriting it.
+537 backend tests, 9 of which skip when JSBSim is not installed.
 
 ## PHASE 17–19 — Analytics, training centre, model centre
 

@@ -90,3 +90,28 @@ def test_the_learnable_reward_terms_outweigh_the_constant_ones(settings):
     weights = settings.training.reward_weights
     constant = weights.survival + weights.coordination + weights.information + weights.control_smoothness
     assert constant < weights.navigation
+
+
+def test_every_section_in_a_config_file_is_actually_read():
+    """A section nobody wired up is silently ignored, because the field has a default.
+
+    PHASE 16 added ``physics:`` to simulation.yaml and forgot to pass it to
+    ``Settings``. Nothing failed: the field's default took over, the API
+    cheerfully reported the default backend, and the only symptom was that
+    editing the file did nothing. Every shipped section is now checked against
+    what the loader actually consumes.
+    """
+    import inspect
+
+    import yaml
+
+    from core.config import DEFAULT_CONFIG_DIR, load_settings
+
+    source = inspect.getsource(load_settings)
+    for path in sorted(DEFAULT_CONFIG_DIR.glob("*.yaml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for section in document:
+            assert f'"{section}"' in source, (
+                f"{path.name} declares a {section!r} section that load_settings never reads — "
+                f"editing it would silently do nothing"
+            )

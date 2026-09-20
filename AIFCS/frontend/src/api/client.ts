@@ -28,6 +28,7 @@ import type {
   ScenariosResponse,
   ScenarioValidation,
   CommandersResponse,
+  PhysicsStatus,
   ScoringWeights,
   TasksResponse,
   TeamPicture,
@@ -175,6 +176,9 @@ export const api = {
   teams: () => request<{ count: number; teams: TeamPicture[] }>('/api/teams'),
   tasks: () => request<TasksResponse>('/api/tasks'),
   commanders: () => request<CommandersResponse>('/api/commanders'),
+  // Which physics model is flying (PHASE 16). Read-only: the backend is a
+  // configuration choice, because a run is only reproducible from its hash.
+  physics: () => request<PhysicsStatus>('/api/physics'),
 
   trainingModels: () =>
     request<{ available: boolean; count: number; models: TrainedModel[]; install_hint?: string }>(

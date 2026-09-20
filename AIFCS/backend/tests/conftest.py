@@ -42,6 +42,16 @@ def _isolated_data(tmp_path_factory):
     text = text.replace("database_path: data/aifcs.db", f"database_path: {root / 'aifcs.db'}")
     analysis.write_text(text, encoding="utf-8")
 
+    # PHASE 16 writes a generated JSBSim data root. Same reasoning: a test run
+    # must not leave airframe files in the project's own data directory.
+    simulation_config = config_dir / "simulation.yaml"
+    simulation_config.write_text(
+        simulation_config.read_text(encoding="utf-8").replace(
+            "data_root: data/jsbsim", f"data_root: {root / 'jsbsim'}"
+        ),
+        encoding="utf-8",
+    )
+
     # PHASE 10 writes scenario files. Point the directory at a copy so a test
     # that creates or deletes one cannot touch the scenarios in the repository.
     scenario_dir = root / "scenarios"

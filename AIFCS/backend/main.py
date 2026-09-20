@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.agents import router as agents_router
 from api.coordination import router as coordination_router
 from api.health import router as health_router
+from api.physics import router as physics_router
 from api.replay import router as replay_router
 from api.scenarios import router as scenarios_router
 from api.simulation import router as simulation_router
@@ -24,6 +25,7 @@ from api.telemetry import router as telemetry_router
 from api.training import router as training_router
 from core.config import APP_TITLE, Settings, get_settings
 from core.logging_config import configure_logging, get_logger
+from core.physics_backend import backend_status
 from core.runtime import get_broadcaster, get_engine, get_run_manager, get_status_registry
 from core.system_status import SubsystemState
 
@@ -41,7 +43,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Subsystems that genuinely run as of PHASE 3.
     registry = get_status_registry()
     registry.set_state("simulation", SubsystemState.ONLINE, "Fixed-timestep engine ready")
-    registry.set_state("physics", SubsystemState.ONLINE, "Newton-Euler 6DOF, RK4 at the fixed timestep")
+    # PHASE 16. The physics subsystem reports the backend that is actually
+    # flying, and says so plainly when the configured one cannot be built.
+    physics = backend_status(settings)
+    registry.set_state(
+        "physics",
+        SubsystemState.ONLINE if physics["available"] else SubsystemState.ERROR,
+        (
+            f"{physics['requested']} \u2014 {physics['detail']}"
+            if physics["available"]
+            else f"{physics['requested']} requested but unavailable: {physics['detail']}"
+        ),
+    )
     registry.set_state("agents", SubsystemState.ONLINE, "Rule-based pilots deciding at the configured rate")
     registry.set_state(
         "controllers",
@@ -167,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(simulation_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(coordination_router, prefix="/api")
+    app.include_router(physics_router, prefix="/api")
     app.include_router(replay_router, prefix="/api")
     app.include_router(scenarios_router, prefix="/api")
     app.include_router(training_router, prefix="/api")

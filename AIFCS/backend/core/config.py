@@ -99,6 +99,42 @@ class WorldSettings(BaseModel):
     air_density_kgpm3: float = Field(default=1.225, gt=0)
 
 
+class JSBSimSettings(BaseModel):
+    """Where the JSBSim backend keeps its generated data root.
+
+    The airframes in it are written from ``AircraftParameters`` at startup, so
+    the directory is a cache rather than something to edit. JSBSim's own
+    bundled aircraft are never on this path.
+    """
+
+    data_root: str = "data/jsbsim"
+    # Where the flat world plane is pinned on the geodetic model JSBSim uses.
+    # Fictional and arbitrary: nothing in the platform depends on the location.
+    reference_latitude_deg: float = Field(default=0.0, ge=-89.0, le=89.0)
+    reference_longitude_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+
+
+class PhysicsSettings(BaseModel):
+    """Which motion integrator advances the world (PHASE 16).
+
+    ``simple_6dof`` is this platform's own Newton-Euler model and the default.
+    ``jsbsim`` is an optional dependency; selecting it without the package
+    installed is an error with an install hint, never a silent fallback to a
+    different model than the one the run was configured for.
+    """
+
+    backend: str = "simple_6dof"
+    jsbsim: JSBSimSettings = Field(default_factory=JSBSimSettings)
+
+    @field_validator("backend")
+    @classmethod
+    def _known_backend(cls, v: str) -> str:
+        known = {"simple_6dof", "jsbsim", "kinematic", "null"}
+        if v not in known:
+            raise ValueError(f"physics.backend must be one of {sorted(known)}, got {v!r}")
+        return v
+
+
 class SensorSettings(BaseModel):
     """Perception limits applied between truth and an agent (PHASE 5)."""
 
@@ -446,6 +482,7 @@ class Settings(BaseModel):
     version: str = APP_VERSION
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
     world: WorldSettings = Field(default_factory=WorldSettings)
+    physics: PhysicsSettings = Field(default_factory=PhysicsSettings)
     sensors: SensorSettings = Field(default_factory=SensorSettings)
     communications: CommunicationSettings = Field(default_factory=CommunicationSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
@@ -515,6 +552,7 @@ def load_settings(config_dir: Path | str | None = None) -> Settings:
     return Settings(
         simulation=SimulationSettings(**sim_doc.get("simulation", {})),
         world=WorldSettings(**sim_doc.get("world", {})),
+        physics=PhysicsSettings(**sim_doc.get("physics", {})),
         sensors=SensorSettings(**sim_doc.get("sensors", {})),
         communications=CommunicationSettings(**sim_doc.get("communications", {})),
         telemetry=TelemetrySettings(**sim_doc.get("telemetry", {})),

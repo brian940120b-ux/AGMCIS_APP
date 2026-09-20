@@ -17,6 +17,8 @@ frontend/node_modules/.tmp/
 data/replay/*
 data/telemetry/*
 data/training/*
+# Generated JSBSim data root: airframes written from AircraftParameters.
+data/jsbsim/*
 !data/**/.gitkeep
 models/*
 !models/.gitkeep

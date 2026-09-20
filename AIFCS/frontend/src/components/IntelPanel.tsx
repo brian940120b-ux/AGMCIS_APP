@@ -17,6 +17,60 @@ function Row({ label, value, accent = false }: { label: string; value: string; a
  * compute device. Scenario/agent/decision intelligence arrives from PHASE 1
  * onwards, so those fields are not invented here.
  */
+/**
+ * PHYSICS BACKEND (PHASE 16).
+ *
+ * Which model is flying, and what else could. A backend that is not installed
+ * is shown as unavailable with the command that installs it — never hidden,
+ * and never shown as if it were an option that would work.
+ */
+function PhysicsBackends() {
+  const physics = useSystemStore((s) => s.physics)
+
+  if (!physics) {
+    return <p className="px-3 py-4 text-[11px] text-ink-faint">Reading physics backend…</p>
+  }
+
+  return (
+    <div className="divide-y divide-edge/50">
+      <Row label="Active" value={physics.active ?? physics.requested} accent />
+      {!physics.available && (
+        <div className="px-3 py-2">
+          <p className="text-[11px] text-amber-hud">
+            {physics.requested} is configured but not available.
+          </p>
+          {physics.install_hint && (
+            <p className="mt-1 font-mono text-[10px] whitespace-pre-wrap text-ink-faint">
+              {physics.install_hint}
+            </p>
+          )}
+        </div>
+      )}
+      {physics.backends.map((backend) => {
+        const active = backend.key === physics.active
+        return (
+          <div key={backend.key} className="px-3 py-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className={`text-[11px] ${active ? 'text-cyan-hud' : 'text-ink-dim'}`}>
+                {backend.title}
+              </span>
+              <span
+                className={`text-[9px] tracking-[0.15em] ${
+                  active ? 'text-cyan-hud' : backend.available ? 'text-ink-faint' : 'text-amber-hud'
+                }`}
+              >
+                {active ? 'FLYING' : backend.available ? 'AVAILABLE' : 'NOT INSTALLED'}
+              </span>
+            </div>
+            <p className="text-[10px] text-ink-faint">{backend.detail}</p>
+          </div>
+        )
+      })}
+      <p className="px-3 py-2 text-[10px] text-ink-faint italic">{physics.notice}</p>
+    </div>
+  )
+}
+
 export function IntelPanel() {
   // Separate selectors: a new object per call would re-render on every store write.
   const config = useSystemStore((s) => s.config)
@@ -58,6 +112,10 @@ export function IntelPanel() {
         ) : (
           <p className="px-3 py-4 text-[11px] text-ink-faint">Probing compute device…</p>
         )}
+      </Panel>
+
+      <Panel title="Physics Backend" subtitle="configs/simulation.yaml · physics.backend">
+        <PhysicsBackends />
       </Panel>
     </div>
   )

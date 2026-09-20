@@ -7,7 +7,13 @@
 
 import { create } from 'zustand'
 import { api, ApiError } from '@/api/client'
-import type { ComputeInfo, ConfigSummary, HealthResponse, SystemStatus } from '@/types/api'
+import type {
+  ComputeInfo,
+  ConfigSummary,
+  HealthResponse,
+  PhysicsStatus,
+  SystemStatus,
+} from '@/types/api'
 
 export type ConnectionState = 'idle' | 'connecting' | 'online' | 'error'
 
@@ -18,6 +24,7 @@ interface SystemState {
   status: SystemStatus | null
   compute: ComputeInfo | null
   config: ConfigSummary | null
+  physics: PhysicsStatus | null
   lastUpdated: number | null
   refresh: () => Promise<void>
 }
@@ -29,6 +36,7 @@ export const useSystemStore = create<SystemState>((set) => ({
   status: null,
   compute: null,
   config: null,
+  physics: null,
   lastUpdated: null,
 
   refresh: async () => {
@@ -37,11 +45,12 @@ export const useSystemStore = create<SystemState>((set) => ({
       error: null,
     }))
     try {
-      const [health, status, compute, config] = await Promise.all([
+      const [health, status, compute, config, physics] = await Promise.all([
         api.health(),
         api.systemStatus(),
         api.compute(),
         api.config(),
+        api.physics(),
       ])
       set({
         connection: 'online',
@@ -50,6 +59,7 @@ export const useSystemStore = create<SystemState>((set) => ({
         status,
         compute,
         config,
+        physics,
         lastUpdated: Date.now(),
       })
     } catch (cause) {

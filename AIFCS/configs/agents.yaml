@@ -28,11 +28,6 @@ rule_agent:
   cruise_speed_mps: 220.0                 # trimmed cruise for the demo airframe
   max_bank_deg: 60.0                      # bank limit used by the guidance loop
 
-rl_agent:
-  # Populated in PHASE 11+. Present so the schema is stable from PHASE 0.
-  model_path: null
-  deterministic_inference: true
-
 # Safety layer (PHASE 4). Enforced by the flight controller on every command,
 # whoever issued it — rule agent, RL policy or API call.
 safety:

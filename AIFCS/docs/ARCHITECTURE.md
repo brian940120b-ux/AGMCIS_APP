@@ -64,6 +64,9 @@
 | `agents/tasks.py` | `Task`, `TaskType`, reason codes | 15 |
 | `agents/task_manager.py` | The only record of who was told what | 15 |
 | `agents/commander_agent.py` | Allocates tasks; holds no aircraft and no controls | 15 |
+| `core/physics_backend.py` | Builds the configured integrator; reports what is available | 16 |
+| `simulation/jsbsim_airframe.py` | Writes a fictional airframe out as JSBSim XML | 16 |
+| `simulation/jsbsim_adapter.py` | JSBSim behind the Integrator protocol, one FDM per entity | 16 |
 
 ## Determinism
 
@@ -158,6 +161,43 @@ things, and the code says which one it is looking at.
 
 The flight controller remains the sole writer of entity controls. Adding a layer
 of command above the agents did not change that, and a test asserts it.
+
+## The physics is one of several
+
+`Integrator` was declared in PHASE 1 with exactly one implementation, on the
+argument that the engine should not know how motion is computed. PHASE 16 is
+the test of that argument: JSBSim now advances the world through the same
+protocol, and the engine did not change to allow it.
+
+```
+                      configs/simulation.yaml
+                              physics.backend
+                                    │
+                                    ▼
+                          build_integrator()
+                  ┌────────────┬────┴───────┬────────────┐
+                  ▼            ▼            ▼            ▼
+           Simple6DOFModel  JSBSimAdapter  Kinematic    Null
+                  └────────────┴────┬───────┴────────────┘
+                                    ▼
+                          Integrator.integrate(world, dt)
+```
+
+**A backend never quietly becomes a different one.** Requesting one that is not
+installed raises, with the command that installs it. Falling back would leave
+`config_hash` — the thing that makes a run reproducible — describing physics the
+run never used.
+
+**A backend with private state must follow truth, not lead it.** JSBSim holds
+its own solution for each vehicle, so the adapter remembers what it last wrote
+and re-initialises from the world whenever something else has written the truth
+state. The one-way pipeline holds: a physics backend is downstream of truth in
+exactly the same sense the scoring engine is.
+
+**Both 6DOF backends fly the same fictional airframe.** The JSBSim aircraft
+files are generated from `AircraftParameters`, not written by hand, so the two
+models cannot drift apart into two different invented platforms. JSBSim's own
+bundled aircraft are never on the search path.
 
 ## Scenarios are written through one door
 

@@ -1,0 +1,11 @@
+# Optional physics backend. Installed only to fly with JSBSim instead of the
+# built-in Simple6DOFModel; the platform runs fully without it.
+#
+#   .venv/bin/pip install -r requirements-physics.txt
+#
+# Then set physics.backend: jsbsim in configs/simulation.yaml and restart.
+#
+# NOTE: JSBSim ships definitions for real aircraft. AIFCS never loads them — it
+# points JSBSim at a data root generated from its own fictional airframes.
+-r requirements.txt
+jsbsim>=1.2

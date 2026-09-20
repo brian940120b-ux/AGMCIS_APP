@@ -38,11 +38,11 @@ from core.config import Settings, get_settings
 from core.event_bus import EventBus, EventType
 from core.integrator import Integrator, clamp_to_bounds
 from core.logging_config import get_logger
+from core.physics_backend import build_integrator
 from core.world_state import EntityStatus, Team, WorldState
 from simulation.communication_manager import CommunicationManager
 from simulation.communications import CommsConfig, CommunicationModel
 from simulation.datalink import DatalinkService
-from simulation.physics import Simple6DOFModel
 from simulation.scenario import Scenario, find_scenario
 from simulation.sensors import SensorConfig, SensorModel
 
@@ -64,7 +64,9 @@ class SimulationEngine:
     ) -> None:
         self.settings = settings or get_settings()
         self.events = event_bus or EventBus()
-        self.integrator: Integrator = integrator or Simple6DOFModel()
+        # PHASE 16: the backend is a configuration choice. An explicit instance
+        # still wins, which is how a test pins one model without touching config.
+        self.integrator: Integrator = integrator or build_integrator(self.settings)
 
         self.clock = SimulationClock(
             tick_rate_hz=self.settings.simulation.tick_rate_hz,
@@ -567,6 +569,11 @@ class SimulationEngine:
         self.sensors.reset(seed=self.seed)
         self.comms.reset(seed=self.seed)
         self.datalink.reset()
+        # A backend that carries its own vehicle state (JSBSim does) has to
+        # drop it, or the rebuilt world would be flown by the old solution.
+        reset_backend = getattr(self.integrator, "reset", None)
+        if callable(reset_backend):
+            reset_backend()
         self.controller.reset()
         for entity in self.world.entities.values():
             self.controller.seed(entity)
