@@ -326,6 +326,33 @@ tbody tr:first-child td{border-top:none}
 .tdead{margin:10px 0 2px}
 .tleft{font-weight:700}
 .tleft.soon{color:var(--down)}
+/* ══ 現在正不正常 ══════════════════════════════════════════
+   2026-09-20 執政官:「我只想看得到數據,不想要一堆文字,
+   然後確認現在是否正常。」一個大字 + 幾個燈,其餘往下看。 */
+.status{border:1px solid var(--line);border-radius:14px;
+ padding:13px 14px;margin-bottom:12px;background:var(--card)}
+.status.s-ok{border-color:var(--up-bd);background:var(--up-bg)}
+.status.s-warn{border-color:var(--down-bd)}
+.status.s-bad{border-color:var(--down-bd);background:var(--down-bg)}
+.s-word{font-size:26px;font-weight:800;letter-spacing:2px;
+ line-height:1.1;margin-bottom:9px}
+.s-ok .s-word{color:var(--up)}
+.s-warn .s-word,.s-bad .s-word{color:var(--down)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:11px;padding:3px 8px;border-radius:999px;
+ border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.chip b{font-family:var(--mono);margin-left:5px;font-weight:600}
+.chip.c-ok b{color:var(--up)}
+.chip.c-bad{border-color:var(--down-bd)}
+.chip.c-bad b{color:var(--down)}
+/* 說明摺起來 —— 平常一行,要看才點開 */
+.ex{margin:8px 0 2px}
+.ex>summary{cursor:pointer;color:var(--dim);font-size:11px;
+ letter-spacing:.5px;list-style:none;padding:2px 0}
+.ex>summary::-webkit-details-marker{display:none}
+.ex>summary::before{content:"▸ ";font-size:10px}
+.ex[open]>summary::before{content:"▾ "}
+.ex .note{margin-top:4px}
 /* 區塊小標 —— 一張卡裡分「此刻」與「這套好不好」兩段 */
 .sect-h{color:var(--dim);font-size:11px;letter-spacing:.6px;
  margin:14px 0 8px;padding-top:11px;border-top:1px solid var(--line)}
@@ -579,6 +606,98 @@ def sizing_basis() -> str:
             'U 本位標準合約的成本一個字都還沒驗證過 —— '
             '所以它算出來的<b>數量</b>可以用,它算出來的<b>損益</b>'
             '不是這個產品的績效。</div>')
+
+
+def status_checks() -> list:
+    """一眼判斷「現在正不正常」的那幾項。回 [(名稱, ok, 一句話)]。
+
+    2026-09-20 執政官:「面板上我只想看得到數據,不想要一堆文字,
+    然後幫我確認現在是否正常。」
+
+    ⚠️ **每一項都要是「量得到」的。** 一個永遠綠燈的狀態列比沒有狀態列
+    危險 —— 它讓上面每一層都變綠,而綠的理由是它什麼都沒在看。
+    所以這裡不放「系統健康」這種抽象項目,只放有實際量測來源的。
+    """
+    out = []
+
+    # 一、跑的版本是不是磁碟上的版本
+    b = _build()
+    out.append(("版本", not b.stale,
+                "已是最新" if not b.stale else "pull 了但沒重啟"))
+
+    # 二、兩組模擬有沒有在記帳
+    try:
+        from portfolio.paper import MAIN, SCREENED
+        from portfolio.scorecard import score
+        for label, cfg in (("主城", MAIN), ("測試組", SCREENED)):
+            sc = score(cfg.curve_path)
+            out.append((label, bool(sc.days) and sc.running,
+                        f"{sc.days} 天" if sc.running else
+                        ("沒記過帳" if not sc.days else "停了")))
+    except Exception as e:                           # noqa: BLE001
+        out.append(("模擬", False, f"問不到:{type(e).__name__}"))
+
+    # 三、行情:串流還是退路,以及多舊
+    try:
+        got = sim_snapshot()
+        src = str(got.get("source") or "?")
+        age = got.get("age_s")
+        # 「無持倉」不是故障:空手是一個合法的部位,而且策略常常空手。
+        # 把它算成紅燈,狀態列就會在最正常的時候喊異常。
+        ok = src.startswith("串流") or src == "無持倉"
+        out.append(("行情", ok,
+                    src + (f" · {age:.0f}s" if age is not None
+                           and src != "無持倉" else "")))
+    except Exception as e:                           # noqa: BLE001
+        out.append(("行情", False, f"問不到:{type(e).__name__}"))
+
+    # 四、日線資料最舊幾小時(記帳的原料)
+    try:
+        from portfolio.paper import SYMBOLS
+        ages = [a for s in SYMBOLS
+                if (a := age_min(HIST / f"{s}_1d.csv")) is not None]
+        if ages:
+            h = max(ages) / 60
+            out.append(("日線", h <= 36, f"{h:.0f} 小時前"))
+        else:
+            out.append(("日線", False, "沒有快取"))
+    except Exception as e:                           # noqa: BLE001
+        out.append(("日線", False, f"問不到:{type(e).__name__}"))
+
+    # 五、交易所帳戶問得到嗎
+    #
+    # ⚠️ **只讀快取,不要用 _cached 去讀。** 第一版寫成
+    # `_cached("exchange", 60, lambda: {"error": "未取"})` —— 快取冷的
+    # 時候那個 lambda 會被呼叫,把一個**假的錯誤**寫進共用的快取鍵,
+    # 而 block_exchange 接著就會拿到它,整張卡變成「問不到」。
+    # 一個狀態檢查把它檢查的東西弄壞,是最糟的一種檢查。
+    hit = _CACHE.get("exchange")
+    if not hit:
+        out.append(("交易所", True, "還沒查"))
+    else:
+        err = (hit[1] or {}).get("error")
+        out.append(("交易所", not err, "問得到" if not err else "問不到"))
+
+    return out
+
+
+def block_status() -> str:
+    """最上面那一條:**現在正不正常。**
+
+    只有一個大字 + 幾個燈。要細節的人往下看,不要細節的人看一眼就走。
+    """
+    checks = status_checks()
+    bad = [c for c in checks if not c[1]]
+    word = "正常" if not bad else ("注意" if len(bad) <= 1 else "異常")
+    cls = "ok" if not bad else ("warn" if len(bad) <= 1 else "bad")
+
+    chips = "".join(
+        f'<span class="chip {"c-ok" if ok else "c-bad"}">'
+        f'{html.escape(name)}<b>{html.escape(detail)}</b></span>'
+        for name, ok, detail in checks)
+    return (f'<div class="status s-{cls}">'
+            f'<div class="s-word">{word}</div>'
+            f'<div class="chips">{chips}</div></div>')
 
 
 def block_tickets() -> str:
@@ -1722,6 +1841,35 @@ def block_system() -> str:
 # ══════════════════════════════════════════════════════════
 # 頁面
 # ══════════════════════════════════════════════════════════
+def _collapse_prose(page: str) -> str:
+    """把說明文字摺進「說明」裡。**警語不摺。**
+
+    2026-09-20 執政官:「面板上我只想看得到數據,不想要一堆文字。」
+
+    他是對的 —— 那些長段落是我寫給自己看的推理過程,不是他要的東西。
+    但**不能直接刪**:一個把「未驗證」講成「驗證過」的面板,乾淨而且
+    在騙人。所以折衷是**摺起來**,一行「說明」點開就有,平常不佔畫面。
+
+    ⚠️ `.flag.warn` 與 `.flag.ok` **不摺** —— 那些是「有東西不對」與
+    「這件事確認過了」,它們本來就該一眼看到。摺掉警告等於關掉警告。
+    """
+    import re
+
+    def wrap(m):
+        body = m.group(2)
+        # 太短的不值得摺(摺完反而多一行)
+        plain = re.sub(r"<[^>]+>", "", body)
+        if len(plain) <= 40:
+            return m.group(0)
+        return (f'<details class="ex"><summary>說明</summary>'
+                f'<{m.group(1)} class="note">{body}</{m.group(1)}></details>')
+
+    page = re.sub(r'<(p) class="note">(.*?)</p>', wrap, page, flags=re.S)
+    # 只摺沒有 warn / ok 的 flag
+    page = re.sub(r'<(div) class="flag">(.*?)</div>', wrap, page, flags=re.S)
+    return page
+
+
 def render() -> str:
     now = datetime.now(timezone.utc)
     # 2026-09-13 執政官:「我想專注在 U 本位標準合約,其他不要,
@@ -1760,10 +1908,10 @@ def render() -> str:
     #   ④ 幣種       為什麼是這些幣
     # ②原本是「模擬持倉」+「成績單」兩張,數字對不上(一張讀每日記帳
     # 的檔案,一張用即時價),2026-09-18 合成一張,同一組價格算完。
-    desk = (block_tickets() + block_sim() + block_exchange()
-            + block_screen())
+    desk = (block_status() + block_tickets() + block_sim()
+            + block_exchange() + block_screen())
     system = block_gaps() + block_proposals() + block_system()
-    return f"""<!doctype html><html lang="zh-Hant"><head>
+    return _collapse_prose(f"""<!doctype html><html lang="zh-Hant"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2325,7 +2473,7 @@ document.querySelectorAll('button.kiv').forEach(function(b){{
 }});
 
 setTimeout(function(){{ location.reload(); }}, 900000);
-</script></body></html>"""
+</script></body></html>""")
 
 
 class Handler(BaseHTTPRequestHandler):
