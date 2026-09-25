@@ -6,3 +6,7 @@ gymnasium>=0.29
 stable-baselines3>=2.3
 pandas>=2.2
 tensorboard>=2.17
+# Stable-Baselines3 raises ImportError from model.learn() rather than
+# drawing no bar, so these are not as optional as they look.
+tqdm>=4.66              # SB3's training progress bar
+rich>=13.7              # and its renderer

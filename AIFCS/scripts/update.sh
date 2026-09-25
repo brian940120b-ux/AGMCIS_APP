@@ -104,6 +104,14 @@ VENV_PY="$(venv_python)"
 # Quiet unless something actually installs, so a no-op update stays readable.
 "$VENV_PY" -m pip install --quiet --upgrade pip
 "$VENV_PY" -m pip install --quiet -r requirements-dev.txt
+
+# Whoever installed the optional RL stack opted into it; keep it current too,
+# rather than leaving it pinned to whatever requirements-ml.txt said that day.
+# It is never installed here — that is a multi-GB download and a deliberate act.
+if "$VENV_PY" -c "import gymnasium" >/dev/null 2>&1; then
+  echo "    Updating the reinforcement-learning stack you have installed…"
+  "$VENV_PY" -m pip install --quiet -r requirements-ml.txt
+fi
 echo "    Python packages up to date."
 
 if ! command -v npm >/dev/null 2>&1; then

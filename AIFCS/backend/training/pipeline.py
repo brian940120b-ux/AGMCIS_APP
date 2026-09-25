@@ -88,6 +88,16 @@ def _require_env() -> type[AIFCSCombatEnv]:
     return AIFCSCombatEnv
 
 
+def _progress_bar_available() -> bool:
+    """Whether SB3 can build its progress bar, which needs tqdm and rich."""
+    try:
+        import rich  # noqa: F401
+        import tqdm  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def resolve_device(requested: str) -> str:
     """Turn ``auto`` into the device actually available."""
     if requested != "auto":
@@ -222,6 +232,17 @@ class TrainingPipeline:
                 "scenario": self.settings.training.scenario,
             },
         )
+
+        # SB3's progress bar needs tqdm and rich. They are listed in
+        # requirements-ml.txt, but an install that predates that listing would
+        # otherwise lose the whole run to a missing cosmetic: `model.learn`
+        # raises ImportError before it takes a single step.
+        if progress and not _progress_bar_available():
+            log.warning(
+                "training progress bar unavailable — install tqdm and rich for it",
+                extra={"event": "TRAINING_PROGRESS_BAR_UNAVAILABLE", "training_id": training_id},
+            )
+            progress = False
 
         started = time.perf_counter()
         try:

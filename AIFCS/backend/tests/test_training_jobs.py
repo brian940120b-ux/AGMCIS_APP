@@ -14,6 +14,7 @@ second instead of after a full PPO block.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -259,3 +260,58 @@ def test_the_status_endpoint_no_longer_claims_training_is_cli_only(client):
     body = client.get("/api/training/status").json()
     assert body["browser_control"] is rl_available()
     assert body["max_timesteps_per_job"] > 0
+
+
+# ------------------------------------------------- the progress bar is cosmetic
+
+
+@pytest.fixture
+def pipeline(tmp_path):
+    from training.pipeline import TrainingPipeline
+
+    settings = load_settings()
+    settings.training.output_directory = str(tmp_path / "models")
+    settings.training.ppo.n_steps = 64
+    settings.training.ppo.batch_size = 32
+    return TrainingPipeline(settings)
+
+
+@requires_rl
+def test_training_survives_a_missing_progress_bar(pipeline, monkeypatch, caplog):
+    """`aifcs train` asked for a progress bar and died before its first step.
+
+    SB3 raises ImportError out of `model.learn()` when tqdm and rich are absent,
+    rather than drawing no bar. They are in requirements-ml.txt now, but losing a
+    training run to a missing decoration is not a thing that should be possible.
+    """
+    monkeypatch.setattr("training.pipeline._progress_bar_available", lambda: False)
+
+    with caplog.at_level("WARNING"):
+        result = pipeline.train("ppo", total_timesteps=64, progress=True)
+
+    assert result.total_timesteps >= 64
+    assert Path(result.model_path).is_file()
+    assert any("progress bar unavailable" in record.message for record in caplog.records)
+
+
+@requires_rl
+def test_the_progress_bar_is_used_when_it_can_be(pipeline, monkeypatch):
+    """The guard must not have quietly turned the bar off for everyone."""
+    from training.pipeline import _progress_bar_available
+
+    if not _progress_bar_available():
+        pytest.skip("tqdm and rich are not installed in this environment")
+
+    seen = {}
+    import stable_baselines3
+
+    original = stable_baselines3.PPO.learn
+
+    def spy(self, *args, **kwargs):
+        seen["progress_bar"] = kwargs.get("progress_bar")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(stable_baselines3.PPO, "learn", spy)
+    pipeline.train("ppo", total_timesteps=64, progress=True)
+
+    assert seen["progress_bar"] is True
