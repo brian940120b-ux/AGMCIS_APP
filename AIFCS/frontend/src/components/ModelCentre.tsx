@@ -64,15 +64,19 @@ export function ModelCentre() {
     void refresh()
   }, [refresh])
 
-  // An evaluation writes its score onto the card, so the list is stale the
-  // moment the job ends. Watch the job rather than asking the operator to
-  // reload a page to see the number they just asked for.
+  // Either kind of job makes this list stale the moment it ends: an evaluation
+  // writes its score onto a card, and a training run saves a whole new policy.
+  // Watch the job rather than asking the operator to reload a page to see what
+  // they just asked for.
+  //
+  // This used to watch evaluations only, so a training run that had just
+  // finished left its new policy invisible — with the previous run's model
+  // still listed above it, which reads as the new one and is not.
   const job = useTrainingStore((s) => s.jobs?.current)
-  const finishedEvaluation =
-    job && job.kind === 'EVALUATE' && job.finished ? job.job_id : null
+  const finishedJob = job && job.finished ? job.job_id : null
   useEffect(() => {
-    if (finishedEvaluation) void refresh()
-  }, [finishedEvaluation, refresh])
+    if (finishedJob) void refresh()
+  }, [finishedJob, refresh])
 
   if (list && !list.available) {
     return (

@@ -170,16 +170,14 @@ try {
   // Training and evaluation share one runner and one `timesteps` field, so an
   // evaluation of 5 episodes was rendered as "5 steps". Five steps is a twelfth
   // of a second of flight; five episodes is ten minutes of it.
-  await page.getByRole('button', { name: 'TRAINING', exact: true }).dispatchEvent('click')
-  await page.waitForTimeout(1500)
+  // No navigation needed: training and the model centre are one stage, which is
+  // why they share a job runner in the first place.
   const episodes = done.result.evaluation.episodes
   await page
     .getByText(new RegExp(`${episodes} of ${episodes} episodes`))
     .first()
     .waitFor({ timeout: 15000 })
   console.log(`JOB ROW      -> the evaluation reads "${episodes} of ${episodes} episodes", not steps`)
-  await page.getByRole('button', { name: 'MODELS', exact: true }).dispatchEvent('click')
-  await page.waitForTimeout(1500)
 
   // --- Archive and restore ---
   await page.getByRole('button', { name: `Archive ${STALE_ID}` }).dispatchEvent('click')

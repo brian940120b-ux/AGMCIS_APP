@@ -136,6 +136,14 @@ try {
   assert(models.count > 0, 'training should have produced a saved policy')
   console.log(`MODELS       -> ${models.count} saved`)
 
+  // --- And the model centre shows it, with no reload ---
+  // The list used to refresh only when an *evaluation* finished. A training run
+  // that had just completed left its new policy invisible, with the previous
+  // run's model still listed above it — which reads as the new one and is not.
+  const newest = done.result?.training_id ?? models.models[0].model_id
+  await page.getByText(newest).first().waitFor({ timeout: 20000 })
+  console.log(`MODEL LIST   -> ${newest} appeared without a reload`)
+
   // --- Refusal: a job must not start on top of a running simulation ---
   await fetch(`${API_URL}/api/simulation/start`, {
     method: 'POST',
