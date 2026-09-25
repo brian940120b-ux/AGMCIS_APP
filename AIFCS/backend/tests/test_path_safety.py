@@ -123,3 +123,49 @@ def test_no_endpoint_builds_a_path_from_an_unvalidated_identifier():
             assert re.search(r"_require_run_id|_VALID_|is_relative_to|path_for", source), (
                 f"{module.name} builds a path from an identifier without validating it"
             )
+
+
+# ------------------------------------------------- the other system upstairs
+
+
+def test_aifcs_never_reaches_above_its_own_directory():
+    """Two systems share this repository; only a bug would make them meet.
+
+    AIFCS lives in `AIFCS/`, the AGMCIS trading platform at the level above.
+    Nothing here should read, write or import anything up there — so no module
+    should be walking up past the project root.
+    """
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    offenders = []
+    for module in backend.rglob("*.py"):
+        if "tests" in module.parts or ".venv" in module.parts:
+            continue
+        source = module.read_text(encoding="utf-8")
+        for pattern in ("project_root.parent", 'ROOT / ".."', "parents[3]"):
+            if pattern in source and "trading" not in source:
+                offenders.append(f"{module.name}: {pattern}")
+    assert not offenders, f"these reach above the project root: {offenders}"
+
+
+def test_the_two_systems_do_not_share_a_port():
+    """Both defaulted to 8000, which was a trap rather than a bug.
+
+    Whichever started first would win it, and if that were AIFCS then
+    restarting the trading service would fail to bind and its dashboard would
+    go down. AIFCS moved to 8080; this holds it there.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    start = (root / "scripts" / "start.sh").read_text(encoding="utf-8")
+    assert "AIFCS_BACKEND_PORT:-8080" in start, "AIFCS must not default to the trading system's port"
+
+    import cli
+
+    port = cli.build_parser().parse_args(["serve"]).port
+    assert port == 8080, f"aifcs serve defaults to {port}, which must not be 8000"
+
+    vite = (root / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+    assert "127.0.0.1:8080" in vite, "the dev proxy must point at the port the backend uses"

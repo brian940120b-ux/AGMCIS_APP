@@ -18,6 +18,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 
 ## Table of contents
 
+- [Two systems in one repository](#two-systems-in-one-repository)
 - [Project overview](#project-overview)
 - [Architecture](#architecture)
 - [Installation](#installation)
@@ -41,6 +42,18 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Safety scope](#safety-scope)
 
 ---
+
+## Two systems in one repository
+
+This repository holds **two unrelated programs**. AIFCS is the one documented
+here, in `AIFCS/`. The AGMCIS trading platform lives at the level above it.
+
+They share a git repository and nothing else — separate virtualenvs, separate
+databases, separate ports, separate processes. AIFCS listens on **8080** so it
+cannot collide with the trading system's 8000, and `aifcs doctor` reports both.
+
+Full detail, including why AIFCS should not run on the trading VPS:
+[`docs/TWO-SYSTEMS.md`](docs/TWO-SYSTEMS.md).
 
 ## Project overview
 
@@ -232,7 +245,7 @@ servers and releases the ports.
 If a port is already taken, the script says so and tells you how to change it:
 
 ```bash
-AIFCS_BACKEND_PORT=8001 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh
+AIFCS_BACKEND_PORT=8081 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh
 ```
 
 ### The manual way — two terminals
@@ -275,7 +288,7 @@ Inside, the transport controls drive the real engine:
 
 ## API
 
-Interactive documentation: **http://127.0.0.1:8000/docs**
+Interactive documentation: **http://127.0.0.1:8080/docs**
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -696,10 +709,10 @@ Run `team_eight` to see it: eight units in two teams of four, two two-ship
 elements per team.
 
 ```
-curl -X POST http://127.0.0.1:8000/api/simulation/start \
+curl -X POST http://127.0.0.1:8080/api/simulation/start \
      -H 'Content-Type: application/json' -d '{"scenario":"team_eight"}'
-curl http://127.0.0.1:8000/api/teams
-curl http://127.0.0.1:8000/api/tasks
+curl http://127.0.0.1:8080/api/teams
+curl http://127.0.0.1:8080/api/tasks
 ```
 
 Disable a leader and the commander reallocates: within about two seconds its
@@ -1181,7 +1194,7 @@ docker compose up --build
 ```
 
 - Dashboard: http://localhost:3000
-- Backend API: http://localhost:8000/docs
+- Backend API: http://localhost:8080/docs
 
 The database is SQLite stored in the `aifcs-data` volume, so it needs no separate
 container.
@@ -1208,9 +1221,9 @@ Windows ships a placeholder `python` command that opens the Microsoft Store.
 Python from [python.org](https://www.python.org/downloads/windows/) with **"Add
 python.exe to PATH"** ticked, then close and reopen the window.
 
-**Port 8000 or 5173 already in use.**
+**Port 8080 or 5173 already in use.**
 On macOS and Linux, `start.sh` detects this and names the fix:
-`AIFCS_BACKEND_PORT=8001 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh`
+`AIFCS_BACKEND_PORT=8081 AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh`
 On Windows, run `scripts\stop.bat` to clear whatever is holding the ports.
 
 **The dashboard is still running after I closed the terminal.**

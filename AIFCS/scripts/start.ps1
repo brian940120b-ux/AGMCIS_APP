@@ -10,7 +10,7 @@
 
 [CmdletBinding()]
 param(
-    [int] $BackendPort  = $(if ($env:AIFCS_BACKEND_PORT)  { [int]$env:AIFCS_BACKEND_PORT }  else { 8000 }),
+    [int] $BackendPort  = $(if ($env:AIFCS_BACKEND_PORT)  { [int]$env:AIFCS_BACKEND_PORT }  else { 8080 }),
     [int] $FrontendPort = $(if ($env:AIFCS_FRONTEND_PORT) { [int]$env:AIFCS_FRONTEND_PORT } else { 5173 })
 )
 

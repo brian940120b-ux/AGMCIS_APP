@@ -14,7 +14,7 @@
 import { chromium } from 'playwright'
 
 const BASE_URL = process.env.AIFCS_UI_URL ?? 'http://127.0.0.1:5173'
-const API_URL = process.env.AIFCS_API_URL ?? 'http://127.0.0.1:8000'
+const API_URL = process.env.AIFCS_API_URL ?? 'http://127.0.0.1:8080'
 const SHOT_DIR = process.env.AIFCS_SHOT_DIR ?? null
 const EXECUTABLE = process.env.PLAYWRIGHT_CHROMIUM ?? undefined
 

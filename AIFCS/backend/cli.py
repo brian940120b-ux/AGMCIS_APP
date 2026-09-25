@@ -167,6 +167,31 @@ def command_doctor(args: argparse.Namespace) -> int:
         warn("run storage is disabled in configs/analysis.yaml — runs will not be recorded")
         warnings += 1
 
+    heading("Ports and neighbours")
+    # This repository holds two systems. They share nothing but a machine, and
+    # the only thing they can collide over is a port — so that is what is
+    # checked, by name, rather than left to be discovered as a bind failure.
+    import socket
+
+    def _free(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.3)
+            return probe.connect_ex(("127.0.0.1", port)) != 0
+
+    for port, who in ((8080, "AIFCS backend"), (5173, "AIFCS dashboard")):
+        if _free(port):
+            ok(f"port {port} free — {who}")
+        else:
+            warn(f"port {port} is in use — {who} cannot start until it is free")
+            warnings += 1
+
+    trading = settings.project_root.parent
+    if (trading / "main.py").is_file() and (trading / "database_service.py").is_file():
+        if _free(8000):
+            ok("the AGMCIS trading system shares this repository; its port 8000 is free")
+        else:
+            ok("the AGMCIS trading system is running on port 8000 — AIFCS does not use it")
+
     heading("Frontend")
     node_modules = settings.project_root / "frontend" / "node_modules"
     if node_modules.is_dir():
@@ -388,7 +413,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="run the backend")
     serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8000)
+    # 8080, not 8000: the trading system in this repository holds 8000.
+    serve.add_argument("--port", type=int, default=8080)
     serve.add_argument("--reload", action="store_true", help="restart on source changes")
     serve.set_defaults(handler=command_serve)
 

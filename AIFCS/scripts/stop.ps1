@@ -5,12 +5,12 @@
 
     start.ps1 cleans up after itself when its window closes. This is the safety
     net for when it did not — a crash, a force-closed window, or a leftover
-    server from an earlier run holding port 8000 or 5173.
+    server from an earlier run holding port 8080 or 5173.
 #>
 
 [CmdletBinding()]
 param(
-    [int[]] $Ports = @(8000, 5173)
+    [int[]] $Ports = @(8080, 5173)
 )
 
 $ErrorActionPreference = 'Continue'

@@ -10,6 +10,15 @@ weapon, radar or targeting data, and no operational capability of any kind.
 
 ---
 
+## It shares a machine with something else
+
+This repository also holds the AGMCIS trading platform, at the level above
+`AIFCS/`. They share nothing but the repository — separate virtualenvs,
+databases, ports and processes — and [`TWO-SYSTEMS.md`](TWO-SYSTEMS.md) covers
+the split. The short version: **AIFCS is on 8080, the trading system is on
+8000**, and AIFCS should not run on the trading VPS, not because it would break
+anything but because a training job will take every core it is given.
+
 ## The one thing to read first
 
 **There is no authentication.** Not a weak scheme — none. Anyone who can reach
@@ -51,7 +60,7 @@ has been installed — and says which of those failed.
 
 ```bash
 docker compose up --build
-# dashboard: http://localhost:3000    API: http://localhost:8000/docs
+# dashboard: http://localhost:3000    API: http://localhost:8080/docs
 ```
 
 Two images: the backend (FastAPI on `python:3.11-slim`) and the frontend (built

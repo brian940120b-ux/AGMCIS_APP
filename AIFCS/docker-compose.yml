@@ -13,7 +13,8 @@ services:
       dockerfile: docker/Dockerfile.backend
     container_name: aifcs-backend
     ports:
-      - "8000:8000"
+      # 8080 on the host: 8000 belongs to the trading system.
+      - "8080:8000"
     volumes:
       # Configs and scenarios are editable without a rebuild.
       - ./configs:/app/configs:ro

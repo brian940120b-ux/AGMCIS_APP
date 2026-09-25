@@ -19,7 +19,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/lib.sh"
 cd "$ROOT"
 
-BACKEND_PORT="${AIFCS_BACKEND_PORT:-8000}"
+# AIFCS listens on 8080, not 8000. The trading system this repository also
+# holds runs its own FastAPI on 8000 under systemd, and two services that
+# default to the same port on one host is a trap: whichever starts first wins,
+# and if that is AIFCS then `systemctl restart agmcis` cannot bind and the
+# trading dashboard goes down. Override with AIFCS_BACKEND_PORT if 8080 is
+# taken by something else.
+BACKEND_PORT="${AIFCS_BACKEND_PORT:-8080}"
 FRONTEND_PORT="${AIFCS_FRONTEND_PORT:-5173}"
 LOG_DIR="$ROOT/data/telemetry"
 BACKEND_LOG="$LOG_DIR/backend.out"
@@ -88,9 +94,27 @@ echo "    Python  $("$PYTHON" --version 2>&1 | cut -d' ' -f2)  ($PYTHON)"
 echo "    Node    $(node --version)"
 
 # --- 2. Ports ---------------------------------------------------------------
+# This repository holds two systems: the AGMCIS trading platform at the top
+# level and AIFCS underneath it. They are separate programs with separate
+# virtualenvs and separate databases, and the only thing they can collide over
+# is a port. AIFCS moved to 8080 so they cannot, but if the trading system is
+# on this machine it is worth naming rather than reporting a bare conflict.
+if [ -f "$ROOT/../main.py" ] && [ -f "$ROOT/../database_service.py" ]; then
+  echo "    Note: the AGMCIS trading system shares this repository."
+  echo "          AIFCS uses port $BACKEND_PORT; the trading system uses 8000. They do not overlap."
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet agmcis 2>/dev/null; then
+    echo "          agmcis.service is RUNNING — leave it alone; AIFCS will not touch it."
+    echo "          交易系統正在執行中 — AIFCS 不會動到它。"
+  fi
+fi
+
 if port_busy "$BACKEND_PORT"; then
+  if [ "$BACKEND_PORT" = "8000" ]; then
+    fail "Port 8000 is in use, and 8000 is the trading system's port. / 連接埠 8000 是交易系統在用的。" \
+         "Do not take it. Run without AIFCS_BACKEND_PORT set and AIFCS will use 8080."
+  fi
   fail "Port $BACKEND_PORT is already in use. / 連接埠 $BACKEND_PORT 已被占用。" \
-       "Close the other program, or run: AIFCS_BACKEND_PORT=8001 ./scripts/start.sh"
+       "Close the other program, or run: AIFCS_BACKEND_PORT=8081 ./scripts/start.sh"
 fi
 if port_busy "$FRONTEND_PORT"; then
   fail "Port $FRONTEND_PORT is already in use. / 連接埠 $FRONTEND_PORT 已被占用。" \
