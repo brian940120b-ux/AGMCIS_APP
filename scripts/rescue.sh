@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# 一次做完:換版 → 查狀態 → 解開記帳死結 → 驗證 → 測警報 · 2026-09-25
+#
+# ═══ 為什麼把這五步綁在一起 ═══
+# 執政官在手機上用 Termius,每多一個指令就多一次打字、多一次貼上、
+# 多一次「上一段是不是成功了」要自己判斷。而這五步**有先後依賴**:
+# 沒換到新版,死結修復就不在;沒解開死結,驗證就沒有東西可看。
+#
+# 用法:  cd /root/agmcis && git pull origin agmcis-base && sudo bash scripts/rescue.sh
+#
+# ⚠️ 這一支**會改東西**(第三段會真的記一次帳、真的下單平倉)。
+#    前面兩段和後面兩段都是唯讀。哪一段在改,下面標得很清楚。
+set -u
+
+REPO="${REPO:-/root/agmcis}"
+PY="${REPO}/.venv/bin/python"
+LINE="══════════════════════════════════════════════════════════════"
+
+step() { printf '\n\n%s\n  %s\n%s\n' "$LINE" "$1" "$LINE"; }
+
+cd "$REPO" || { echo "✗ 進不去 $REPO"; exit 1; }
+
+# ── 一、換版(會改:重啟服務)────────────────────────────
+step "一 / 五  換版並驗證服務跑的是新版"
+bash scripts/deploy.sh || {
+  printf '\n✗ 換版沒過。**後面全部不跑** —— 死結修復不在舊版裡,\n'
+  printf '  硬跑下去會用舊的程式碼改帳本,那比不跑更糟。\n\n'
+  exit 1
+}
+
+# ── 二、查狀態(唯讀)──────────────────────────────────
+step "二 / 五  記帳為什麼停了(唯讀,不改任何東西)"
+"$PY" scripts/why_stopped.py
+
+# ── 三、解開死結(**會改帳本**)────────────────────────
+step "三 / 五  補跑 PRIMARY 記帳 —— ⚠️ 這一段會真的改帳本"
+"$PY" - <<'PYEOF'
+import sys, traceback
+sys.path.insert(0, "/root/agmcis")
+from portfolio import paper
+
+print("  跑之前:")
+from portfolio.account import Account
+a0 = Account.load(paper.PRIMARY.state_path)
+print(f"    在倉 {len(a0.positions)} 檔 · 最後記帳 {a0.funding_through_ms}")
+
+try:
+    r = paper.tick(cfg=paper.PRIMARY)
+except Exception as e:
+    print(f"\n  ✗ 還是掛了:{type(e).__name__}: {e}\n")
+    traceback.print_exc()
+    print("\n  **這不是預期結果。** 把上面整段貼回來 —— 死結不只一處。")
+    raise SystemExit(1)
+
+if r.get("skipped"):
+    print(f"\n  這個交易日已經記過帳了:{r['skipped']}")
+elif r.get("error"):
+    print(f"\n  ✗ plan() 回了錯誤:{r['error']}")
+    raise SystemExit(1)
+else:
+    hold = r.get("holdings") or []
+    pool = r.get("symbols") or []
+    gaps = r.get("funding_gaps") or []
+    print("\n  跑之後:")
+    print(f"    在倉 {len(hold)} 檔 · 今天的目標池 {len(pool)} 檔")
+    print(f"    成交 {len(r.get('orders') or [])} 筆")
+    print(f"    權益 {r.get('equity')}  報酬 {r.get('return_pct')}%")
+    if gaps:
+        print(f"\n    收不到資金費而放掉的 {len(gaps)} 檔:{'、'.join(gaps)}")
+        print("    這幾檔這一輪記 0 並準備出場 —— 少收的範圍是一檔一輪,")
+        print("    而且**看得見**。整本帳不再被它們擋住。")
+    else:
+        print("\n    沒有收不到費率的幣。")
+PYEOF
+
+# ── 四、驗證(唯讀)────────────────────────────────────
+step "四 / 五  驗證:記帳有沒有真的動起來(唯讀)"
+"$PY" - <<'PYEOF'
+import json, sys
+from datetime import datetime, timezone
+sys.path.insert(0, "/root/agmcis")
+from portfolio.account import Account
+from portfolio.paper import CONTROL, MAX_UNIVERSE, PRIMARY
+
+now = datetime.now(timezone.utc).timestamp() * 1000
+bad = []
+for cfg, tag in ((PRIMARY, "PRIMARY(系統本身)"), (CONTROL, "CONTROL(對照組)")):
+    a = Account.load(cfg.state_path)
+    ms = a.funding_through_ms or 0
+    hrs = (now - ms) / 3600_000 if ms else 9e9
+    n = 0
+    last = None
+    try:
+        with cfg.curve_path.open(encoding="utf-8") as fh:
+            for ln in fh:
+                if ln.strip():
+                    n += 1
+                    try:
+                        last = json.loads(ln).get("t") or last
+                    except json.JSONDecodeError:
+                        pass
+    except OSError:
+        pass
+    over = len(a.positions) > MAX_UNIVERSE
+    stale = hrs > 26
+    print(f"\n  {cfg.name:10} {tag}")
+    print(f"    最後記帳   {hrs:.1f} 小時前      {'✗ 停了' if stale else '✓'}")
+    print(f"    權益曲線   {n} 點,最後 {last}")
+    print(f"    在倉       {len(a.positions)} 檔(上限 {MAX_UNIVERSE})"
+          f"  {'✗ 超過上限' if over else '✓'}")
+    if stale or over:
+        bad.append(cfg.name)
+
+print()
+if bad:
+    print(f"  ✗ 還沒好:{'、'.join(bad)}。整段貼回來。")
+else:
+    print("  ✓ 兩組都在記帳,而且都沒超過池子上限。")
+PYEOF
+
+# ── 五、測警報(會改:真的送一則訊息)──────────────────
+step "五 / 五  測警報送不送得出去 —— 會真的送一則訊息"
+"$PY" - <<'PYEOF'
+import sys
+sys.path.insert(0, "/root/agmcis")
+from notify.telegram import is_configured, last_delivery, send
+
+if not is_configured():
+    print("\n  Telegram 沒有設定(TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)。")
+    print("  那本身不是錯誤 —— 但代表**系統沒有任何辦法主動通知你**。")
+else:
+    ok = send("AGMCIS 警報通道測試:如果你看到這一則,通道是通的。")
+    d = last_delivery()
+    print(f"\n  送出結果  {'✓ 成功' if ok else '✗ 失敗'}")
+    print(f"  紀錄      {d.get('why')}")
+    if not ok:
+        print("\n  ⚠️ **這就是 133 小時沒人知道的原因。**")
+        print("     檢修官每 10 分鐘都在報警,而每一則都卡在這裡。")
+        print("\n     要你自己處理(我做不到):")
+        print("       1. 打開 Telegram 找 @BotFather → /mybots → 確認 token")
+        print("       2. 跟你的 bot 講一句話,再開")
+        print("          https://api.telegram.org/bot<TOKEN>/getUpdates")
+        print("          看回傳裡的 chat.id 是不是跟 .env 裡的一樣")
+        print("       3. 改 /root/agmcis/.env 之後重啟:")
+        print("          sudo systemctl restart agmcis-dash")
+        print("\n     ⚠️ **不要把 token 貼進對話。** 貼腳本的輸出就好。")
+
+print("\n  不管通不通,面板狀態列現在都有「通知」那一格 ——")
+print("  警報送不出去,面板會自己說。")
+PYEOF
+
+printf '\n\n%s\n  跑完了。整段貼回來。\n%s\n\n' "$LINE" "$LINE"
