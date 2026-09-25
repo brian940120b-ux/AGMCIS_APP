@@ -1101,3 +1101,17 @@ temptation to show something reasonable.
 another, the stage that opened on an empty run, the model list that would not
 refresh, the header that overflowed on a phone — none of those were caught by a
 test suite that was passing. They were caught by opening the thing.
+
+**Optional has to be tested as absent.** After PHASE 20 the backend was
+installed on a Windows desktop with the core requirements only. It would not
+start: `training/pipeline.py` imported the Gymnasium environment at module
+scope, the runtime imports the pipeline, so `backend.main` pulled an optional
+dependency in on every boot. The suite said nothing, because every RL test
+skips itself when the stack is missing — the skip condition and the breakage
+were the same condition. `aifcs doctor` said "Ready" a second before the
+traceback, because it imported the pieces and never the application.
+
+Both of those are now checked: `test_optional_dependencies.py` starts the API
+and runs the simulation in a subprocess with the optional packages made
+unimportable, and doctor's last check before the frontend is whether the
+application imports at all.

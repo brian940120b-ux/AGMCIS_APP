@@ -188,8 +188,13 @@ Everything the platform does without a browser, behind one name:
 
 **Run `aifcs doctor` first when anything is wrong.** It checks Python, every
 dependency, the optional ones, whether the configs load, whether every scenario
-parses, whether the database opens and whether the frontend is installed — and
-tells you which of those failed, in about two seconds.
+parses, whether the database opens, whether the API application actually
+imports and whether the frontend is installed — and tells you which of those
+failed, in a couple of seconds.
+
+That import check is there because the rest of the list can pass while the
+server still refuses to start: every other check imports a piece, and `uvicorn`
+imports the whole application.
 
 ### Step 1 — Open a terminal and go to the project
 

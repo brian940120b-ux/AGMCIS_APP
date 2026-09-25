@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -204,6 +205,27 @@ def command_doctor(args: argparse.Namespace) -> int:
             ok("the AGMCIS trading system shares this repository; its port 8000 is free")
         else:
             ok("the AGMCIS trading system is running on port 8000 — AIFCS does not use it")
+
+    heading("Backend")
+    # Everything above can pass while the server still refuses to start: the
+    # checks above import pieces, and uvicorn imports the whole application. A
+    # missing optional dependency reached through an eager import broke exactly
+    # this way, and doctor said "Ready" right before the traceback.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import sys; sys.path.insert(0, 'backend'); import main"],
+        cwd=settings.project_root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if probe.returncode == 0:
+        ok("the API application imports — the server can start")
+    else:
+        last = [line for line in probe.stderr.strip().splitlines() if line.strip()]
+        fail("the API application will not import — the server cannot start")
+        for line in last[-3:]:
+            print(f"       {line}")
+        problems += 1
 
     heading("Frontend")
     node_modules = settings.project_root / "frontend" / "node_modules"

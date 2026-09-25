@@ -25,13 +25,15 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from core.config import AlgorithmSettings, Settings, get_settings
 from core.logging_config import get_logger
-from training.environment import AIFCSCombatEnv
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from training.environment import AIFCSCombatEnv
 
 log = get_logger("training.pipeline")
 
@@ -48,8 +50,14 @@ class TrainingUnavailableError(RuntimeError):
 
 
 def rl_available() -> bool:
-    """Whether torch and Stable-Baselines3 can be imported."""
+    """Whether the whole RL stack can be imported.
+
+    Gymnasium belongs in here with the other two. The environment needs it, and
+    a check that passed without it would promise a training centre that cannot
+    build an environment to train in.
+    """
     try:
+        import gymnasium  # noqa: F401
         import stable_baselines3  # noqa: F401
         import torch  # noqa: F401
     except ImportError:
@@ -63,6 +71,21 @@ def _require_rl() -> Any:
     except ImportError as exc:  # pragma: no cover - exercised only without the stack
         raise TrainingUnavailableError(_INSTALL_HINT) from exc
     return sb3
+
+
+def _require_env() -> type[AIFCSCombatEnv]:
+    """The Gymnasium environment class, imported on use rather than on import.
+
+    ``training.environment`` imports gymnasium at module scope, and this module
+    is reachable from ``backend.main`` through the runtime. Importing it eagerly
+    made an optional dependency mandatory: without the RL stack the API server
+    did not start at all.
+    """
+    try:
+        from training.environment import AIFCSCombatEnv
+    except ImportError as exc:  # pragma: no cover - exercised only without the stack
+        raise TrainingUnavailableError(_INSTALL_HINT) from exc
+    return AIFCSCombatEnv
 
 
 def resolve_device(requested: str) -> str:
@@ -129,7 +152,7 @@ class TrainingPipeline:
         from stable_baselines3.common.monitor import Monitor
 
         training = self.settings.training
-        env = AIFCSCombatEnv(
+        env = _require_env()(
             scenario_name=training.scenario,
             entity_id=training.entity_id,
             settings=self.settings,
@@ -352,7 +375,7 @@ class TrainingPipeline:
         # The card is what makes the model meaningful later. A .zip on its own
         # does not say which environment shaped it, and a policy run against a
         # different observation layout is silently wrong rather than broken.
-        spec = AIFCSCombatEnv(
+        spec = _require_env()(
             scenario_name=self.settings.training.scenario,
             entity_id=self.settings.training.entity_id,
             settings=self.settings,
