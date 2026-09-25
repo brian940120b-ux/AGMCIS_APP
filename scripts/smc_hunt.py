@@ -129,7 +129,7 @@ def run_ladder(lad, symbols: list[str], verbose: bool) -> dict:
     trades, skipped = [], {}
     # 對照組的 p95 逐幣算(每個幣的 K 棒不同),**按訊號數加權**彙總 ——
     # 直接取平均的話,只有 2 個訊號的幣會跟有 80 個訊號的幣一樣重。
-    ctrl: list[tuple[float, int]] = []
+    ctrl: list[tuple[float, float, int]] = []
     for sym in symbols:
         st = bars_of(sym, si, days)
         en = bars_of(sym, ei, days)
@@ -147,16 +147,18 @@ def run_ladder(lad, symbols: list[str], verbose: bool) -> dict:
         trades += o.trades
         c = control(en, ss, reps=60)
         if c.get("p95_r") is not None:
-            ctrl.append((c["p95_r"], len(o.trades)))
+            ctrl.append((c["p95_r"], c["p95_gross"], len(o.trades)))
         if verbose:
             print(f"      {sym:<14}{si}={len(st):>6} {ei}={len(en):>6}"
                   f"  訊號 {len(ss):>3}  成交 {len(o.trades):>3}")
     rs = [t.r for t in trades]
-    w = sum(n for _, n in ctrl)
+    w = sum(n for *_, n in ctrl)
     return {"code": code, "label": label, "trades": trades, "rs": rs,
             "skipped": skipped,
-            "ctrl_p95": (round(sum(v * n for v, n in ctrl) / w, 4)
-                         if w else None)}
+            "ctrl_p95": (round(sum(v * n for v, _, n in ctrl) / w, 4)
+                         if w else None),
+            "ctrl_p95_gross": (round(sum(g * n for _, g, n in ctrl) / w, 4)
+                               if w else None)}
 
 
 def equity_stats(rs: list[float]) -> tuple[float, float]:
@@ -222,7 +224,17 @@ def main(argv=None) -> int:
         # 平均 R 為負的時候,先問「是型態沒用,還是停損比成本還窄」。
         # 兩者的處理方式完全不同,而表面數字長得一模一樣。
         print(f"     扣成本前 {st['gross_r']:+.4f}R"
-              f" · 成本中位數 {st['cost_r_med']}R/筆")
+              f" · 成本中位數 {st['cost_r_med']}R/筆"
+              f" · 隨機對照(毛)p95 {res['ctrl_p95_gross']}R")
+        if st["gross_r"] > 0 and st["expectancy_r"] < 0:
+            mean_cost = st["gross_r"] - st["expectancy_r"]
+            print(f"     ⚠️ **扣成本前是正的,扣完變負的。**")
+            print(f"        成本平均 {mean_cost:.3f}R/筆,是毛利的"
+                  f" {mean_cost / st['gross_r']:.0f} 倍。")
+            print(f"        成本平均({mean_cost:.3f})遠高於中位數"
+                  f"({st['cost_r_med']})= 少數幾筆的停損窄到離譜,")
+            print(f"        把整批的平均拖垮。**問題在停損距離,"
+                  f"不在型態準不準。**")
         if st["cost_r_med"] >= 1.0:
             print(f"     ⚠️ **光是進出一趟就吃掉 {st['cost_r_med']} 個 R** ——"
                   f" 停損設得比來回成本還窄。")

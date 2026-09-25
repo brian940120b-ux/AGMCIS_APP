@@ -206,9 +206,19 @@ def control(bars: list[Bar], setups: list[Setup], *, reps: int = 200,
             seed: int = 20260925, cost_pct: float | None = None) -> dict:
     """隨機對照組:同樣的停損 / 止盈距離,進場時點打散。
 
-    回傳對照組平均 R 的分布,以及**策略贏過對照組的百分位**。
+    回傳對照組平均 R 的分布(**扣成本後與扣成本前都給**)。
     如果策略的平均 R 落在對照組分布裡面,那它量到的不是型態,
     是那組 R:R 本身。
+
+    ═══ 2026-09-25:為什麼扣成本前也要給 ═══
+    首版只回扣成本後的數字,而我拿它下了一個**不安全的結論**
+    (「SMC 進場比隨機丟飛鏢還糟」)。問題在於:淨值的比較把
+    「型態準不準」跟「成本結構」混在一起,而實跑顯示六套階梯
+    **扣成本前全部是正的**(+0.05 ~ +0.14R)。
+
+    要回答「型態有沒有預測力」,該比的是**毛利**;
+    要回答「這樣做會不會賺錢」,才比淨利。兩個問題不一樣,
+    而只給一個數字的話,看的人一定會拿它回答兩個。
     """
     if not setups or len(bars) < 10:
         return {"reps": 0}
@@ -216,6 +226,7 @@ def control(bars: list[Bar], setups: list[Setup], *, reps: int = 200,
     rng = random.Random(seed)
     span = [s.expire_i - s.i for s in setups]
     means: list[float] = []
+    gross: list[float] = []
     for _ in range(reps):
         fake: list[Setup] = []
         for s, hold in zip(setups, span):
@@ -228,15 +239,23 @@ def control(bars: list[Bar], setups: list[Setup], *, reps: int = 200,
             tp = px * (1 + d_tp) if s.up else px * (1 - d_tp)
             fake.append(Setup(i, s.up, sl, tp,
                               min(i + max(1, hold), len(bars) - 1)))
-        rs = [t.r for t in run(bars, fake, cost_pct=cost).trades]
-        if rs:
-            means.append(statistics.fmean(rs))
+        ts = run(bars, fake, cost_pct=cost).trades
+        if ts:
+            means.append(statistics.fmean([t.r for t in ts]))
+            gross.append(statistics.fmean([t.r + t.cost_r for t in ts]))
     if not means:
         return {"reps": 0}
     means.sort()
+    gross.sort()
+
+    def _p95(v):
+        return round(v[int(0.95 * (len(v) - 1))], 4)
+
     return {"reps": len(means),
             "median_r": round(statistics.median(means), 4),
-            "p95_r": round(means[int(0.95 * (len(means) - 1))], 4)}
+            "p95_r": _p95(means),
+            "median_gross": round(statistics.median(gross), 4),
+            "p95_gross": _p95(gross)}
 
 
 def beats_control(expectancy_r: float, ctrl: dict) -> bool:

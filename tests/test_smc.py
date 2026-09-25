@@ -317,3 +317,58 @@ class CostDiagnostic(unittest.TestCase):
         st = stats(self._one(90.0, 0.0))
         self.assertEqual(st["cost_r_med"], 0.0)
         self.assertAlmostEqual(st["gross_r"], st["expectancy_r"], places=6)
+
+
+class ControlIsAnchored(unittest.TestCase):
+    """隨機對照組要先證明**它自己是對的**,才能拿它下結論。
+
+    2026-09-25:我拿對照組的淨值 p95 下了一個結論(「SMC 進場比隨機
+    丟飛鏢還糟」),而那個結論**不安全** —— 實跑顯示六套階梯扣成本前
+    全部是正的。淨值的比較把「型態準不準」跟「成本結構」混在一起。
+
+    這組測試釘的是對照組的定錨點:在**零漂移隨機漫步、零成本**上,
+    隨機進場的毛利期望值必須接近 0。不接近 0 就代表對照組本身在
+    製造訊號,那它量到的任何東西都不算數。
+    """
+
+    def _walk(self, n=4000, seed=3):
+        import random
+        rng = random.Random(seed)
+        t0, px, out = T0, 100.0, []
+        for i in range(n):
+            o = px
+            px *= (1 + rng.gauss(0.0, 0.004))
+            h = max(o, px) * (1 + abs(rng.gauss(0, 0.002)))
+            lo = min(o, px) * (1 - abs(rng.gauss(0, 0.002)))
+            out.append(Bar(t0 + timedelta(minutes=5 * i), o, h, lo, px, 1e5))
+        return out
+
+    def test_random_entries_have_no_gross_edge_on_a_driftless_walk(self):
+        import random
+        from portfolio.event_sim import control
+        bars = self._walk()
+        rng = random.Random(11)
+        ss = []
+        for _ in range(300):
+            i = rng.randrange(10, len(bars) - 60)
+            px = bars[i].c
+            ss.append(Setup(i, True, px * 0.99, px * 1.02,
+                            min(i + 50, len(bars) - 1)))
+        c = control(bars, ss, reps=40, cost_pct=0.0)
+        self.assertLess(abs(c["median_gross"]), 0.25,
+                        f"對照組自己就有優勢,它量到的東西不算數:{c}")
+
+    def test_control_reports_gross_as_well_as_net(self):
+        """只給淨值的話,看的人會拿它回答兩個不同的問題。"""
+        import random
+        from portfolio.event_sim import control
+        bars = self._walk()
+        rng = random.Random(5)
+        ss = [Setup(i, True, bars[i].c * 0.99, bars[i].c * 1.02,
+                    min(i + 50, len(bars) - 1))
+              for i in (rng.randrange(10, len(bars) - 60) for _ in range(120))]
+        c = control(bars, ss, reps=20, cost_pct=0.2)
+        for k in ("median_r", "p95_r", "median_gross", "p95_gross"):
+            self.assertIn(k, c)
+        # 有成本的話,淨值必定低於毛利
+        self.assertLess(c["median_r"], c["median_gross"])
