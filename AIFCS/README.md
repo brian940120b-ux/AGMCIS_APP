@@ -22,6 +22,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Project overview](#project-overview)
 - [Architecture](#architecture)
 - [Installation](#installation)
+- [Updating an existing copy](#updating-an-existing-copy)
 - [The `aifcs` command](#the-aifcs-command)
 - [Running AIFCS](#running-aifcs)
 - [API](#api)
@@ -154,6 +155,21 @@ AIFCS/
 > The Windows launcher is **not yet verified on a real Windows machine** — it
 > was written against the documented behaviour but never executed there. If it
 > fails, the error text is what to send back.
+
+### Updating an existing copy
+
+One command. It refuses to run if you have uncommitted work, pulls the latest
+code, installs whatever is new, checks the installation, and starts:
+
+```bash
+cd ~/Desktop/AGMCIS_APP/AIFCS && ./scripts/update.sh
+```
+
+On Windows, double-click **`scripts\update.bat`**.
+
+Add `--no-start` to update and check without launching. If anything is broken it
+stops at the `aifcs doctor` step and prints the `FAIL` lines rather than
+starting something that will not work.
 
 ### The `aifcs` command
 

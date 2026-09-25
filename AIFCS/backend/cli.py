@@ -178,11 +178,24 @@ def command_doctor(args: argparse.Namespace) -> int:
             probe.settimeout(0.3)
             return probe.connect_ex(("127.0.0.1", port)) != 0
 
+    def _is_aifcs(port: int) -> bool:
+        """Whether the thing on this port is AIFCS itself, already running."""
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as reply:
+                return json.loads(reply.read(2000)).get("app") == "AIFCS"
+        except Exception:
+            return False
+
     for port, who in ((8080, "AIFCS backend"), (5173, "AIFCS dashboard")):
         if _free(port):
             ok(f"port {port} free — {who}")
+        elif port == 8080 and _is_aifcs(port):
+            # Not a problem, and saying "cannot start" here would be wrong.
+            ok(f"port {port} in use by the {who}, which is already running")
         else:
-            warn(f"port {port} is in use — {who} cannot start until it is free")
+            warn(f"port {port} is in use by something else — {who} cannot start until it is free")
             warnings += 1
 
     trading = settings.project_root.parent
