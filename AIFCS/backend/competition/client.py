@@ -60,6 +60,8 @@ MAX_PLAUSIBLE_FRAME_MOVE_M = 200.0
 
 #: A policy: normalised state in, four raw channels out.
 Policy = Callable[[np.ndarray], np.ndarray]
+#: An observer: every accepted frame, for recording. Returns nothing.
+Observer = Callable[["Telemetry", "ClientStats"], None]
 
 
 @dataclass
@@ -108,8 +110,12 @@ class CompetitionClient:
     commands, which is what makes a five-minute round a unit test.
     """
 
-    def __init__(self, policy: Policy) -> None:
+    def __init__(self, policy: Policy, observer: Observer | None = None) -> None:
         self.policy = policy
+        #: Called with every accepted frame, after the round tracking has run.
+        #: A tap, not a filter: it cannot change the command, so recording a
+        #: session cannot change what that session does.
+        self.observer = observer
         self.encoder = StateEncoder()
         self.joystick = JoystickState()
         self.stats = ClientStats()
@@ -218,6 +224,9 @@ class CompetitionClient:
         self._track_round(telemetry)
         self.stats.frames_this_round += 1
         self._advance_handshake(telemetry)
+
+        if self.observer is not None:
+            self.observer(telemetry, self.stats)
 
         state = self.encoder.encode(telemetry)
         raw_action = np.asarray(self.policy(state), dtype=np.float64)
