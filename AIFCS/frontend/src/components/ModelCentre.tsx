@@ -239,7 +239,13 @@ export function ModelCentre() {
           <ul className="divide-y divide-edge/40">{list.models.map(renderModel)}</ul>
         ) : (
           <p className="px-3 py-4 text-[11px] text-ink-faint">
-            No policies saved yet. Train one above.
+            {/* Two different empty lists. Saying "train one" to someone who
+                has trained several and archived them all is simply wrong. */}
+            {list && list.archived_count > 0 && !includeArchived
+              ? `No active policies. ${list.archived_count} ${
+                  list.archived_count === 1 ? 'is' : 'are'
+                } archived — tick ARCHIVED to see them.`
+              : 'No policies saved yet. Train one above.'}
           </p>
         )}
 

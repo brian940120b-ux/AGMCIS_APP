@@ -807,7 +807,8 @@ export interface TrainingJob {
   model_id: string | null
   algorithm: string
   requested_timesteps: number
-  /** What it actually trained for. PPO collects in blocks, so it can overshoot. */
+  /** What it actually trained for. PPO collects in blocks, so it can overshoot.
+   *  On an EVALUATE job this counts episodes, not steps — read `kind` first. */
   timesteps: number
   fraction: number
   seed: number
@@ -894,6 +895,9 @@ export interface ModelList {
   available: boolean
   install_hint: string | null
   unavailable_reason: string | null
+  /** How many are in the archive, so an empty list can say which kind of
+   *  empty it is: nothing trained yet, or everything trained is archived. */
+  archived_count: number
   notice: string
 }
 

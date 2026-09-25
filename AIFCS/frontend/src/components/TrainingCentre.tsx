@@ -59,6 +59,25 @@ function RewardCurve({ job }: { job: TrainingJob }) {
   )
 }
 
+/**
+ * An evaluation job counts episodes in the same field a training job counts
+ * timesteps, because one runner serves both. Calling five episodes "5 steps"
+ * is not a rounding error in the wording: five steps is a twelfth of a second
+ * of flight, and five episodes is ten minutes of it.
+ */
+function workLabel(job: TrainingJob): string {
+  if (job.kind === 'EVALUATE') {
+    const done = job.timesteps.toLocaleString()
+    return `${done} of ${job.evaluate_episodes.toLocaleString()} episodes`
+  }
+  return `${job.timesteps.toLocaleString()} steps`
+}
+
+function progressLabel(job: TrainingJob): string {
+  if (job.kind === 'EVALUATE') return workLabel(job)
+  return `${job.timesteps.toLocaleString()} / ${job.requested_timesteps.toLocaleString()} steps`
+}
+
 function JobProgress({ job }: { job: TrainingJob }) {
   const percent = Math.round(job.fraction * 100)
   return (
@@ -66,8 +85,7 @@ function JobProgress({ job }: { job: TrainingJob }) {
       <div className="flex items-baseline justify-between gap-2">
         <span className={`text-[11px] ${STATE_STYLE[job.state]}`}>{job.state}</span>
         <span className="text-[10px] tabular-nums text-ink-faint">
-          {job.timesteps.toLocaleString()} / {job.requested_timesteps.toLocaleString()} steps ·{' '}
-          {duration(job.elapsed_s)}
+          {progressLabel(job)} · {duration(job.elapsed_s)}
         </span>
       </div>
       <div className="mt-1 h-1.5 w-full bg-edge">
@@ -257,9 +275,10 @@ export function TrainingCentre() {
               <li key={job.job_id} className="flex items-baseline gap-2 px-3 py-1.5 text-[10px]">
                 <span className={`w-20 shrink-0 ${STATE_STYLE[job.state]}`}>{job.state}</span>
                 <span className="text-ink-dim">{job.algorithm.toUpperCase()}</span>
-                <span className="tabular-nums text-ink-faint">
-                  {job.timesteps.toLocaleString()} steps
-                </span>
+                <span className="tabular-nums text-ink-faint">{workLabel(job)}</span>
+                {job.kind === 'EVALUATE' && job.model_id && (
+                  <span className="truncate text-ink-faint">{job.model_id}</span>
+                )}
                 <span className="ml-auto tabular-nums text-ink-faint">
                   {duration(job.elapsed_s)}
                 </span>

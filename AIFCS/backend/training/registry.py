@@ -221,6 +221,15 @@ class ModelRegistry:
             ]
         return sorted(entries, key=lambda e: e["created_at"], reverse=True)
 
+    def archived_count(self) -> int:
+        """How many policies are in the archive.
+
+        The dashboard needs this to tell "nothing has been trained yet" from
+        "everything you trained is archived". Those look identical in a list
+        that excludes the archive, and only one of them means train something.
+        """
+        return sum(1 for path in self.directory(archived=True).glob("*.zip") if path.is_file())
+
     def get(self, model_id: str) -> dict[str, Any]:
         """One policy, looking in the archive as well as the active directory."""
         for archived in (False, True):

@@ -283,3 +283,43 @@ def test_archiving_a_missing_model_is_a_404(client):
     assert client.post("/api/models/ppo-nothing/archive").status_code == 404
     assert client.post("/api/models/ppo-nothing/restore").status_code == 404
     assert client.delete("/api/models/ppo-nothing").status_code == 404
+
+
+# ------------------------------------------- an empty list is not one thing
+
+
+def test_archived_count_separates_nothing_trained_from_everything_archived(registry):
+    """The dashboard said "No policies saved yet. Train one above."
+
+    It said it to someone who had just trained three policies and archived them.
+    A list that excludes the archive cannot tell the two cases apart on its own,
+    so the count travels with it.
+    """
+    assert registry.archived_count() == 0
+
+    _write(registry, "ppo-kept", _card(registry))
+    _write(registry, "ppo-put-away", _card(registry))
+    registry.archive("ppo-put-away")
+
+    assert registry.archived_count() == 1
+    assert [m["model_id"] for m in registry.list_models()] == ["ppo-kept"]
+
+    registry.archive("ppo-kept")
+    assert registry.list_models() == [], "nothing active"
+    assert registry.archived_count() == 2, "but not nothing at all"
+
+
+def test_the_model_list_payload_carries_the_archived_count(registry, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+
+    _write(registry, "ppo-put-away", _card(registry))
+    registry.archive("ppo-put-away")
+    monkeypatch.setattr("api.training._registry", lambda settings: registry)
+
+    with TestClient(main.app) as client:
+        body = client.get("/api/models").json()
+
+    assert body["count"] == 0
+    assert body["archived_count"] == 1

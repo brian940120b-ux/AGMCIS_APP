@@ -239,10 +239,13 @@ def models_list(
     """Every saved policy with a verdict on whether it still means anything."""
     from training.observation_encoder import LAYOUT_VERSION
 
-    found = _registry(settings).list_models(include_archived=include_archived)
+    registry = _registry(settings)
+    found = registry.list_models(include_archived=include_archived)
     return {
         "count": len(found),
         "models": found,
+        # So an empty list can say which kind of empty it is.
+        "archived_count": registry.archived_count(),
         "current_layout": LAYOUT_VERSION,
         "available": rl_available(),
         "install_hint": rl_status().install_hint,
