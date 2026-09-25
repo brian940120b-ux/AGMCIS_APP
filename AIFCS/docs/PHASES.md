@@ -1115,3 +1115,37 @@ Both of those are now checked: `test_optional_dependencies.py` starts the API
 and runs the simulation in a subprocess with the optional packages made
 unimportable, and doctor's last check before the frontend is whether the
 application imports at all.
+
+## The competition layer (COMP PHASE 1-3)
+
+The 2026 AI 飛行員擂台賽 (NCSIST-AIPilot) fixes the interface and the scoring,
+so the work here is faithfulness rather than design: 26 doubles in, four control
+channels out, 60 Hz, UDP, and a judge on the other end who is not running our
+code. Three things were built, and each of them found something.
+
+**One implementation, not two.** The reference package encodes the state twice —
+in the training environment and in the competition client — and the copies have
+drifted: a high-speed elevator limit in one and not the other, two different
+definitions of the speed it triggers on, a float32 cast on one side that adds
++/-12.7 m/s of noise to a closure rate the other computes exactly, and per-round
+state held in module globals that no round boundary resets. All four exist only
+because there are two copies. The parity tests vendor the organiser's own two
+functions and use them as an oracle, so "faithful" is a thing that fails a test
+rather than a thing that is claimed.
+
+**The round boundary is a signal, not a message.** Nothing in the ICD says a
+round started. What the host does is repeat the initial position unchanged
+between INIT and START, so a held position after movement is the boundary — and
+it takes exactly one frame to recognise, because a position is not held until it
+has been seen twice.
+
+**The scoring is not the reward.** `_compute_reward_and_done` pays for a nose on
+target at any range; the competition pays between 500 and 3000 ft and pays more
+for accumulated seconds than for any instant. Implementing the published scoring
+turned that from an argument into a measurement — and the first thing it
+measured was the reference policy itself, over five-minute rounds against the
+non-manoeuvring opponent it was trained on: killed twice in three rounds, at 46 s
+and at 180 s, and in the third round never got inside the envelope at all.
+
+That is the baseline. It is beatable, and now there is a ruler that says by how
+much.

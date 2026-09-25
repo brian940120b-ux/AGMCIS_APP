@@ -41,7 +41,18 @@ from competition.protocol import (
     decode_observation,
     encode_command,
 )
-from competition.state import STATE_SIZE, StateEncoder, Telemetry
+from competition.scoring import (
+    AttackEnvelope,
+    EndReason,
+    RoundOutcome,
+    ScoringWeights,
+    SideScore,
+    Verdict,
+    decide_round,
+    distance_factor,
+    position_advantage,
+)
+from competition.state import STATE_SIZE, Geometry, StateEncoder, Telemetry
 
 __all__ = [
     "CMD_PACKET_BYTES",
@@ -49,16 +60,26 @@ __all__ = [
     "OBS_PACKET_BYTES",
     "PLAYER_CMD_TRAILER",
     "STATE_SIZE",
+    "AttackEnvelope",
     "ClientStats",
     "Command",
     "CompetitionClient",
+    "EndReason",
     "Endpoint",
+    "Geometry",
     "JoystickState",
     "PlayerState",
+    "RoundOutcome",
+    "ScoringWeights",
+    "SideScore",
     "StateEncoder",
     "Telemetry",
+    "Verdict",
+    "decide_round",
     "decode_observation",
+    "distance_factor",
     "encode_command",
+    "position_advantage",
     "serve",
     "shape_command",
 ]
