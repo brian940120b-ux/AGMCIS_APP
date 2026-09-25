@@ -38,7 +38,13 @@ from typing import Any
 
 from core.config import Settings, get_settings
 from core.logging_config import get_logger
-from training.pipeline import ALGORITHMS, TrainingPipeline, TrainingUnavailableError, rl_available
+from training.pipeline import (
+    ALGORITHMS,
+    TrainingPipeline,
+    TrainingUnavailableError,
+    rl_available,
+    rl_status,
+)
 
 log = get_logger("training.jobs")
 
@@ -243,8 +249,13 @@ class TrainingJobRunner:
 
     def status(self) -> dict[str, Any]:
         current = self.current()
+        rl = rl_status()
         return {
-            "available": rl_available(),
+            "available": rl.available,
+            # "not installed" and "installed but will not load" need different
+            # advice, so the payload carries which one this machine has.
+            "install_hint": rl.install_hint,
+            "unavailable_reason": rl.reason,
             "busy": self.busy(),
             "current": current.to_dict() if current else None,
             "history": [j.to_dict() for j in self.history()],

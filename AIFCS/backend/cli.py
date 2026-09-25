@@ -104,15 +104,30 @@ def command_doctor(args: argparse.Namespace) -> int:
 
     heading("Optional dependencies")
     try:
-        from training.pipeline import rl_available
+        from training.pipeline import rl_status
 
-        if rl_available():
+        rl = rl_status()
+        if rl.available:
             ok("reinforcement learning — training and evaluation available")
+        elif rl.installed:
+            # A different problem from "not installed", and a different fix.
+            #
+            # A WARN rather than a FAIL, deliberately: this is an optional
+            # feature, and a FAIL here stops update.sh from starting AIFCS at
+            # all. Refusing to launch a working simulator because training is
+            # broken would be the worse mistake. So: loud, specific, and not
+            # in the way.
+            warn("reinforcement learning is INSTALLED BUT WILL NOT LOAD")
+            print(f"       {rl.reason}")
+            print("       Everything except training and evaluation still works.")
+            print("       Windows: this is usually the Microsoft Visual C++ Redistributable")
+            print("       (x64), from https://aka.ms/vs/17/release/vc_redist.x64.exe")
+            warnings += 1
         else:
             warn("reinforcement learning not installed — the training centre will say so")
             warnings += 1
-    except ImportError:
-        warn("reinforcement learning not installed — the training centre will say so")
+    except Exception as exc:  # doctor reports, never raises
+        warn(f"reinforcement learning could not be checked: {exc}")
         warnings += 1
 
     from simulation.jsbsim_adapter import jsbsim_available, jsbsim_version
@@ -321,11 +336,17 @@ def command_scenarios(args: argparse.Namespace) -> int:
 
 
 def command_train(args: argparse.Namespace) -> int:
-    from training.pipeline import TrainingPipeline, TrainingUnavailableError, rl_available
+    from training.pipeline import TrainingPipeline, TrainingUnavailableError, rl_status
 
-    if not rl_available():
-        print("The reinforcement-learning stack is not installed.")
-        print("  pip install -r requirements-ml.txt")
+    rl = rl_status()
+    if not rl.available:
+        if rl.installed:
+            print("The reinforcement-learning stack is installed but will not load.")
+            print(f"  {rl.reason}")
+            print("  Run `aifcs doctor` for what to do about it.")
+        else:
+            print("The reinforcement-learning stack is not installed.")
+            print("  pip install -r requirements-ml.txt")
         return EXIT_FAILED
 
     try:
@@ -374,12 +395,18 @@ def command_models(args: argparse.Namespace) -> int:
 
 
 def command_evaluate(args: argparse.Namespace) -> int:
-    from training.pipeline import TrainingPipeline, rl_available
+    from training.pipeline import TrainingPipeline, rl_status
     from training.registry import ModelIncompatibleError, ModelNotFoundError, ModelRegistry
 
-    if not rl_available():
-        print("The reinforcement-learning stack is not installed.")
-        print("  pip install -r requirements-ml.txt")
+    rl = rl_status()
+    if not rl.available:
+        if rl.installed:
+            print("The reinforcement-learning stack is installed but will not load.")
+            print(f"  {rl.reason}")
+            print("  Run `aifcs doctor` for what to do about it.")
+        else:
+            print("The reinforcement-learning stack is not installed.")
+            print("  pip install -r requirements-ml.txt")
         return EXIT_FAILED
 
     registry = ModelRegistry(get_settings())

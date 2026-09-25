@@ -21,6 +21,7 @@ this.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -192,3 +193,121 @@ def test_doctor_fails_loudly_when_the_application_will_not_import(tmp_path: Path
     assert "the API application will not import" in result.stdout, result.stdout[-2000:]
     # And it says why, rather than only that.
     assert "fastapi" in result.stdout
+
+
+# ------------------------------------------- installed, and will not load
+
+# A package can be present and still fail. On Windows torch raises
+# `OSError: [WinError 1114] ... Error loading "...\\torch\\lib\\c10.dll"` when the
+# Visual C++ runtime is missing. `rl_available()` caught only ImportError, so
+# that escaped through every caller — including the one that runs during
+# application startup. Installing the optional feature took the server down.
+BROKEN_TORCH = "raise OSError('[WinError 1114] Error loading \"c10.dll\" or one of its dependencies.')\n"
+
+
+def _broken_torch(tmp_path: Path) -> Path:
+    """A directory that shadows torch with one that raises on import."""
+    package = tmp_path / "torch"
+    package.mkdir()
+    (package / "__init__.py").write_text(BROKEN_TORCH, encoding="utf-8")
+    return tmp_path
+
+
+def _run_with(shadow: Path, body: str) -> subprocess.CompletedProcess[str]:
+    preamble = f"import sys, logging\nsys.path.insert(0, {str(shadow)!r})\n"
+    preamble += "sys.path.insert(1, 'backend')\nlogging.disable(logging.CRITICAL)\n"
+    return subprocess.run(
+        [sys.executable, "-c", preamble + body],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+
+@pytest.fixture
+def shadow(tmp_path: Path) -> Path:
+    return _broken_torch(tmp_path)
+
+
+def test_a_broken_optional_package_does_not_stop_the_server(shadow: Path) -> None:
+    result = _run_with(
+        shadow,
+        """
+import time
+from fastapi.testclient import TestClient
+import main
+
+with TestClient(main.app) as client:
+    print("HEALTH", client.get("/api/health").status_code)
+    print("START", client.post("/api/simulation/start", json={"scenario": "demo_alpha"}).status_code)
+    time.sleep(1)
+    print("TICKS", client.get("/api/world/state").json()["tick"])
+    client.post("/api/simulation/stop")
+""",
+    )
+    assert "HEALTH 200" in result.stdout, result.stderr[-2500:]
+    assert "START 200" in result.stdout, result.stderr[-2500:]
+    assert int(result.stdout.split("TICKS")[1].split()[0]) > 10, result.stdout
+
+
+def test_the_training_endpoint_reports_a_broken_install_honestly(shadow: Path) -> None:
+    """Telling someone to install what they already installed is not an answer."""
+    result = _run_with(
+        shadow,
+        """
+import json
+from fastapi.testclient import TestClient
+import main
+
+with TestClient(main.app) as client:
+    body = client.get("/api/training/status").json()
+    print("PAYLOAD", json.dumps({
+        "available": body["available"],
+        "install_hint": body["install_hint"],
+        "unavailable_reason": body["unavailable_reason"],
+    }))
+""",
+    )
+    assert "PAYLOAD" in result.stdout, result.stderr[-2500:]
+    payload = json.loads(result.stdout.split("PAYLOAD", 1)[1].strip().splitlines()[0])
+    assert payload["available"] is False
+    assert payload["install_hint"] is None, "it is installed; installing it again is no help"
+    assert "WinError 1114" in payload["unavailable_reason"]
+
+
+def test_rl_status_separates_absent_from_broken(shadow: Path) -> None:
+    result = _run_with(
+        shadow,
+        """
+from training.pipeline import rl_status
+s = rl_status()
+print("STATUS", s.available, s.installed, s.install_hint)
+""",
+    )
+    assert "STATUS False True None" in result.stdout, result.stderr[-2500:]
+
+
+def test_doctor_reports_a_broken_rl_stack_without_blocking_startup(shadow: Path) -> None:
+    """Loud and specific, but not a FAIL.
+
+    `update.sh` stops on a doctor failure. A broken optional feature must not
+    stop a working simulator from starting, so this reports the problem and the
+    remedy and still exits zero.
+    """
+    import os
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(shadow)
+    result = subprocess.run(
+        [sys.executable, "backend/cli.py", "doctor"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    assert "INSTALLED BUT WILL NOT LOAD" in result.stdout, result.stdout[-2000:]
+    assert "WinError 1114" in result.stdout
+    assert "Visual C++" in result.stdout
+    assert result.returncode == 0, "an optional feature must not block the platform"

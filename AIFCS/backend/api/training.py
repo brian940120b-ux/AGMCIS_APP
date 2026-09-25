@@ -35,6 +35,7 @@ from training.pipeline import (
     TrainingUnavailableError,
     resolve_device,
     rl_available,
+    rl_status,
 )
 from training.registry import (
     ModelIncompatibleError,
@@ -57,11 +58,15 @@ def _pipeline(settings: Settings) -> TrainingPipeline:
 @router.get("/training/status")
 def training_status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """What the training stack can do right now."""
-    available = rl_available()
+    status = rl_status()
+    available = status.available
     training = settings.training
     return {
         "available": available,
-        "install_hint": None if available else INSTALL_HINT,
+        # Only when installing would help. On a machine where the stack is
+        # installed but will not load, "install it" is the one useless answer.
+        "install_hint": status.install_hint,
+        "unavailable_reason": status.reason,
         "how_to_run": CLI_HINT,
         "browser_control": available,
         "browser_control_note": (
@@ -240,7 +245,8 @@ def models_list(
         "models": found,
         "current_layout": LAYOUT_VERSION,
         "available": rl_available(),
-        "install_hint": None if rl_available() else INSTALL_HINT,
+        "install_hint": rl_status().install_hint,
+        "unavailable_reason": rl_status().reason,
         "notice": (
             "A policy trained against a different observation layout still loads and still "
             "produces actions — from numbers that stopped meaning what they meant. Those are "

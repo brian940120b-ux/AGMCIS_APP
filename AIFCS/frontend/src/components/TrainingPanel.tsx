@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrainCircuit, Terminal } from 'lucide-react'
 import { Panel } from '@/components/Panel'
+import { RLUnavailable } from '@/components/RLUnavailable'
 import { api } from '@/api/client'
 import type {
   TrainedModel,
@@ -70,7 +71,9 @@ export function TrainingPanel() {
         status
           ? status.available
             ? `PPO / SAC on ${status.device}`
-            : 'RL stack not installed'
+            : status?.unavailable_reason && !status.install_hint
+              ? 'RL stack will not load'
+              : 'RL stack not installed'
           : 'reading…'
       }
       actions={<BrainCircuit className="size-3.5 text-cyan-hud" strokeWidth={1.5} />}
@@ -79,12 +82,11 @@ export function TrainingPanel() {
         {error && <p className="text-[10px] text-rose-400">{error}</p>}
 
         {status && !status.available && (
-          <p className="text-[10px] leading-relaxed text-amber-300">
-            The reinforcement-learning stack is not installed. Install it with:
-            <code className="mt-1 block break-all text-[9px] text-ink-dim">
-              {status.install_hint}
-            </code>
-          </p>
+          <RLUnavailable
+            consequence="the training centre is closed"
+            installHint={status.install_hint}
+            reason={status.unavailable_reason}
+          />
         )}
 
         {status?.available && (

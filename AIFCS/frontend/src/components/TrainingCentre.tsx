@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CircleStop, Play } from 'lucide-react'
 import { LineChart } from '@/charts/LineChart'
 import { Panel } from '@/components/Panel'
+import { RLUnavailable } from '@/components/RLUnavailable'
 import { StateBadge } from '@/components/StateBadge'
 import { useTrainingStore } from '@/stores/trainingStore'
 import type { TrainingJob } from '@/types/api'
@@ -127,12 +128,11 @@ export function TrainingCentre() {
     return (
       <Panel title="Training Centre" subtitle="reinforcement learning">
         <div className="px-3 py-4">
-          <p className="text-[11px] text-amber-hud">
-            The reinforcement-learning stack is not installed, so nothing can be trained.
-          </p>
-          <p className="mt-1 font-mono text-[10px] text-ink-faint">
-            .venv/bin/pip install -r requirements-ml.txt
-          </p>
+          <RLUnavailable
+            consequence="nothing can be trained"
+            installHint={jobs.install_hint}
+            reason={jobs.unavailable_reason}
+          />
         </div>
       </Panel>
     )

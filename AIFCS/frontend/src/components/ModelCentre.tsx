@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Archive, ArchiveRestore, GitCompareArrows, Gauge, Trash2 } from 'lucide-react'
 import { Panel } from '@/components/Panel'
+import { RLUnavailable } from '@/components/RLUnavailable'
 import { useModelStore } from '@/stores/modelStore'
 import { useTrainingStore } from '@/stores/trainingStore'
 import type { ModelVerdict, SavedModel } from '@/types/api'
@@ -77,11 +78,11 @@ export function ModelCentre() {
     return (
       <Panel title="Model Centre" subtitle="saved policies">
         <div className="px-3 py-4">
-          <p className="text-[11px] text-amber-hud">
-            The reinforcement-learning stack is not installed, so no policy can be loaded or
-            measured.
-          </p>
-          <p className="mt-1 font-mono text-[10px] text-ink-faint">{list.install_hint}</p>
+          <RLUnavailable
+            consequence="no policy can be loaded or measured"
+            installHint={list.install_hint}
+            reason={list.unavailable_reason}
+          />
         </div>
       </Panel>
     )

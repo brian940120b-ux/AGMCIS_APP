@@ -46,30 +46,96 @@ _INSTALL_HINT = (
 
 
 class TrainingUnavailableError(RuntimeError):
-    """Raised when the RL dependencies are missing."""
+    """Raised when the RL dependencies are missing or will not load."""
 
 
-def rl_available() -> bool:
-    """Whether the whole RL stack can be imported.
+@dataclass(frozen=True)
+class RLStatus:
+    """Whether the optional RL stack can actually be used, and why not."""
 
-    Gymnasium belongs in here with the other two. The environment needs it, and
-    a check that passed without it would promise a training centre that cannot
-    build an environment to train in.
+    available: bool
+    installed: bool
+    reason: str | None = None
+
+    @property
+    def install_hint(self) -> str | None:
+        """Only when installing would help. Telling someone to install what
+        they already installed sends them round the same loop again."""
+        return None if self.available or self.installed else _INSTALL_HINT
+
+
+_rl_status: RLStatus | None = None
+
+
+def _probe_rl() -> RLStatus:
+    """Import the stack once and remember what happened.
+
+    Two different failures, and they need different advice:
+
+    * ``ImportError`` — the package is not there. Install it.
+    * anything else — the package is there and will not load. On Windows torch
+      raises ``OSError: [WinError 1114]`` from ``c10.dll`` when the Visual C++
+      runtime is missing. Catching only ``ImportError`` let that escape through
+      every caller, and one of them runs during application startup, so an
+      optional feature being broken took the whole server down.
+
+    Cached because importing torch costs seconds, and ``rl_available()`` is
+    called on the health endpoint, the training status and the model list.
     """
     try:
         import gymnasium  # noqa: F401
         import stable_baselines3  # noqa: F401
         import torch  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    except ImportError as exc:
+        return RLStatus(available=False, installed=False, reason=str(exc))
+    except Exception as exc:  # any failure here must not escape
+        reason = f"{type(exc).__name__}: {exc}"
+        log.warning(
+            "the RL stack is installed but will not load",
+            extra={"event": "RL_STACK_BROKEN", "reason": reason},
+        )
+        return RLStatus(available=False, installed=True, reason=reason)
+    return RLStatus(available=True, installed=True)
+
+
+def rl_status() -> RLStatus:
+    """The cached result of :func:`_probe_rl`."""
+    global _rl_status
+    if _rl_status is None:
+        _rl_status = _probe_rl()
+    return _rl_status
+
+
+def reset_rl_status() -> None:
+    """Forget the cached probe. For tests, and for nothing else."""
+    global _rl_status
+    _rl_status = None
+
+
+def rl_available() -> bool:
+    """Whether the whole RL stack can be imported and loaded.
+
+    Gymnasium belongs in here with torch and SB3. The environment needs it, and
+    a check that passed without it would promise a training centre that cannot
+    build an environment to train in.
+    """
+    return rl_status().available
+
+
+def _unavailable() -> TrainingUnavailableError:
+    status = rl_status()
+    if status.install_hint:
+        return TrainingUnavailableError(_INSTALL_HINT)
+    return TrainingUnavailableError(
+        f"The reinforcement-learning stack is installed but will not load.\n    {status.reason}"
+    )
 
 
 def _require_rl() -> Any:
     try:
         import stable_baselines3 as sb3
-    except ImportError as exc:  # pragma: no cover - exercised only without the stack
-        raise TrainingUnavailableError(_INSTALL_HINT) from exc
+    except Exception as exc:  # reported, never propagated raw
+        raise _unavailable() from exc
     return sb3
 
 
@@ -83,8 +149,8 @@ def _require_env() -> type[AIFCSCombatEnv]:
     """
     try:
         from training.environment import AIFCSCombatEnv
-    except ImportError as exc:  # pragma: no cover - exercised only without the stack
-        raise TrainingUnavailableError(_INSTALL_HINT) from exc
+    except Exception as exc:  # reported, never propagated raw
+        raise _unavailable() from exc
     return AIFCSCombatEnv
 
 
@@ -93,7 +159,7 @@ def _progress_bar_available() -> bool:
     try:
         import rich  # noqa: F401
         import tqdm  # noqa: F401
-    except ImportError:
+    except Exception:  # a bar is never worth a failed run
         return False
     return True
 

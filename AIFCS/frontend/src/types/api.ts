@@ -550,7 +550,10 @@ export type ScenarioValidation =
 
 export interface TrainingStatus {
   available: boolean
+  /** Only set when installing would help. A stack that is installed and will
+   *  not load needs a different fix, and gets `unavailable_reason` instead. */
   install_hint: string | null
+  unavailable_reason: string | null
   how_to_run: string
   /** False until the training centre phase: a long job needs progress,
    *  cancellation and reload survival before a button can honestly exist. */
@@ -822,6 +825,8 @@ export interface TrainingJob {
 
 export interface TrainingJobs {
   available: boolean
+  install_hint: string | null
+  unavailable_reason: string | null
   busy: boolean
   current: TrainingJob | null
   history: TrainingJob[]
@@ -888,6 +893,7 @@ export interface ModelList {
   current_layout: number
   available: boolean
   install_hint: string | null
+  unavailable_reason: string | null
   notice: string
 }
 

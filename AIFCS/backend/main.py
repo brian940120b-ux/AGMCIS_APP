@@ -131,13 +131,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # PHASE 11-13 built the stack; PHASE 18 made it startable from the browser,
     # so the detail says that rather than still pointing at the command line.
-    from training.pipeline import resolve_device, rl_available
+    from training.pipeline import resolve_device, rl_status
 
-    if rl_available():
+    training_status = rl_status()
+    if training_status.available:
         registry.set_state(
             "training",
             SubsystemState.ONLINE,
             f"Gymnasium env, PPO and SAC on {resolve_device(settings.training.device)} - one job at a time",
+        )
+    elif training_status.installed:
+        # Installed and broken is not the same as absent, and the fix is not
+        # the same either. Say which one this machine has.
+        registry.set_state(
+            "training",
+            SubsystemState.OFFLINE,
+            f"RL stack installed but will not load: {training_status.reason}",
         )
     else:
         registry.set_state(
