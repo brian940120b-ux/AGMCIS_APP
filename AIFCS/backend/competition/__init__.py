@@ -43,6 +43,7 @@ from competition.environment import (
     reference_opponent,
     resolve_jsbsim_root,
 )
+from competition.gym_env import CompetitionEnv, make_env, make_vec_env
 from competition.protocol import (
     CMD_PACKET_BYTES,
     OBS_PACKET_BYTES,
@@ -52,6 +53,7 @@ from competition.protocol import (
     decode_observation,
     encode_command,
 )
+from competition.rewards import ReferenceReward, RewardMode, ScoreReward
 from competition.scoring import (
     AttackEnvelope,
     EndReason,
@@ -76,6 +78,7 @@ __all__ = [
     "ClientStats",
     "Command",
     "CompetitionClient",
+    "CompetitionEnv",
     "CompetitionRound",
     "EndReason",
     "Endpoint",
@@ -83,8 +86,11 @@ __all__ = [
     "Geometry",
     "JoystickState",
     "PlayerState",
+    "ReferenceReward",
+    "RewardMode",
     "RoundOutcome",
     "RoundSetup",
+    "ScoreReward",
     "ScoringWeights",
     "SideScore",
     "StateEncoder",
@@ -96,6 +102,8 @@ __all__ = [
     "distance_factor",
     "encode_command",
     "level_opponent",
+    "make_env",
+    "make_vec_env",
     "observation_space",
     "position_advantage",
     "reference_opponent",
