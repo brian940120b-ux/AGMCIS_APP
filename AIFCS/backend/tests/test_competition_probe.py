@@ -217,7 +217,7 @@ def test_the_probe_flies_a_round_against_a_host_and_reports_on_it():
     assert report["frames"] > 400
     assert report["rounds_detected"] == 2, "the INIT hold should mark the second round"
     assert report["frames_with_position_held"] >= 50
-    assert report["initial"]["separation_ft"] > 0
+    assert report["initial"]["horizontal_separation_ft"] > 0
     # The handshake has to have gone 1 then 2, or the host would never start.
     assert 1 in host.states_seen and 2 in host.states_seen
 
@@ -242,3 +242,38 @@ def test_the_self_test_fails_when_the_host_port_is_taken():
         assert selftest(args) == 1
     finally:
         squatter.close()
+
+
+def test_the_separation_accounts_for_the_cosine_of_the_latitude():
+    """A degree of longitude shrinks with latitude, and the first version forgot.
+
+    The numbers are the real host's first frame, 2026-09-25: two F-16s at
+    25.328 N, at the same altitude. With the cosine the separation is 3,295 ft;
+    without it, 3,604 — which was reported, and looked like the published
+    3,000 / 6,000 / 9,000 being wrong rather than this being wrong.
+    """
+    from competition.probe import _separation
+
+    frame = _frame(
+        lat=25.32831559268268,
+        lon=121.21688960512867,
+        alt_ft=19116.00001178682,
+        enemy_lat=25.32515018725573,
+        enemy_lon=121.20754202869814,
+        enemy_alt_ft=19116.00002093613,
+    )
+    horizontal_ft, vertical_ft, slant_ft = _separation(frame)
+
+    assert horizontal_ft == pytest.approx(3295.0, abs=2.0)
+    assert vertical_ft == pytest.approx(0.0, abs=0.001)
+    assert slant_ft == pytest.approx(horizontal_ft, abs=0.001)
+    # Without the cosine it comes out here, which is what was reported.
+    assert horizontal_ft < 3604.0
+
+
+def test_the_host_starts_both_aircraft_at_the_same_altitude():
+    """Measured: they matched to 1e-5 ft, which two random draws never do."""
+    from competition.probe import _separation
+
+    _, vertical_ft, _ = _separation(_frame(alt_ft=19116.00001178682, enemy_alt_ft=19116.00002093613))
+    assert abs(vertical_ft) < 0.001

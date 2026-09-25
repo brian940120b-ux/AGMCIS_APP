@@ -254,3 +254,43 @@ def test_the_reference_opponent_never_manoeuvres():
         if done:
             break
     assert max(headings) - min(headings) < 20.0, headings
+
+
+def test_both_aircraft_start_at_the_same_altitude_as_the_host_starts_them():
+    """Measured: the host's first frame had them equal to 1e-5 ft.
+
+    Two independent draws from a 10,000 ft range do not agree to five decimal
+    places, so this is construction rather than coincidence — and an environment
+    that randomises them separately trains for a merge geometry the competition
+    never sets up.
+
+    Tolerance in tenths of a millimetre rather than exact: two JSBSim instances
+    initialised to the same altitude settle a few microns apart, and the host's
+    own pair differed by 9e-6 ft for the same reason. That is six orders of
+    magnitude below anything two random draws would produce.
+    """
+    for seed in range(8):
+        round_ = CompetitionRound(EnvConfig(), seed=seed)
+        geometry = round_.geometry()
+        assert geometry.own_alt_m == pytest.approx(geometry.enemy_alt_m, abs=1e-4)
+
+
+def test_the_measured_setup_is_recorded_and_is_not_the_published_one():
+    """The public test host randomises where the rules give three values.
+
+    Measured over two rounds: 3,295.0 and 4,850.2 ft apart, headings 340 and 55.
+    Whole feet and whole degrees — the reference generator's output, not the
+    rules'. So the test host cannot check the round setup, and the published
+    figures stay the default because they are the only statement about
+    competition day that exists.
+    """
+    published = RoundSetup()
+    measured = RoundSetup.measured()
+
+    assert published.separations_ft == (3000.0, 6000.0, 9000.0)
+    assert 3295.0 in measured.separations_ft
+    assert 4850.0 in measured.separations_ft
+    assert 3295.0 not in published.separations_ft
+    # Both agree on the two things the host did match the rules on.
+    assert measured.speed_kcas == published.speed_kcas == 340.0
+    assert measured.altitude_range_ft == published.altitude_range_ft

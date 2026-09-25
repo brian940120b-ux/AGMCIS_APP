@@ -1174,3 +1174,22 @@ packets and no non-finite values in 33,090 frames.
 One thing did not match and is open: the initial separation measured 3,604 ft
 where the rules give 3,000 / 6,000 / 9,000. The probe measures a 3D range and
 the rules may mean a horizontal one, which the recorded frames will settle.
+
+**And one thing the host said that the rules do not.** The probe's two rounds
+started 3,295.0 and 4,850.2 ft apart, on headings of 340 and 55 degrees — whole
+feet and whole degrees, which is `randint(0, 12000) * 0.3048` and
+`randint(0, 359)`, the reference generator, not the published
+3,000 / 6,000 / 9,000. The readme calls that build 民眾公告版, a public release
+for testing a connection, so a test host randomising is unremarkable; what it
+means is that it cannot be used to check the round setup. The published figures
+stay the default because they are the only statement about competition day that
+exists, and `RoundSetup.measured()` records what was seen so the difference is
+written down rather than remembered.
+
+Reading that frame also found a defect in the probe's own analysis: its
+separation left the cosine of the latitude out of the longitude conversion, a
+10% error on the east component at 25 degrees north, which turned 3,295 ft into
+a reported 3,604 and made the rules look wrong instead of the arithmetic. The
+state encoder always had the cosine. This was the one place that grew a second
+copy of it — the exact mistake the package is arranged to avoid, made in the
+tool built to check the arrangement.

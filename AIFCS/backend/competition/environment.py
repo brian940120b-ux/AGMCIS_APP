@@ -86,6 +86,36 @@ class RoundSetup:
             speed_kcas=340.0,
         )
 
+    @classmethod
+    def measured(cls) -> RoundSetup:
+        """What the public test host actually did, 2026-09-25, over two rounds.
+
+        Not the published setup. Measured with WGS84 curvature:
+
+            round 1   19,116 ft   3,295.0 ft apart   heading 340 deg
+            round 2   14,659 ft   4,850.2 ft apart   heading  55 deg
+
+        Both separations are whole feet (3,295.013 is 4 mm off an integer) and
+        both headings are whole degrees, which is what
+        `random.randint(0, 12000) * 0.3048` and `random.randint(0, 359)`
+        produce — the reference environment's generator, not the rules'
+        3,000 / 6,000 / 9,000. Both aircraft shared an altitude and both flew at
+        340 KCAS, which the reference environment does not do.
+
+        The readme calls this build 民眾公告版, a public release for testing a
+        connection, so a test host randomising where the competition does not
+        is unremarkable. What it means is that the test host cannot be used to
+        check the round setup, and the published figures stay the default:
+        they are the only statement about competition day that exists.
+
+        Two samples. Not a distribution.
+        """
+        return cls(
+            separations_ft=tuple(float(ft) for ft in range(0, 12_001, 1)),
+            altitude_range_ft=(10_000.0, 20_000.0),
+            speed_kcas=340.0,
+        )
+
 
 class Aircraft:
     """One JSBSim F-16, set up the way the reference sets one up.
@@ -369,7 +399,11 @@ class CompetitionRound:
 
         separation_ft = self.random.choice(setup.separations_ft)
         altitude_ft = self.random.uniform(*setup.altitude_range_ft)
-        foe_altitude_ft = self.random.uniform(*setup.altitude_range_ft)
+        # Measured against the real host, 2026-09-25: both aircraft started at
+        # 19,116.00001 and 19,116.00002 ft, matching to a hundred-thousandth of
+        # a foot. Two independent draws from a 10,000 ft range do not do that,
+        # so the altitude is shared by construction and is shared here.
+        foe_altitude_ft = altitude_ft
         bearing_deg = self.random.uniform(0.0, 360.0)
         own_heading = self.random.uniform(0.0, 360.0)
         foe_heading = self.random.uniform(0.0, 360.0)

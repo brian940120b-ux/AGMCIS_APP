@@ -180,7 +180,10 @@ def analyse(frames: list[dict[str, Any]]) -> dict[str, Any]:
             "vc_kts": round(vc_kts, 1),
             "vt_kts": round(vt_kts, 1),
             "mach_estimate": round(first["vt_fps"] * FT_TO_M / 340.0, 3),
-            "separation_ft": round(_separation_ft(first), 0),
+            "horizontal_separation_ft": round(_separation(first)[0], 0),
+            "vertical_separation_ft": round(_separation(first)[1], 1),
+            "slant_separation_ft": round(_separation(first)[2], 0),
+            "own_heading_deg": round(first["yaw"], 2),
         },
         "altitude_ft": {"min": round(min(altitudes), 1), "max": round(max(altitudes), 1)},
         "vc_kts": {"min": round(min(speeds), 1), "max": round(max(speeds), 1)},
@@ -192,12 +195,27 @@ def analyse(frames: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _separation_ft(frame: dict[str, Any]) -> float:
-    metres_per_degree = 111_320.0
-    north = (frame["enemy_lat"] - frame["lat"]) * metres_per_degree
-    east = (frame["enemy_lon"] - frame["lon"]) * metres_per_degree
-    up = (frame["enemy_alt_ft"] - frame["alt_ft"]) * FT_TO_M
-    return float(math.sqrt(north * north + east * east + up * up)) / FT_TO_M
+def _separation(frame: dict[str, Any]) -> tuple[float, float, float]:
+    """Horizontal, vertical and slant range between the two aircraft, in feet.
+
+    A degree of longitude is a degree of latitude times the cosine of the
+    latitude, and the first version of this left the cosine out. At 25 degrees
+    north that is a 10% error on the east component, and it turned a separation
+    of 3,295 ft into a reported 3,604 — which then looked like the rules'
+    3,000 / 6,000 / 9,000 being wrong rather than this being wrong.
+
+    The state encoder always had the cosine. This is the one place that grew a
+    second copy of the same arithmetic, which is the mistake the whole package
+    is arranged to avoid.
+    """
+    earth_radius_m = 6378137.0
+    latitude = math.radians(frame["lat"])
+    north_m = math.radians(frame["enemy_lat"] - frame["lat"]) * earth_radius_m
+    east_m = math.radians(frame["enemy_lon"] - frame["lon"]) * earth_radius_m * math.cos(latitude)
+    horizontal_m = math.hypot(north_m, east_m)
+    vertical_ft = frame["enemy_alt_ft"] - frame["alt_ft"]
+    slant_ft = math.hypot(horizontal_m / FT_TO_M, vertical_ft)
+    return horizontal_m / FT_TO_M, vertical_ft, slant_ft
 
 
 def selftest(args: argparse.Namespace) -> int:
