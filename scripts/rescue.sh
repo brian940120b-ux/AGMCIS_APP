@@ -120,14 +120,30 @@ PYEOF
 
 # ── 五、測警報(會改:真的送一則訊息)──────────────────
 step "五 / 五  測警報送不送得出去 —— 會真的送一則訊息"
+# ⚠️ 2026-09-25 修:首版直接跑 python,而 sudo bash 的環境**沒有載
+#    .env** —— 於是它印「Telegram 沒有設定」,而同一份 log 裡服務端
+#    明明在收 401。那個答案是**錯的**:它量到的是這個 shell,不是
+#    服務跑的環境。一支診斷工具給出自信而錯誤的答案,比沉默更糟。
+#    這裡先把服務用的 .env 載進來,再問。
+if [ -f "${REPO}/.env" ]; then
+  set -a; . "${REPO}/.env" 2>/dev/null || true; set +a
+  echo "  (已載入 ${REPO}/.env —— 與服務同一份設定)"
+else
+  echo "  (找不到 ${REPO}/.env;下面問到的是這個 shell 的環境)"
+fi
 "$PY" - <<'PYEOF'
 import sys
 sys.path.insert(0, "/root/agmcis")
 from notify.telegram import is_configured, last_delivery, send
 
 if not is_configured():
-    print("\n  Telegram 沒有設定(TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)。")
-    print("  那本身不是錯誤 —— 但代表**系統沒有任何辦法主動通知你**。")
+    print("\n  這個環境裡沒有 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID。")
+    print("  ⚠️ 但這**不代表服務端也沒有** —— 服務是由 systemd 帶著")
+    print("     EnvironmentFile 啟動的。如果 journal 裡看得到 401,")
+    print("     那就是服務端有設定、而且那組設定是壞的。")
+    print("     查(**不會印出 token**):")
+    print("       systemctl show agmcis-dash -p EnvironmentFiles")
+    print("       grep -c TELEGRAM /root/agmcis/.env")
 else:
     ok = send("AGMCIS 警報通道測試:如果你看到這一則,通道是通的。")
     d = last_delivery()

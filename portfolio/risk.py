@@ -143,6 +143,37 @@ class RiskLimits:
 ALLOW, REDUCE, REJECT = "ALLOW", "REDUCE", "REJECT"
 
 
+def reduces_exposure(order, account) -> bool:
+    """這張單是不是**把部位往零的方向推**(平倉或減倉)。
+
+    ═══ 2026-09-25:為什麼需要這個判斷 ═══
+    帳戶層的檢查不過時,原本的做法是 `orders_in = []` —— 整批丟掉。
+
+    那在「想開太多」的情境下是對的。但 PRIMARY 這次的情境相反:
+    它手上有 48 檔(上限 25),而今天的目標池只有 10 檔,所以那批
+    訂單裡有 38 張是**平倉單**。整批丟掉的結果是:
+
+        風控因為「持倉太多」而否決了「減少持倉」的那些單。
+
+    於是 48 檔永遠是 48 檔,明天照樣否決。**一個阻止你降風險的
+    風控閘,是反過來的。** 這跟資金費那個死結是同一個形狀 ——
+    只是換了一道關卡。
+
+    ═══ 判準 ═══
+    以「成交之後 |部位| 會不會變小」為準,而不是看 BUY / SELL ——
+    空單的減倉是 BUY,多單的減倉是 SELL,看方向會弄反。
+    沒有部位的幣,任何單都是**開新倉**,一律不算減。
+    """
+    pos = (account.positions or {}).get(order.symbol)
+    cur = float(getattr(pos, "position_amt", 0.0) or 0.0) if pos else 0.0
+    if cur == 0.0:
+        return False                      # 手上沒有 = 這是開新倉
+    d = float(order.qty or 0.0)
+    if order.side.upper() == "SELL":
+        d = -d
+    return abs(cur + d) < abs(cur)
+
+
 @dataclass
 class Check:
     name: str

@@ -545,7 +545,26 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     if not risk.allowed:
         for c in risk.failures():
             log.warning(f"**風控否決** {c.name}:{c.detail}")
-        orders_in = []
+        # ⚠️ 2026-09-25:否決**不包括平倉與減倉**。
+        #
+        # 原本這裡是 `orders_in = []` —— 整批丟掉。那在「想開太多」
+        # 的情境下是對的,但 PRIMARY 這次的情境相反:手上 48 檔
+        # (上限 25),今天的目標池只有 10 檔,所以那批訂單裡有 38 張
+        # 是平倉單。整批丟掉的結果是:
+        #
+        #     風控因為「持倉太多」而否決了「減少持倉」的那些單。
+        #
+        # 於是 48 檔永遠是 48 檔,明天照樣否決。**一個阻止你降風險
+        # 的風控閘,是反過來的。** 這跟資金費那個死結同一個形狀,
+        # 只是換了一道關卡 —— 所以這裡用同一條原則修:
+        # **拒絕仍然在,但不准把出口一起鎖上。**
+        from portfolio.risk import reduces_exposure
+        kept = [o for o in orders_in if reduces_exposure(o, a)]
+        if kept:
+            log.warning(
+                "風控否決,但放行 %d 張平倉/減倉單(共 %d 張)—— "
+                "擋新倉是風控,擋出場不是。", len(kept), len(orders_in))
+        orders_in = kept
     elif risk.rejected_symbols:
         for c in risk.failures():
             log.warning(f"**風控拒單** {c.name}:{c.detail}")
