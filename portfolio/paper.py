@@ -484,11 +484,31 @@ def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
             "already_done": a.last_signal_day == day.isoformat()}
 
 
-def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
+def tick(now: datetime | None = None, cfg: "Config | None" = None,
+         force: bool = False) -> dict:
     """跑一日:收資金費 → 產訂單 → 執行 → 記帳。
 
     冪等:同一個訊號日重複呼叫不會重複記帳。
     cfg 預設是主城(MAIN),行為與參數化之前完全相同。
+
+    ═══ force:**只有一個正當理由** ═══
+    2026-09-25 的狀況:當天的 tick 已經跑過,但那一版的風控會把平倉單
+    連同開倉單一起丟掉(見 risk.reduces_exposure),所以它**成交 0 筆**
+    —— 帳戶留在 48 檔,而池子上限是 10。
+
+    於是冪等這道鎖,鎖住的是一個**已知是錯的**狀態:今天的額度被一次
+    什麼都沒做的 tick 用掉了,而修好的程式碼要等到明天才有機會跑。
+
+    force=True 跳過那道鎖。**它安全的理由要寫清楚,不是「應該沒事」**:
+    · 資金費是左開右閉的區間 `(funding_through_ms, now]`。上一次 tick
+      已經把 funding_through_ms 推到剛剛,所以再跑一次收到的是**同一
+      段裡沒有新結算** = 0。不會重複收費 —— 這是區間定義保證的,
+      不是運氣。
+    · 訂單是**依目標權重與現有權重的差額**算出來的,不是依「今天還沒
+      下過單」。前一次成交 0 筆,所以差額沒變,不會重複下單。
+
+    ⚠️ **不要拿它當每日流程。** 它是修復用的,而且每一次使用都應該
+    在呼叫端說明為什麼 —— 見 scripts/rescue.sh。
     """
     cfg = cfg or MAIN
     now = now or datetime.now(timezone.utc)
@@ -496,10 +516,14 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     if "error" in p:
         return p
     a = Account.load(cfg.state_path)
-    if p["already_done"]:
+    if p["already_done"] and not force:
         return {"skipped": "本交易日已記帳",
                 "symbols": list(p.get("symbols") or []),
                 "equity": a.equity(p["prices"])}
+    if p["already_done"] and force:
+        log.warning("force=True:本交易日已記帳,仍重跑一次 —— "
+                    "資金費區間左開右閉(不會重複收),訂單走目標與"
+                    "現有的差額(不會重複下)。這是修復用,不是日常流程。")
 
     prices = p["prices"]
     if a.started_at is None:

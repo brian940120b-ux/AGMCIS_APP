@@ -93,3 +93,47 @@ def test_the_rejection_itself_is_still_in_force():
     """**不是把風控放寬。** 開新倉仍然被擋住。"""
     src = (ROOT / "portfolio/paper.py").read_text(encoding="utf-8")
     assert "**風控否決**" in src, "否決的紀錄不見了"
+
+
+def test_force_is_documented_as_repair_only_with_its_safety_argument():
+    """`force` 必須寫清楚**為什麼安全**,不是「應該沒事」。
+
+    2026-09-25:當天的 tick 已經跑過,但那一版風控把平倉單連同開倉單
+    一起丟掉,成交 0 筆。於是冪等那道鎖,鎖住的是一個**已知是錯的**
+    狀態 —— 今天的額度被一次什麼都沒做的 tick 用掉了。
+
+    跳過那道鎖之所以安全,理由是結構性的,不是運氣:
+      · 資金費區間左開右閉,上一次已把 funding_through_ms 推到剛剛,
+        再跑一次那段裡沒有新結算 = 0
+      · 訂單走「目標權重 − 現有權重」的差額,前次成交 0 筆所以差額沒變
+
+    這條測試守的是那兩句話還在 —— 一個沒有寫明理由的後門,
+    下一個人會把它當成日常流程用。
+    """
+    src = (ROOT / "portfolio/paper.py").read_text(encoding="utf-8")
+    # 從 def tick( 切到它自己的結尾。用 "cfg = cfg or MAIN" 當終點會
+    # 抓到 plan() 裡先出現的那一個(它在檔案更前面),切出空字串 ——
+    # 而空字串會讓下面每一條 assert 都變成在測空氣。
+    i = src.index("def tick(")
+    body = src[i:i + src[i:].index("\ndef ", 1)]
+    assert len(body) > 500, "切出來的 tick() 太短,切法壞了"
+    assert "左開右閉" in body, "沒有寫明資金費為什麼不會重複收"
+    assert "差額" in body, "沒有寫明訂單為什麼不會重複下"
+    assert "不要拿它當每日流程" in body
+
+
+def test_force_defaults_to_off():
+    """後門預設關著。開著的後門不是後門,是大門。"""
+    import inspect
+
+    from portfolio.paper import tick
+    assert inspect.signature(tick).parameters["force"].default is False
+
+
+def test_the_rescue_script_only_forces_when_the_account_is_out_of_bounds():
+    """**不是無條件重跑。** 只有在倉超過硬上限時才動用。"""
+    sh = (ROOT / "scripts/rescue.sh").read_text(encoding="utf-8")
+    assert "over = len(a0.positions) > paper.MAX_UNIVERSE" in sh
+    assert "if not over:" in sh
+    assert "在倉沒有超過池子上限 —— 不需要重跑" in sh
+    assert "force=True" in sh

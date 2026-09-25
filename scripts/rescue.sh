@@ -54,6 +54,28 @@ except Exception as e:
 
 if r.get("skipped"):
     print(f"\n  這個交易日已經記過帳了:{r['skipped']}")
+    # 但如果帳戶還在硬上限外面,那道冪等鎖鎖住的是一個**已知是錯的**
+    # 狀態 —— 今天的額度被一次什麼都沒做的 tick 用掉了。那種情況下
+    # 重跑一次是修復,不是重複記帳(理由見 paper.tick 的 force 說明)。
+    over = len(a0.positions) > paper.MAX_UNIVERSE
+    if not over:
+        print("  在倉沒有超過池子上限 —— 不需要重跑。")
+    else:
+        print(f"\n  ⚠️ 但在倉 {len(a0.positions)} 檔 > 上限"
+              f" {paper.MAX_UNIVERSE} —— 那道鎖鎖住的是一個已知是錯的狀態。")
+        print("     重跑一次(force):資金費區間左開右閉不會重複收,")
+        print("     訂單走目標與現有的差額不會重複下。")
+        r = paper.tick(cfg=paper.PRIMARY, force=True)
+        if r.get("error"):
+            print(f"\n  ✗ 重跑失敗:{r['error']}")
+            raise SystemExit(1)
+        hold = r.get("holdings") or []
+        pool = r.get("symbols") or []
+        print(f"\n  重跑之後:在倉 {len(hold)} 檔 · 目標池 {len(pool)} 檔"
+              f" · 成交 {len(r.get('orders') or [])} 筆")
+        if r.get("risk_verdict"):
+            print(f"    風控判決 {r['risk_verdict']}"
+                  f" · 未過的檢查 {r.get('risk_failures')}")
 elif r.get("error"):
     print(f"\n  ✗ plan() 回了錯誤:{r['error']}")
     raise SystemExit(1)
