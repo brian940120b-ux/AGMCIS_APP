@@ -265,3 +265,87 @@ def test_a_powershell_script_with_chinese_starts_with_a_utf8_bom(path: Path):
             f"{path.name} has non-ASCII text and no UTF-8 BOM, so PowerShell 5.1 "
             "will decode it with the system codepage"
         )
+
+
+# ------------------------------------------------ the platform launchers
+
+LAUNCHERS = {"start.sh": "sh", "start.ps1": "ps1"}
+
+
+@pytest.mark.parametrize("name", sorted(LAUNCHERS))
+def test_the_dashboard_probe_tries_both_names_for_this_machine(name: str):
+    """Reported: Vite logged "ready in 2794 ms" and the launcher killed it.
+
+        VITE v6.4.3  ready in 2794 ms
+        ➜  Local:   http://localhost:5173/
+        !!  Dashboard did not start in 30s.
+
+    "localhost" and "127.0.0.1" are the same machine and not always the same
+    address — the first can resolve to the IPv6 loopback where the dev server
+    is listening on IPv4, or the reverse. Probing one name and reporting "did
+    not start" says the opposite of what the log beside it says.
+    """
+    raw = (SCRIPTS / name).read_bytes()
+    text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+    assert "127.0.0.1:$FRONTEND_PORT" in text or "127.0.0.1:$FrontendPort" in text
+    assert "localhost:$FRONTEND_PORT" in text or "localhost:$FrontendPort" in text
+
+
+@pytest.mark.parametrize("name", sorted(LAUNCHERS))
+def test_a_failed_dashboard_says_what_it_tried(name: str):
+    """A timeout with no evidence is not a diagnosis.
+
+    The failure now prints each URL with what came back, and what is listening
+    on the port, so the next report carries the answer with it.
+    """
+    raw = (SCRIPTS / name).read_bytes()
+    text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+    assert "did not answer" in text, "the message should describe what happened"
+    assert "What was tried" in text
+    assert "netstat" in text
+
+
+def test_the_shell_launcher_is_still_valid_shell():
+    """bash -n, because a launcher that does not parse fails at the worst time."""
+    import subprocess
+
+    result = subprocess.run(["bash", "-n", str(SCRIPTS / "start.sh")], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+# ------------------------------------------------- what the dev server reads
+
+FRONTEND_SRC = Path(__file__).resolve().parents[2] / "frontend" / "src"
+
+
+def test_the_three_d_view_imports_only_the_two_components_it_uses():
+    """Reported from the laptop, as the dev server dying just after saying ready:
+
+        Cannot read file "node_modules/@react-three/drei/core/TrailTexture.js":
+        系統資源不足，無法完成要求的服務。
+
+    That is Windows' ERROR_NO_SYSTEM_RESOURCES: handles or paged pool exhausted.
+    esbuild opens a great many files at once while pre-bundling, and importing
+    from `@react-three/drei` pulls its barrel — 320 files — to reach two
+    components. Naming the two directly took the pre-bundle from 28.0 MB to
+    18.3 MB on this machine.
+
+    It reduces the pressure rather than removing the limit, so this is a test
+    to stop it creeping back, not a claim that the limit cannot be reached.
+    """  # noqa: RUF002  (the message is quoted as Windows printed it)
+    offenders = []
+    for path in FRONTEND_SRC.rglob("*.tsx"):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "'@react-three/drei'" in line:
+                offenders.append(f"{path.name}:{number}")
+    assert not offenders, "import the component's own module instead of the barrel: " + ", ".join(offenders)
+
+
+def test_the_components_that_are_imported_are_the_ones_that_are_used():
+    """A narrow import that names the wrong module is worse than a broad one."""
+    aircraft = (FRONTEND_SRC / "three" / "Aircraft.tsx").read_text(encoding="utf-8")
+    camera = (FRONTEND_SRC / "three" / "CameraRig.tsx").read_text(encoding="utf-8")
+    assert "@react-three/drei/web/Html" in aircraft
+    assert "<Html" in aircraft
+    assert "@react-three/drei/core/OrbitControls" in camera
+    assert "<OrbitControls" in camera

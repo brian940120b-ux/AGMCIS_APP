@@ -166,21 +166,43 @@ echo "==> Starting dashboard / 啟動儀表板…"
 (cd frontend && exec npm run dev -- --port "$FRONTEND_PORT") > "$FRONTEND_LOG" 2>&1 &
 frontend_pid=$!
 
+# Two names for the same machine, because they are not always the same address.
+# "localhost" resolves to the IPv6 loopback first on some Windows setups and the
+# dev server may be listening only on IPv4, or the other way round. Whichever
+# answers is the one the browser is told to use.
+FRONTEND_URL=""
 for _ in $(seq 1 60); do
-  curl -sf -m 2 "http://127.0.0.1:$FRONTEND_PORT" >/dev/null 2>&1 && break
+  for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
+    if curl -sf -m 2 "$candidate" >/dev/null 2>&1; then FRONTEND_URL="$candidate"; break 2; fi
+  done
   kill -0 "$frontend_pid" 2>/dev/null || { cat "$FRONTEND_LOG"; fail "Dashboard exited during startup." "前端啟動失敗，訊息在上面。"; }
   sleep 0.5
 done
 
-if ! curl -sf -m 2 "http://127.0.0.1:$FRONTEND_PORT" >/dev/null 2>&1; then
+if [ -z "$FRONTEND_URL" ]; then
+  # A timeout that says only "it did not start" is useless next to a log that
+  # says the server is ready — which is exactly the pair this printed once.
+  # So say what was actually tried and what came back.
+  echo
+  echo "    The dashboard did not answer. What was tried:"
+  for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
+    code="$(curl -s -m 2 -o /dev/null -w '%{http_code}' "$candidate" 2>/dev/null)"
+    status=$?
+    echo "      $candidate  ->  curl exit $status, HTTP ${code:-none}"
+  done
+  if command -v netstat >/dev/null 2>&1; then
+    echo "    Listening on $FRONTEND_PORT:"
+    netstat -an 2>/dev/null | grep -E "[:.]$FRONTEND_PORT\b" | head -5 | sed 's/^/      /'
+  fi
+  echo
   tail -20 "$FRONTEND_LOG"
-  fail "Dashboard did not start in 30s." "前端 30 秒內沒有啟動成功。"
+  fail "Dashboard did not answer in 30s." "前端 30 秒內沒有回應。"
 fi
 
 # --- 6. Ready ---------------------------------------------------------------
-# "localhost" can resolve to the IPv6 loopback on Windows, which the dev
-# server does not listen on. The literal IPv4 address always works.
-URL="http://127.0.0.1:$FRONTEND_PORT"
+# Whichever name answered above. Not assumed: "localhost" and "127.0.0.1" are
+# the same machine and not always the same address.
+URL="$FRONTEND_URL"
 echo
 echo "================================================================"
 echo "  AIFCS is running.  AIFCS 已啟動。"

@@ -286,3 +286,49 @@ Use a different --name, or delete the session directory to start again.
 ```bash
 train.bat --name run2 --reward score
 ```
+
+---
+
+# 開不起來：`系統資源不足`
+
+換到筆電後出現過這個。`start.bat` 印出 `VITE v6.4.3 ready in 2794 ms`，下一行卻說前端沒啟動 —— 兩句話互相矛盾。直接跑 `npm run dev` 才看到真正的原因：
+
+```
+X [ERROR] Cannot read file "node_modules/@react-three/drei/core/TrailTexture.js":
+系統資源不足，無法完成要求的服務。
+Error: Build failed with 1 error
+```
+
+這是 Windows 的 **ERROR_NO_SYSTEM_RESOURCES (1450)**：handle 或 paged pool 用完了。Vite 會先說 ready，再在背景做套件預先打包（pre-bundle），esbuild 在那一步同時開非常多檔案，開到一半開不下去就整個死掉。所以「ready」是真的，「死掉」也是真的。
+
+## 我們這邊改了什麼
+
+3D 畫面只用到 `@react-three/drei` 裡的兩個元件（`Html`、`OrbitControls`），但原本是從套件的總入口 import，會把 320 個檔案整包拉進來。改成直接指名那兩個模組：
+
+```tsx
+import { Html } from '@react-three/drei/web/Html'
+import { OrbitControls } from '@react-three/drei/core/OrbitControls'
+```
+
+預先打包從 **28.0 MB 降到 18.3 MB（−35%）**。
+
+**這是減輕壓力，不是解除上限。** Windows 的 handle 上限還在那裡，只是現在離它比較遠。所以下面這幾件事還是要做。
+
+## 你要做的（Windows 這邊）
+
+1. **把資料夾加進 Defender 排除清單。** 設定 → 隱私權與安全性 → Windows 安全性 → 病毒與威脅防護 → 管理設定 → 排除項目 → 新增排除項目 → 資料夾 → 選 `C:\Users\user\AGMCIS_APP`。即時掃描會替每個被開啟的檔案多佔一份 handle，`node_modules` 有幾萬個檔案。
+2. **重新開機。** handle 洩漏是會累積的，開機久了本來就比較容易撞到。
+3. **關掉吃記憶體的程式**再開 —— 瀏覽器分頁、Docker Desktop、其他 IDE。
+
+## 確認修好了
+
+```bash
+cd ~/AGMCIS_APP && git pull --ff-only origin claude/aifcs-flight-simulation-u32h56
+cd AIFCS/frontend && rm -rf node_modules/.vite && npm run dev
+```
+
+`rm -rf node_modules/.vite` 是把上次沒做完的預先打包結果丟掉，不然它會沿用壞掉的快取。
+
+**成功**：停在 `ready`，而且**不會**再往下吐錯誤。然後 Ctrl+C，改用 `start.bat` 正常開。
+
+**失敗**：錯誤訊息會不一樣（不同檔名、或不同錯誤）。把那幾行貼出來 —— 檔名會指出還有誰在拉整包。

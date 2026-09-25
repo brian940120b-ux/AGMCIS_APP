@@ -1226,3 +1226,42 @@ mojibake under the codepage a Traditional Chinese machine uses. The shortcut
 installer asks Windows where the Desktop is rather than assuming
 `%USERPROFILE%\Desktop`, because OneDrive redirects it — and this machine's
 nearly was.
+
+### A launcher that says what it saw (COMP PHASE 8)
+
+Moving to the laptop, `start.bat` printed two things that cannot both be true:
+
+```
+VITE v6.4.3 ready in 2794 ms
+!! Dashboard did not start in 30s.
+```
+
+My first two explanations — IPv6 loopback, then the dev server binding only to
+`127.0.0.1` — were guesses, and both were wrong: `vite.config.ts` already has
+`host: true`. What settled it was the user running `npm run dev` by hand:
+
+```
+X [ERROR] Cannot read file "node_modules/@react-three/drei/core/TrailTexture.js":
+系統資源不足，無法完成要求的服務。
+Error: Build failed with 1 error
+```
+
+Windows' ERROR_NO_SYSTEM_RESOURCES (1450): handles or paged pool exhausted.
+Vite prints "ready" when the server is listening and *then* pre-bundles
+dependencies, so the log was honest and so was the timeout. The 3D view uses
+two components from `@react-three/drei` and was importing them through the
+package's barrel, which reaches all 320 of its files to find them. Naming the
+two modules directly took the pre-bundle from 28.0 MB to 18.3 MB, −35%.
+
+That reduces the pressure; it does not remove the limit, and saying otherwise
+would be a fix that is really a hope. The Windows-side remedies — a Defender
+exclusion for the repository, a reboot, closing memory-heavy applications — are
+written down in `docs/COMPETITION.md` next to the change, because the change
+alone may not be enough on a machine that is already close to the ceiling.
+
+The launcher itself was the second defect. A message that reports only a
+timeout, sitting under a log that says the server is ready, gives its reader
+nothing to do. Both launchers now try `127.0.0.1` and `localhost` alternately
+rather than exhausting one before the other, and on failure print each URL's
+curl exit and HTTP code plus `netstat` for the port. The wording changed from
+"did not start" to "did not answer", which is the thing actually observed.

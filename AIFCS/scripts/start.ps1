@@ -64,10 +64,32 @@ function Test-PortBusy {
     return [bool]$listening
 }
 
+function Wait-ForAnyHttp {
+    <#
+        The first of several URLs to answer, or $null. They are tried in turn on
+        every pass rather than one being exhausted before the next is reached:
+        "localhost" and "127.0.0.1" name the same machine but not always the
+        same address, and waiting a full minute on the wrong one before trying
+        the right one turns a working dashboard into a two-minute failure.
+    #>
+    param([string[]] $Urls, [int] $TimeoutSeconds, [System.Diagnostics.Process] $Process)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if ($Process -and $Process.HasExited) { return $null }
+        foreach ($url in $Urls) {
+            if (Wait-ForHttp $url 0 $Process) { return $url }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    return $null
+}
+
 function Wait-ForHttp {
     param([string] $Url, [int] $TimeoutSeconds, [System.Diagnostics.Process] $Process)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
+    # do/while, so a timeout of zero is one attempt rather than none — which is
+    # what Wait-ForAnyHttp wants when it is running the waiting itself.
+    do {
         if ($Process -and $Process.HasExited) { return $false }
         try {
             $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
@@ -77,8 +99,9 @@ function Wait-ForHttp {
             # connection carries no response and means "not up yet".
             if ($_.Exception.Response) { return $true }
         }
+        if ((Get-Date) -ge $deadline) { break }
         Start-Sleep -Milliseconds 500
-    }
+    } while ($true)
     return $false
 }
 
@@ -191,16 +214,38 @@ try {
         -RedirectStandardOutput $FrontOut -RedirectStandardError $FrontErr `
         -NoNewWindow -PassThru
 
-    if (-not (Wait-ForHttp "http://127.0.0.1:$FrontendPort" 60 $frontend)) {
+    # Two names for the same machine, because they are not always the same
+    # address: "localhost" resolves to the IPv6 loopback first on some Windows
+    # setups, and the dev server may be listening only on IPv4, or the reverse.
+    $frontendUrl = Wait-ForAnyHttp `
+        @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort") 60 $frontend
+    if (-not $frontendUrl) {
+        # A timeout saying only "it did not start", next to a log saying the
+        # server is ready, gives the reader nothing to act on. Say what was
+        # tried and what came back.
+        Write-Host ''
+        Write-Host '    The dashboard did not answer. What was tried:'
+        foreach ($candidate in @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort")) {
+            try {
+                $response = Invoke-WebRequest -Uri $candidate -UseBasicParsing -TimeoutSec 2
+                Write-Host "      $candidate  ->  HTTP $($response.StatusCode)"
+            } catch {
+                Write-Host "      $candidate  ->  $($_.Exception.Message)"
+            }
+        }
+        Write-Host "    Listening on ${FrontendPort}:"
+        netstat -an | Select-String ":$FrontendPort\s" | Select-Object -First 5 |
+            ForEach-Object { Write-Host "      $_" }
+        Write-Host ''
         Show-Log $FrontErr 'dashboard log'
         Show-Log $FrontOut 'dashboard output'
-        Fail 'Dashboard did not start in 60s.' '前端 60 秒內沒有啟動成功，訊息在上面。'
+        Fail 'Dashboard did not answer in 60s.' '前端 60 秒內沒有回應，訊息在上面。'
     }
 
     # --- 6. Ready -----------------------------------------------------------
-    # "localhost" can resolve to the IPv6 loopback on Windows, which the dev
-    # server does not listen on. The literal IPv4 address always works.
-    $url = "http://127.0.0.1:$FrontendPort"
+    # Whichever of the two names answered above. Which one that is depends on
+    # the machine, so it is measured rather than assumed.
+    $url = $frontendUrl
     Write-Host ''
     Write-Host '================================================================' -ForegroundColor Green
     Write-Host '  AIFCS is running.  AIFCS 已啟動。'

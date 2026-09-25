@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei/core/OrbitControls'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { sceneCentroid, sceneSpread, worldToScene } from '@/three/coordinates'
 import type { Entity } from '@/types/api'

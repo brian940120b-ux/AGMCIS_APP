@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { Html } from '@react-three/drei'
+import { Html } from '@react-three/drei/web/Html'
 import { TEAM_COLOUR, attitudeToEuler, worldToScene } from '@/three/coordinates'
 import type { Entity } from '@/types/api'
 
