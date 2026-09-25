@@ -193,7 +193,16 @@ def screened_universe(min_volume: float | None = None,
     for sym in picked:
         try:
             # 資金費歷史:缺了就補抓。specs 自己會落地快取。
-            specs.refresh_funding([sym])
+            #
+            # 2026-09-25:加上 funding_fresh() 的前置檢查。原本每次
+            # plan() 都對每個候選幣打一次網路 —— 73 個候選 = 73 次
+            # 請求,而全系統的預算是 2 次/秒。已經有的就別再要一次。
+            #
+            # ⚠️ 這一關檢查的仍然是「**有沒有**資料」,不是「抓不抓
+            # 得到」—— 第四關的意思沒有變。跳過的是重複的網路往返,
+            # 不是那道門。
+            if not specs.funding_fresh(sym):
+                specs.refresh_funding([sym])
             ok.append(sym)
         except Exception as e:                       # noqa: BLE001
             dropped.append(f"{sym}({type(e).__name__})")

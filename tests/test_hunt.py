@@ -44,7 +44,7 @@ def test_the_hypothesis_list_is_fixed_before_running():
     那時候 p 值就不是 p 值了。加一批新的可以,但必須在跑之前加完,
     而且分母跟著變大(見下面那條)。
     """
-    hyps = _hunt().hypotheses({})
+    hyps = _hunt().hypotheses({"BTC-USDT": [(0, 0.0)]})
     assert len(hyps) == 18, f"假說數量變了:{len(hyps)}"
     keys = [k for k, _, _ in hyps]
     for kind in ("macd", "kdj", "rsi", "ma", "boll", "vote"):
@@ -55,13 +55,31 @@ def test_the_hypothesis_list_is_fixed_before_running():
         assert k in keys, k
 
 
+def test_a_hypothesis_with_no_data_is_dropped_not_shown_as_a_zero():
+    """**沒有量到任何東西的格子,不是一次嘗試。**
+
+    2026-09-25 第一次跑 B2 的時候,七個幣的資金費率歷史全部抓不到,
+    而 B2 照樣出現在表上顯示 `0.00 / 0.00 / 0.0%`。那三個 0 看起來
+    像「這個假說很爛」,實際上是它一檔都沒持有過 —— 根本沒被測到,
+    卻佔了一格,還進了多重比較的分母。
+
+    根因是 specs.refresh_funding() 會把快取整個蓋掉
+    (見 tests/test_funding_cache_never_shrinks.py)。但就算根因修好,
+    這一層也要擋:**資料拿不到就不要有那一格。**
+    """
+    hyps = _hunt().hypotheses({})                    # 沒有任何費率資料
+    keys = [k for k, _, _ in hyps]
+    assert "B2資金費" not in keys, "沒有資料還把 B2 留在表上"
+    assert len(hyps) == 17
+
+
 def test_every_hypothesis_is_built_fresh_per_window():
     """工廠,不是共用物件。
 
     B4(吊燈)記得持有期間的最高點。同一個物件先跑訓練段再跑驗證段,
     狀態會從前一段漏進來 —— 驗證段就不再是乾淨的樣本外。
     """
-    hyps = _hunt().hypotheses({})
+    hyps = _hunt().hypotheses({"BTC-USDT": [(0, 0.0)]})
     for key, _, make in hyps:
         assert callable(make), key
         assert make() is not make(), f"{key} 兩次拿到同一個物件"

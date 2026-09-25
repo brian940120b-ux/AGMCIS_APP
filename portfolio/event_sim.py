@@ -70,6 +70,10 @@ class Trade:
     tp: float
     r: float                # 扣成本後的 R 倍數
     reason: str             # tp / sl / expire
+    #: 這一筆的來回成本，換算成 R。停損距離越窄，同樣的手續費就吃掉
+    #: 越多個 R —— 這個數字如果大於 1，代表「單是進出一趟就輸掉一個
+    #: 完整的風險額度」，那時候策略準不準已經不是重點了。
+    cost_r: float = 0.0
 
 
 @dataclass
@@ -99,7 +103,7 @@ def _resolve(bars: list[Bar], s: Setup, cost_pct: float) -> Trade | None:
     def done(k: int, px: float, why: str) -> Trade:
         raw = (px - entry) if s.up else (entry - px)
         return Trade(s.symbol, j, k, s.up, entry, px, s.sl, s.tp,
-                     raw / risk - cost_r, why)
+                     raw / risk - cost_r, why, cost_r)
 
     # 成交當根:先看有沒有一開盤就已經越過(跳空),再看這根剩下的走勢。
     if (s.up and entry <= s.sl) or (not s.up and entry >= s.sl):
@@ -174,6 +178,12 @@ def stats(o: Outcome) -> dict:
         "equity_pct": round(100.0 * (o.equity[-1] - 1.0), 2),
         "max_dd_pct": round(100.0 * dd, 1),
         "tp_pct": round(100.0 * sum(t.reason == "tp" for t in o.trades) / n, 1),
+        # 成本佔掉幾個 R(中位數)。**平均 R 為負的時候先看這一格。**
+        # 大於 1 就代表停損設得比來回成本還窄 —— 那是結構問題,
+        # 不是「這個型態沒有預測力」。兩者的處理方式完全不同。
+        "cost_r_med": round(statistics.median([t.cost_r for t in o.trades]), 3),
+        "gross_r": round(statistics.fmean(
+            [t.r + t.cost_r for t in o.trades]), 4),
     }
 
 

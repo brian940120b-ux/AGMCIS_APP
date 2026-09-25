@@ -285,3 +285,35 @@ class EventSim(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CostDiagnostic(unittest.TestCase):
+    """平均 R 為負的時候,要分得出「型態沒用」和「停損比成本還窄」。
+
+    2026-09-25 的實跑:L1 3387 筆、平均 -1.1068R、回撤 102.8%。
+    平均比 -1R 還糟,而停損就是 1R —— 那個差額只能從成本來。
+    表面數字跟「型態完全沒有預測力」長得一模一樣,但兩者要做的事
+    完全不同,所以這個分辨要量出來,不是用講的。
+    """
+
+    def _one(self, sl, cost):
+        bs = [bar(0, 100, 100, 100, 100),
+              bar(1, 100, 100, 100, 100),
+              bar(2, 100, 100.5, sl - 1, 100)]
+        return run(bs, [Setup(0, True, sl, 200.0, 2)], cost_pct=cost)
+
+    def test_a_tight_stop_makes_cost_exceed_a_whole_r(self):
+        wide = stats(self._one(90.0, 0.2))      # 停損 10%
+        tight = stats(self._one(99.9, 0.2))     # 停損 0.1%
+        self.assertLess(wide["cost_r_med"], 0.1)
+        self.assertGreater(tight["cost_r_med"], 1.0)
+
+    def test_gross_and_net_differ_by_exactly_the_cost(self):
+        st = stats(self._one(99.9, 0.2))
+        self.assertAlmostEqual(st["gross_r"] - st["expectancy_r"],
+                               st["cost_r_med"], places=3)
+
+    def test_gross_equals_net_when_costs_are_zero(self):
+        st = stats(self._one(90.0, 0.0))
+        self.assertEqual(st["cost_r_med"], 0.0)
+        self.assertAlmostEqual(st["gross_r"], st["expectancy_r"], places=6)

@@ -182,10 +182,34 @@ _FUND: dict = {}
 
 
 def refresh_funding(symbols: list[str], limit: int = 1000) -> int:
-    """抓每個幣實際結算過的資金費率歷史並落地。回傳總筆數。"""
+    """抓每個幣實際結算過的資金費率歷史並落地。回傳快取裡的總筆數。
+
+    ═══ 2026-09-25:這支曾經是全系統最貴的一個 bug ═══
+    首版把 `out` 從空的開始,抓完就整個蓋回去 —— 於是
+    **`refresh_funding(["BTC-USDT"])` 會把其他所有幣從快取裡刪掉。**
+
+    而 `paper.screened_universe()` 正是在迴圈裡一個一個呼叫它:
+
+        for sym in picked:
+            specs.refresh_funding([sym])      # ← 每一次都把前一次洗掉
+
+    跑完之後快取裡只剩**最後一個幣**。接著 `tick()` 走到
+    `specs.funding_rate_sum(s, ...)`,那支函式**刻意**在資料不全時
+    拋 SpecMissing(不准靜靜少收資金費美化績效)—— 於是記帳當場死掉。
+
+    這跟 2026-09-13 停機 73.7 小時是**同一個形狀**:一個篩選交易池的
+    步驟,把記帳弄死了。那次是幣沒有資金費歷史,這次是我們自己刪掉的。
+
+    修法:**合併,不覆蓋。** 與 market_data/history.py 同一條原則 ——
+    **歷史只進不出**:合併永遠是聯集,絕不因為這次沒抓它就刪掉本地已有的。
+    """
     import urllib.parse
     import urllib.request
-    out: dict[str, list] = {}
+    try:
+        out: dict[str, list] = dict(_load_funding())
+    except SpecMissing:
+        out = {}                     # 第一次跑,還沒有快取 —— 這不是錯誤
+    before = sum(len(v) for v in out.values())
     for sym in symbols:
         q = urllib.parse.urlencode({"symbol": sym, "limit": int(limit)})
         with ratelimit.urlopen(f"{FUNDING_EP}?{q}", timeout=20) as r:
@@ -200,13 +224,20 @@ def refresh_funding(symbols: list[str], limit: int = 1000) -> int:
                              "rate": float(x["fundingRate"])})
             except (KeyError, TypeError, ValueError):
                 continue
-        rows.sort(key=lambda r: r["t"])
-        out[sym] = rows
+        # 同一個幣也是聯集:交易所只給最近 1000 筆,更早的我們自己留著。
+        merged = {r["t"]: r for r in (out.get(sym) or [])}
+        merged.update({r["t"]: r for r in rows})
+        out[sym] = [merged[t] for t in sorted(merged)]
     write_json_atomic(FUNDING_CACHE,
                       {"updated": time.time(), "symbols": out})
     _FUND.clear()
     n = sum(len(v) for v in out.values())
-    log.info(f"資金費率歷史更新 {len(out)} 幣、{n} 筆結算")
+    log.info(f"資金費率歷史更新:這次抓 {len(symbols)} 幣,"
+             f"快取共 {len(out)} 幣、{n} 筆結算(之前 {before} 筆)")
+    if n < before:
+        # 合併之後總數變少 = 有東西被刪掉了。這不該發生,而且如果
+        # 發生了要當場知道,不是等記帳死掉才發現。
+        log.error(f"資金費快取縮水:{before} → {n} 筆。**這是 bug。**")
     return n
 
 
@@ -224,6 +255,26 @@ def _load_funding() -> dict:
     if not _FUND:
         raise SpecMissing("資金費率快取是空的")
     return _FUND
+
+
+def funding_fresh(symbol: str, now_ms: int | None = None) -> bool:
+    """這個幣的資金費快取是不是新到可以直接用(不必再打網路)。
+
+    交易所每 8 小時結算一次,所以「最後一筆在 16 小時內」= 夠新。
+    留兩個週期的餘裕:剛好卡在結算邊界時不會每次都判成過期。
+
+    這支存在的理由是**速率預算**:screened_universe 每次 plan() 都
+    對候選幣逐一補抓,73 個候選 = 73 次請求,而全系統只有 2 次/秒。
+    已經有的就別再要一次。
+    """
+    now_ms = now_ms or int(time.time() * 1000)
+    try:
+        rows = _load_funding().get(symbol)
+    except SpecMissing:
+        return False
+    if not rows:
+        return False
+    return (now_ms - rows[-1]["t"]) <= 16 * 3600 * 1000
 
 
 def funding_settlements(symbol: str, since_ms: int,

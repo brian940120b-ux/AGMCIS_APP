@@ -219,6 +219,14 @@ def main(argv=None) -> int:
               f"{st['expectancy_r']}R · 達標出場 {st['tp_pct']}%")
         print(f"     權益 {pct:+.2f}%(每筆風險 {RISK_PCT}%)· 回撤 {dd}%"
               f" · 隨機對照 p95 {res['ctrl_p95']}R")
+        # 平均 R 為負的時候,先問「是型態沒用,還是停損比成本還窄」。
+        # 兩者的處理方式完全不同,而表面數字長得一模一樣。
+        print(f"     扣成本前 {st['gross_r']:+.4f}R"
+              f" · 成本中位數 {st['cost_r_med']}R/筆")
+        if st["cost_r_med"] >= 1.0:
+            print(f"     ⚠️ **光是進出一趟就吃掉 {st['cost_r_med']} 個 R** ——"
+                  f" 停損設得比來回成本還窄。")
+            print(f"        這一格為負,量到的是成本結構,不是型態準不準。")
 
     print(f"\n{LINE}\n  驗收\n{LINE}")
     passed = []

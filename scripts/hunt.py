@@ -88,10 +88,22 @@ KINDS = [("macd", "MACD 12/26/9"), ("kdj", "KDJ 9/3/3"),
 def funding_history() -> tuple[dict, list[str]]:
     """{幣: [(毫秒, 費率)]},以及**沒有資料的幣**。
 
-    缺漏要回報出來,不能靜靜當成 0 —— B2 的結論如果建立在
-    「沒資料就當費率 0」上面,那它量到的是缺漏不是費率。
+    ═══ 2026-09-25:這裡曾經只是「警告一下然後照跑」═══
+    第一次跑的時候七個幣的費率歷史全部抓不到,而 B2 照樣出現在表上,
+    顯示 `0.00 / 0.00 / 0.0%`。那三個 0 看起來像「這個假說很爛」,
+    實際上是**它一檔都沒持有過** —— 根本沒被測到。
+
+    更糟的是它佔了一個假說的位置,進了多重比較的分母。一個沒有量到
+    任何東西的格子,不是一次嘗試。
+
+    所以現在:**先自己去補抓**,補不到就把 B2 整個拿掉,而不是讓它
+    留在表上裝成一個結果。
     """
     from portfolio import specs
+    try:
+        specs.refresh_funding(list(SYMBOLS))
+    except Exception as e:                           # noqa: BLE001
+        print(f"  ⚠️ 補抓資金費率失敗:{type(e).__name__}: {e}")
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     out, missing = {}, []
     for s in SYMBOLS:
@@ -130,8 +142,11 @@ def hypotheses(funding: dict) -> list:
     # ── 第二批 · 2026-09-25 ────────────────────────────
     out.append(("B1成交量", "當日量高於 20 日均量才持有",
                 lambda: volume_confirm(base())))
-    out.append(("B2資金費", "資金費率為正(多方付錢)的幣不持有",
-                lambda: funding_filter(base(), funding)))
+    if funding:
+        # **沒有資料就不要有這一格。** 一個什麼都沒量到的假說留在表上,
+        # 會被當成「試過了、不行」,而且佔掉多重比較的分母。
+        out.append(("B2資金費", "資金費率為正(多方付錢)的幣不持有",
+                    lambda: funding_filter(base(), funding)))
     out.append(("B3相對強弱", "50 日報酬跑輸 BTC 的幣不持有",
                 lambda: relative_strength(base(), "BTC-USDT", 50)))
     out.append(("B4吊燈出場", "跌破 波段高 − 3×22日ATR 就出場",
@@ -178,7 +193,8 @@ def main(argv=None) -> int:
 
     funding, missing = funding_history()
     hyps = hypotheses(funding)
-    print(f"\n{LINE}\n  獵場 · {len(hyps)} 個預先登記的假說\n{LINE}\n")
+    print(f"\n{LINE}\n  獵場 · {len(hyps)} 個假說(預先登記 18,"
+          f"資料齊全的 {len(hyps)})\n{LINE}\n")
     print(f"  現役      {STRATEGY}")
     print(f"  樣本      {len(dates)} 天 · {len(SYMBOLS)} 幣")
     print(f"  訓練段    {train_dates[0].date()} ~ {train_dates[-1].date()}")
@@ -186,11 +202,13 @@ def main(argv=None) -> int:
     print("\n  參數一律用各自領域的通行預設值,**一個都不搜** ——")
     print("  搜參數就是舊系統那 1391 次(通過 15 案,雜訊預期 52 案)。")
     if missing:
-        print(f"\n  ⚠️ B2 缺資金費率歷史的幣:{', '.join(missing)}")
+        print(f"\n  ⚠️ 缺資金費率歷史的幣:{', '.join(missing)}")
         print("     這些幣在 B2 裡一律**不持有**(不假設費率是 0)。")
-        print("     要補的話,在 VPS 上跑:")
-        print("       .venv/bin/python -c 'from portfolio import specs, paper;"
-              " specs.refresh_funding(paper.SYMBOLS)'")
+    if not funding:
+        print("\n  ✗ **B2 沒有跑** —— 一個幣的資金費率歷史都拿不到。")
+        print("     它不會出現在下面的表上,也不算進多重比較的分母。")
+        print("     一個什麼都沒量到的格子不是一次嘗試。")
+        print("     查:.venv/bin/python scripts/probe_oi_history.py")
 
     inc = ma_filter(SYMBOLS, 50)
     inc_tr_res, inc_tr = run(train_dates, idx, inc)
