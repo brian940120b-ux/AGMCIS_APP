@@ -141,50 +141,15 @@ else:
 PYEOF
 
 # ── 五、測警報(會改:真的送一則訊息)──────────────────
-step "五 / 五  測警報送不送得出去 —— 會真的送一則訊息"
-# ⚠️ 2026-09-25 修:首版直接跑 python,而 sudo bash 的環境**沒有載
-#    .env** —— 於是它印「Telegram 沒有設定」,而同一份 log 裡服務端
-#    明明在收 401。那個答案是**錯的**:它量到的是這個 shell,不是
-#    服務跑的環境。一支診斷工具給出自信而錯誤的答案,比沉默更糟。
-#    這裡先把服務用的 .env 載進來,再問。
+step "五 / 五  警報通道健檢"
+# ⚠️ 2026-09-25 第二修:原本這一段自己拼了一串 getMe / getUpdates 的
+#    排查步驟,執政官的回覆是「看不懂」。那是我的問題 —— 他用手機、
+#    不是工程師,而我把讀 JSON、拼網址的活丟給他。
+#    現在交給 telegram_doctor.py:它自己去問 Telegram,用人話講結論,
+#    而且**永遠不會印出 token**。
 if [ -f "${REPO}/.env" ]; then
-  set -a; . "${REPO}/.env" 2>/dev/null || true; set +a
-  echo "  (已載入 ${REPO}/.env —— 與服務同一份設定)"
-else
-  echo "  (找不到 ${REPO}/.env;下面問到的是這個 shell 的環境)"
+  echo "  (讀 ${REPO}/.env —— 與服務同一份設定)"
 fi
-"$PY" - <<'PYEOF'
-import sys
-sys.path.insert(0, "/root/agmcis")
-from notify.telegram import is_configured, last_delivery, send
-
-if not is_configured():
-    print("\n  這個環境裡沒有 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID。")
-    print("  ⚠️ 但這**不代表服務端也沒有** —— 服務是由 systemd 帶著")
-    print("     EnvironmentFile 啟動的。如果 journal 裡看得到 401,")
-    print("     那就是服務端有設定、而且那組設定是壞的。")
-    print("     查(**不會印出 token**):")
-    print("       systemctl show agmcis-dash -p EnvironmentFiles")
-    print("       grep -c TELEGRAM /root/agmcis/.env")
-else:
-    ok = send("AGMCIS 警報通道測試:如果你看到這一則,通道是通的。")
-    d = last_delivery()
-    print(f"\n  送出結果  {'✓ 成功' if ok else '✗ 失敗'}")
-    print(f"  紀錄      {d.get('why')}")
-    if not ok:
-        print("\n  ⚠️ **這就是 133 小時沒人知道的原因。**")
-        print("     檢修官每 10 分鐘都在報警,而每一則都卡在這裡。")
-        print("\n     要你自己處理(我做不到):")
-        print("       1. 打開 Telegram 找 @BotFather → /mybots → 確認 token")
-        print("       2. 跟你的 bot 講一句話,再開")
-        print("          https://api.telegram.org/bot<TOKEN>/getUpdates")
-        print("          看回傳裡的 chat.id 是不是跟 .env 裡的一樣")
-        print("       3. 改 /root/agmcis/.env 之後重啟:")
-        print("          sudo systemctl restart agmcis-dash")
-        print("\n     ⚠️ **不要把 token 貼進對話。** 貼腳本的輸出就好。")
-
-print("\n  不管通不通,面板狀態列現在都有「通知」那一格 ——")
-print("  警報送不出去,面板會自己說。")
-PYEOF
+"$PY" scripts/telegram_doctor.py || true
 
 printf '\n\n%s\n  跑完了。整段貼回來。\n%s\n\n' "$LINE" "$LINE"

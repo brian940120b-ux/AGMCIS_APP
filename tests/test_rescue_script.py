@@ -32,8 +32,10 @@ def test_bash_syntax_is_valid():
 
 def test_every_embedded_python_block_parses():
     """bash -n 看不見 heredoc 裡的 python。跑到那一段才爆就太遲了。"""
+    # 2026-09-25:第五段的 python 移到 scripts/telegram_doctor.py 了
+    # (原本那段自己拼 API 排查步驟,使用者看不懂),所以剩兩段。
     blocks = re.findall(r"<<'PYEOF'\n(.*?)\nPYEOF", SRC, re.S)
-    assert len(blocks) == 3, f"預期 3 段內嵌 python,實際 {len(blocks)}"
+    assert len(blocks) == 2, f"預期 2 段內嵌 python,實際 {len(blocks)}"
     for i, b in enumerate(blocks, 1):
         ast.parse(b)                                  # 語法錯就在這裡炸
 
@@ -80,8 +82,26 @@ def test_it_says_which_steps_mutate():
     assert "唯讀" in SRC
 
 
-def test_it_never_asks_for_the_token_to_be_pasted():
-    """§10 / §84:金鑰不得出現在對話、log、前端或任何輸出。"""
-    assert "不要把 token 貼進對話" in SRC
-    assert "TELEGRAM_BOT_TOKEN" not in SRC.split("getUpdates")[1], \
-        "不要在輸出裡回顯 token"
+def test_step_five_hands_the_api_work_to_the_doctor():
+    """第五段不再自己拼 API 排查步驟。
+
+    2026-09-25:原本那一段印了一串 getMe / getUpdates 的指示,
+    執政官的回覆是「看不懂」。**能自動的要自動** ——
+    讀 JSON、拼網址是機器的活,不是使用者的活。
+    """
+    assert "telegram_doctor.py" in SRC
+    # 剝掉註解再查。不剝的話,這條會被我自己寫的「原本這一段拼了
+    # getMe / getUpdates」那句說明擋下來 —— 變成在測散文,不是測
+    # 程式碼。**同一個坑我今天已經踩過一次了。**
+    code = "\n".join(ln.split("#", 1)[0] for ln in SRC.splitlines())
+    assert "getUpdates" not in code, "又把 API 的活丟回給使用者了"
+
+
+def test_it_never_echoes_the_token():
+    """§10 / §84:金鑰不得出現在對話、log、前端或任何輸出。
+
+    第五段改由 telegram_doctor.py 負責,那一支只會印遮罩過的
+    `1234…wxyz`。這裡守的是 rescue.sh 自己不要再去碰它。
+    """
+    assert "$TELEGRAM_BOT_TOKEN" not in SRC
+    assert "${TELEGRAM_BOT_TOKEN}" not in SRC
