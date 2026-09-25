@@ -152,8 +152,13 @@ def main(argv=None) -> int:
 
     syms, how = universe()
     print(f"\n{LINE}\n  SMC 獵場 · {len(LADDERS)} 套預先登記的階梯\n{LINE}\n")
-    print(f"  來源      IG @1336cryptoclub(帳號自標「AI 內容」),"
-          f"貼文未附任何績效證據")
+    print(f"  來源      IG @1336cryptoclub(帳號自標「AI 內容」)。"
+          f"貼文未附任何績效證據 ——")
+    print(f"            只有一個範例的宣稱結果,沒有樣本數、期間,"
+          f"也沒有賠錢的例子。")
+    print(f"            而且「進場乾淨」是事後判斷的 —— 這裡的規則在"
+          f"收盤那刻就決定,")
+    print(f"            賺賠一律算進統計。**比貼文本身更嚴格。**")
     print(f"  翻譯表    portfolio/smc.py 的 docstring,"
           f"跑之前就提交,跑完不改")
     print(f"  幣種      {len(syms)} 個({how})")

@@ -128,3 +128,18 @@ def test_a_short_sample_reports_the_count_and_refuses_a_verdict():
     import scripts.smc_hunt as h                       # noqa: PLC0415
     assert h.MIN_TRADES == 100
     assert "只報樣本數,不報結論" in HUNT
+
+
+def test_the_unfalsifiable_part_of_the_post_is_named_and_removed():
+    """「進場乾淨」照字面無法否證 —— 這件事要寫下來,而且要拿掉。
+
+    賺了就說進場乾淨,賠了就說那筆不算標準型態。只要「這筆算不算
+    數」可以在看到結果**之後**才決定,那套流程就永遠 100% 正確,
+    而那等於什麼都沒說。
+
+    機械化版本沒有這個退路:規則在收盤那一刻就決定,賺賠一律算進
+    統計。這條測試守的就是那個退路沒有被偷偷加回來。
+    """
+    assert "無法否證" in SMC
+    assert "一律算進統計" in SMC
+    assert "比貼文本身更嚴格" in HUNT
