@@ -47,15 +47,26 @@ if ! git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
        "Clone it instead: git clone https://github.com/brian940120b-ux/AGMCIS_APP.git"
 fi
 
-if [ -n "$(git -C "$ROOT" status --porcelain -- "$ROOT" 2>/dev/null)" ]; then
+# Only edits to tracked files can be clobbered by a fast-forward pull. Untracked
+# files are left alone by git, so they are worth mentioning but never a reason to
+# stop — leftovers from a failed download used to block the whole update here.
+if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no -- "$ROOT" 2>/dev/null)" ]; then
   echo
-  git -C "$ROOT" status --short -- "$ROOT"
+  git -C "$ROOT" status --short --untracked-files=no -- "$ROOT"
   fail "You have changes in AIFCS/ that are not committed." \
        "AIFCS/ 底下有還沒提交的修改，更新會蓋掉它們。" \
        "Save them:    git add -A AIFCS && git commit -m 'my changes'" \
        "Or throw them away: git checkout -- AIFCS"
 fi
-echo "    Nothing unsaved. / 沒有未儲存的修改。"
+
+UNTRACKED="$(git -C "$ROOT" ls-files --others --exclude-standard --directory -- "$ROOT" 2>/dev/null || true)"
+if [ -n "$UNTRACKED" ]; then
+  echo "    Nothing unsaved. Ignoring these extra files, which git does not track:"
+  echo "    沒有未儲存的修改。以下是多出來的檔案，更新不會動到它們："
+  echo "$UNTRACKED" | head -10 | sed 's|^|      |'
+else
+  echo "    Nothing unsaved. / 沒有未儲存的修改。"
+fi
 
 # --- 2. Get the new code ----------------------------------------------------
 step "Fetching the latest code / 取得最新的程式碼"
