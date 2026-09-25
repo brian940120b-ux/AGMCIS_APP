@@ -1,4 +1,4 @@
-# Put two shortcuts on the Desktop, one for the platform and one for training.
+﻿# Put two shortcuts on the Desktop, one for the platform and one for training.
 #
 # The work is here rather than in the .bat because CMD's batch parser and UTF-8
 # do not mix: `chcp 65001` fixes output but not the parsing of the file itself,

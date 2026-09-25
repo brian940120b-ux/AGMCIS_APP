@@ -238,3 +238,30 @@ def test_the_bilingual_banner_comes_from_python_not_from_the_batch_file():
 
     launcher = (SCRIPTS / "train.bat").read_bytes()
     assert all(byte < 128 for byte in launcher)
+
+
+@pytest.mark.parametrize("path", sorted(SCRIPTS.glob("*.ps1")), ids=lambda p: p.name)
+def test_a_powershell_script_with_chinese_starts_with_a_utf8_bom(path: Path):
+    """Windows PowerShell 5.1 reads a .ps1 as ANSI unless a BOM says otherwise.
+
+    On a Traditional Chinese machine that is CP950, so UTF-8 text comes out as
+    mojibake — and worse than mojibake: one of the misread bytes ended a quoted
+    string early, and the shell printed
+
+        Write-Host  AIFCS 閮毀 ???匱蝥奎鞈質?蝺?
+
+    having taken the rest of the line as arguments. start.ps1 and stop.ps1 had
+    the BOM all along; install_shortcuts.ps1, written later, did not.
+
+    ASCII-only scripts do not need one, so the requirement follows the content.
+    """
+    raw = path.read_bytes()
+    bom = b"\xef\xbb\xbf"
+    body = raw[len(bom) :] if raw.startswith(bom) else raw
+    body.decode("utf-8")  # it must be UTF-8 whatever else is true
+
+    if any(byte > 127 for byte in body):
+        assert raw.startswith(bom), (
+            f"{path.name} has non-ASCII text and no UTF-8 BOM, so PowerShell 5.1 "
+            "will decode it with the system codepage"
+        )
