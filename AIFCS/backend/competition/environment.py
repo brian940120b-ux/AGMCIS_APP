@@ -40,7 +40,12 @@ from typing import Any
 
 import numpy as np
 
-from competition.action import INITIAL_THROTTLE, JoystickState, shape_command
+from competition.action import (
+    ELEVATOR_LIMIT_HIGH_SPEED,
+    INITIAL_THROTTLE,
+    JoystickState,
+    shape_command,
+)
 from competition.scoring import (
     COLLISION_DISTANCE_M,
     CRASH_ALTITUDE_M,
@@ -98,6 +103,7 @@ class Aircraft:
         altitude_ft: float,
         heading_deg: float,
         speed_kcas: float,
+        speed_before_altitude: bool = False,
     ) -> None:
         import jsbsim
 
@@ -106,10 +112,24 @@ class Aircraft:
         self.fdm.load_model("f16")
         self.fdm.set_dt(1.0 / SIM_HZ)
 
-        self.fdm["ic/vc-kts"] = speed_kcas
+        # Order matters, and the reference has it the wrong way round. A
+        # calibrated airspeed set before the altitude is resolved at sea level,
+        # and the later altitude change preserves the true airspeed instead, so
+        # the aircraft ends up slow. Asking for 340 knots at 15,000 ft:
+        #
+        #     speed first       234 KCAS   292 KTAS   Mach 0.466
+        #     altitude first    340 KCAS   419 KTAS   Mach 0.669
+        #
+        # 106 knots, and it is why the Mach 0.8 elevator limit never fires in
+        # the reference environment: nothing there ever gets close to Mach 0.8.
+        # `speed_before_altitude` reproduces the reference for comparison.
+        if speed_before_altitude:
+            self.fdm["ic/vc-kts"] = speed_kcas
         self.fdm["ic/lat-gc-deg"] = lat_deg
         self.fdm["ic/long-gc-deg"] = lon_deg
         self.fdm["ic/h-sl-ft"] = altitude_ft
+        if not speed_before_altitude:
+            self.fdm["ic/vc-kts"] = speed_kcas
         self.fdm["ic/psi-true-deg"] = heading_deg
         self.fdm["ic/theta-deg"] = 0.0
         self.fdm["ic/phi-deg"] = 0.0
@@ -204,6 +224,59 @@ def level_opponent(target_altitude_ft: float) -> Opponent:
     return fly
 
 
+def reference_opponent(target_altitude_ft: float, target_speed_kcas: float) -> Opponent:
+    """A faithful port of the reference package's `auto_run`.
+
+    Worth having exactly rather than approximately, because it is the only
+    opponent a reference policy has ever met, and any comparison against that
+    policy is a comparison against this.
+
+    Three of its details are not obvious and all three matter:
+
+    * Its heading logic picks from `["Straight"]` — the turn options are
+      commented out in the source — so it never manoeuvres. It is a target drone.
+    * Its elevator carries a constant -0.05 bias plus a bank compensation term,
+      because an untrimmed F-16 needs back pressure to hold level.
+    * Its throttle is a PID onto a target calibrated airspeed, around a base of
+      0.5. A fixed throttle instead lets the opponent accelerate away from the
+      pursuer, which is what a first attempt at this did.
+    """
+    state = {"previous_roll_error": 0.0, "previous_pitch_error": 0.0, "previous_speed_error": 0.0}
+    dt = 1.0 / SIM_HZ
+
+    def fly(telemetry: Telemetry) -> np.ndarray:
+        altitude_error_ft = target_altitude_ft - telemetry.own_alt_ft
+        target_pitch_deg = max(min(altitude_error_ft * 0.01, 10.0), -5.0)
+
+        roll_error = 0.0 - telemetry.own_roll_deg
+        roll_rate = (roll_error - state["previous_roll_error"]) / dt
+        aileron = 0.02 * roll_error + 0.01 * roll_rate
+        state["previous_roll_error"] = roll_error
+
+        pitch_error = target_pitch_deg - telemetry.own_pitch_deg
+        pitch_rate = (pitch_error - state["previous_pitch_error"]) / dt
+        elevator = -(0.05 * pitch_error + 0.02 * pitch_rate)
+        bank_compensation = abs(math.sin(math.radians(telemetry.own_roll_deg))) * 0.2
+        elevator -= 0.05 + bank_compensation
+        state["previous_pitch_error"] = pitch_error
+
+        speed_error = target_speed_kcas - telemetry.own_vc_fps / 1.68781
+        speed_rate = (speed_error - state["previous_speed_error"]) / dt
+        throttle = 0.5 + 0.1 * speed_error + 0.01 * speed_rate
+        state["previous_speed_error"] = speed_error
+
+        return np.array(
+            [
+                max(min(aileron, 1.0), -1.0),
+                max(min(elevator, 1.0), -1.0),
+                0.0,
+                max(min(throttle, 1.0), 0.0),
+            ]
+        )
+
+    return fly
+
+
 @dataclass
 class EnvConfig:
     setup: RoundSetup = field(default_factory=RoundSetup)
@@ -216,6 +289,16 @@ class EnvConfig:
     #: policy has never used one. False reproduces that exactly.
     rudder_enabled: bool = False
     round_seconds: float = ROUND_SECONDS
+    #: 0.4 is what the competition client applies above Mach 0.8. 1.0 is what
+    #: the reference *trainer* applies, which is no limit at all — and is what
+    #: a reference policy learned to fly under.
+    high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED
+    #: True reproduces the reference's initial-condition ordering, which
+    #: leaves the aircraft 106 knots slower than asked for.
+    speed_before_altitude: bool = False
+    #: "reference" ports the package's own auto_run; "level" is a simpler
+    #: hold that flies straight on a fixed throttle and outruns the pursuer.
+    opponent: str = "reference"
 
     def describe(self) -> dict[str, Any]:
         """What a model card needs to say this policy is comparable."""
@@ -225,6 +308,9 @@ class EnvConfig:
             "speed_kcas": self.setup.speed_kcas,
             "jsbsim_root": self.jsbsim_root or "installed package",
             "rudder_enabled": self.rudder_enabled,
+            "high_speed_elevator_limit": self.high_speed_elevator_limit,
+            "speed_before_altitude": self.speed_before_altitude,
+            "opponent": self.opponent,
             "round_seconds": self.round_seconds,
             "attack_half_angle_deg": self.envelope.half_angle_deg,
             "attack_range_ft": [self.envelope.min_range_ft, self.envelope.max_range_ft],
@@ -292,6 +378,7 @@ class CompetitionRound:
             altitude_ft=altitude_ft,
             heading_deg=own_heading,
             speed_kcas=setup.speed_kcas,
+            speed_before_altitude=self.config.speed_before_altitude,
         )
         self.foe = Aircraft(
             root=root,
@@ -300,8 +387,13 @@ class CompetitionRound:
             altitude_ft=foe_altitude_ft,
             heading_deg=foe_heading,
             speed_kcas=setup.speed_kcas,
+            speed_before_altitude=self.config.speed_before_altitude,
         )
-        self.opponent = level_opponent(foe_altitude_ft)
+        self.opponent = (
+            reference_opponent(foe_altitude_ft, setup.speed_kcas)
+            if self.config.opponent == "reference"
+            else level_opponent(foe_altitude_ft)
+        )
 
         self.encoder.reset()
         self.joystick.reset()
@@ -327,7 +419,12 @@ class CompetitionRound:
     def step(self, raw_action: np.ndarray) -> tuple[np.ndarray, Geometry, bool, str]:
         """Advance one frame. Returns the new state, the geometry, and why it ended."""
         telemetry = self.telemetry()
-        command = shape_command(raw_action, self.joystick, telemetry.reference_mach)
+        command = shape_command(
+            raw_action,
+            self.joystick,
+            telemetry.reference_mach,
+            high_speed_elevator_limit=self.config.high_speed_elevator_limit,
+        )
         self.own.apply(command)
 
         # Straight to the surfaces: an opponent is part of the world, not a

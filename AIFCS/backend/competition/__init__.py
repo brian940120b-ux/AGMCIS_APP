@@ -40,6 +40,7 @@ from competition.environment import (
     action_space,
     level_opponent,
     observation_space,
+    reference_opponent,
     resolve_jsbsim_root,
 )
 from competition.protocol import (
@@ -97,6 +98,7 @@ __all__ = [
     "level_opponent",
     "observation_space",
     "position_advantage",
+    "reference_opponent",
     "resolve_jsbsim_root",
     "serve",
     "shape_command",

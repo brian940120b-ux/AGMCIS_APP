@@ -69,10 +69,17 @@ class JoystickState:
         self.last_command = np.array([0.0, 0.0, 0.0, INITIAL_THROTTLE], dtype=np.float64)
 
 
-def elevator_limit_for(reference_mach: float) -> float:
-    """The elevator authority available at this speed."""
+def elevator_limit_for(reference_mach: float, high_speed_limit: float = ELEVATOR_LIMIT_HIGH_SPEED) -> float:
+    """The elevator authority available at this speed.
+
+    `high_speed_limit` is an argument because the reference package cannot
+    agree with itself about it — the client limits, the trainer does not — and
+    a policy trained under one and flown under the other meets a control
+    authority it has never seen. Passing 1.0 reproduces the trainer exactly,
+    which is what it takes to run a reference policy on the terms it learned.
+    """
     if reference_mach > ELEVATOR_LIMIT_ABOVE_MACH:
-        return ELEVATOR_LIMIT_HIGH_SPEED
+        return high_speed_limit
     return ELEVATOR_LIMIT
 
 
@@ -80,13 +87,22 @@ def shape_command(
     raw_action: np.ndarray,
     joystick: JoystickState,
     reference_mach: float,
+    *,
+    high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
 ) -> np.ndarray:
     """One frame of stick shaping. Mutates `joystick`, returns the new command.
 
     `raw_action` is the policy's four channels: aileron, elevator, rudder,
     throttle.
     """
-    limits = np.array([AILERON_LIMIT, elevator_limit_for(reference_mach), RUDDER_LIMIT], dtype=np.float64)
+    limits = np.array(
+        [
+            AILERON_LIMIT,
+            elevator_limit_for(reference_mach, high_speed_elevator_limit),
+            RUDDER_LIMIT,
+        ],
+        dtype=np.float64,
+    )
     previous = joystick.last_command
     shaped = np.zeros(4, dtype=np.float64)
 
