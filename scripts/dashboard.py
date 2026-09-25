@@ -1397,9 +1397,12 @@ def _cohort_row() -> str:
     start, main_pct, cohort_pct, n = since(CONTROL.curve_path,
                                            PRIMARY.curve_path)
 
+    # 重疊天數做成一格數字,而不是只寫在下面那段字裡 —— 這是這組
+    # 對照**唯一會自己長大**的東西,執政官要看得到它在動。
     cells = [kv("對照組在倉", f"{got['pool']} 檔"),
              kv("記帳天數", f"{card.days} 天"),
-             kv("走完的進出", f"{card.round_trips} 次")]
+             kv("走完的進出", f"{card.round_trips} 次"),
+             kv("兩組重疊", f"{n} 天")]
     out = [head, f'<div class="grid">{"".join(cells)}</div>']
 
     if main_pct is None or cohort_pct is None:

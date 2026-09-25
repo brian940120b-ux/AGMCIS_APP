@@ -35,21 +35,51 @@ def _hunt():
 
 
 def test_the_hypothesis_list_is_fixed_before_running():
-    """13 個:5 指標 × 2 種用法 + 多數決 × 2 + 動能前一半。
+    """18 個 = 第一批 13 + 第二批 5。
+
+    第一批(2026-09-08):6 指標 × 2 種用法 + 動能前一半 = 13
+    第二批(2026-09-25):成交量 / 資金費 / 相對強弱 / 吊燈 / 低波動 = 5
 
     **清單在跑之前定死。** 跑完之後增刪清單,等於用結果挑假說 ——
-    那時候 p 值就不是 p 值了。
+    那時候 p 值就不是 p 值了。加一批新的可以,但必須在跑之前加完,
+    而且分母跟著變大(見下面那條)。
     """
-    hyps = _hunt().hypotheses()
-    assert len(hyps) == 13, f"假說數量變了:{len(hyps)}"
+    hyps = _hunt().hypotheses({})
+    assert len(hyps) == 18, f"假說數量變了:{len(hyps)}"
     keys = [k for k, _, _ in hyps]
     for kind in ("macd", "kdj", "rsi", "ma", "boll", "vote"):
         assert f"{kind}-單獨" in keys and f"{kind}-濾網" in keys
     assert "動能前一半" in keys
+    for k in ("B1成交量", "B2資金費", "B3相對強弱",
+              "B4吊燈出場", "B5低波動"):
+        assert k in keys, k
+
+
+def test_every_hypothesis_is_built_fresh_per_window():
+    """工廠,不是共用物件。
+
+    B4(吊燈)記得持有期間的最高點。同一個物件先跑訓練段再跑驗證段,
+    狀態會從前一段漏進來 —— 驗證段就不再是乾淨的樣本外。
+    """
+    hyps = _hunt().hypotheses({})
+    for key, _, make in hyps:
+        assert callable(make), key
+        assert make() is not make(), f"{key} 兩次拿到同一個物件"
+
+
+def test_the_correction_denominator_follows_the_hypothesis_count():
+    """**分母跟著假說數走,不是各批算各批。**
+
+    同一批資料、同一個決定,試過幾次就付幾次的帳。分批算就是在
+    偷偷放寬門檻 —— 而那是最難被抓到的一種作弊。
+    """
+    src = (ROOT / "scripts/hunt.py").read_text(encoding="utf-8")
+    assert "trials = len(rows)" in src, "分母必須是實際跑過的假說數"
+    assert "分母跟著變成 18" in src
 
 
 def test_no_parameter_is_searched():
-    """參數一律用 BingX App 的預設值。
+    """參數一律用各自領域的通行預設值。
 
     搜參數就是舊系統那 1391 次 —— 而它實際低於雜訊。
     """

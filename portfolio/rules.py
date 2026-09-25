@@ -26,6 +26,9 @@
 """
 from __future__ import annotations
 
+import bisect
+import statistics
+
 
 def _sma(idx: dict, sym: str, dates: list, i: int, n: int) -> float | None:
     vals = []
@@ -532,4 +535,247 @@ def top_half_by_momentum_strength(symbols: list[str], n: int = 50):
         cand.sort(key=lambda x: -x[1])
         keep = cand[:max(1, -(-len(cand) // 2))]      # 前一半,無條件進位
         return {s: 1.0 / len(keep) for s, _ in keep}
+    return f
+
+
+# ═══════════════════════════════════════════════════════════════
+#  第二批預先登記的假說 · 2026-09-25
+# ═══════════════════════════════════════════════════════════════
+#
+# 第一批(13 個教科書指標與橫截面動量)在 2026-09-20 跑完,**一個都
+# 沒過**:沒有任何一個在驗證段贏過現役的 50 日均線(0.50 Calmar)。
+# 最接近的是 MACD 兩種用法 —— 訓練段贏、回撤也最低(14.8~14.9%),
+# 但驗證段只有 0.25 / 0.40。那是過擬合最典型的形狀。
+#
+# 這一批刻意**不碰指標**,因為第一批已經把「教科書指標在這批幣上
+# 有沒有用」這個問題問完了。這五個問的是別的東西:
+#
+#   B1 成交量  突破要不要量能確認
+#   B2 資金費  擁擠的多單該不該避開       ← 這個訊號跟價格無關,是最獨立的一個
+#   B3 相對強弱 跑輸 BTC 的幣該不該持有
+#   B4 吊燈出場 出場改用移動停損會不會更好  ← 只動出場,不動進場
+#   B5 波動狀態 只在低波動期持有
+#
+# **每一個都只掛在現役策略上當濾網或出場**,不另起爐灶 —— 這樣贏了
+# 才知道贏的是那一條規則,不是整套換掉之後的綜合效果。
+#
+# 參數一律用各自領域的通行預設值(20 日均量 / 22 根 3 倍 ATR 的吊燈),
+# **一個都不搜**。驗收條件與第一批同一套,寫在 scripts/hunt.py。
+
+
+def _atr(idx: dict, sym: str, dates: list, i: int, n: int) -> float | None:
+    """真實區間均值。含第 i 日 —— ATR 是波動度量,不是突破判準,
+    用今天的波動決定今天的停損距離不構成前視偏誤。"""
+    if i < n:
+        return None
+    trs = []
+    for j in range(i - n + 1, i + 1):
+        b = idx.get(sym, {}).get(dates[j])
+        p = idx.get(sym, {}).get(dates[j - 1])
+        if not b or not p:
+            return None
+        trs.append(max(b.h - b.l, abs(b.h - p.c), abs(b.l - p.c)))
+    return sum(trs) / len(trs) if trs else None
+
+
+def volume_confirm(base_fn, n: int = 20):
+    """B1:只保留「當日成交量高於 N 日均量」的幣。
+
+    通行做法是用量能確認突破 —— 沒有量的突破被認為是假的。
+    N=20 是通行預設值,不搜。
+
+    ⚠️ 量能欄位 2026-09-10 才加進 Bar,舊快取可能是 0。量為 0 的幣
+    直接**排除**而不是放行 —— 放行等於「沒資料就當通過」,那是
+    本專案抓過好幾次的同一種錯。
+    """
+    def f(i, dates, idx):
+        w = base_fn(i, dates, idx) or {}
+        out = {}
+        for s in w:
+            b = idx.get(s, {}).get(dates[i])
+            if not b or i < n:
+                continue
+            vs = [x.v for j in range(i - n, i)
+                  if (x := idx.get(s, {}).get(dates[j]))]
+            if len(vs) < n or not all(vs) or not b.v:
+                continue                 # 沒有量能資料 = 不通過,不是通過
+            if b.v > sum(vs) / len(vs):
+                out[s] = w[s]
+        return out
+    _forward_exit(base_fn, f)
+    return f
+
+
+def funding_filter(base_fn, funding: dict):
+    """B2:當日資金費率為正(多方付錢)的幣不持有。
+
+    ═══ 為什麼這一個值得單獨試 ═══
+    前 13 個假說全部是價格的函數 —— MACD、KDJ、RSI、均線、布林,
+    算到底都是同一串收盤價的不同排列。它們互相高度相關,所以
+    「13 個都沒過」其實比較接近「一個東西沒過」。
+
+    資金費率不是價格。它是**持倉的擁擠程度**:正費率代表多單多到
+    要付錢給空單。這是這個系統目前唯一一個與價格獨立的訊號來源,
+    所以它是第二批裡最值得試的一個。
+
+    ═══ 為什麼門檻是「正負號」而不是某個數字 ═══
+    設一個門檻(前 10%、超過 0.01% 之類)就是憑空挑一個數字,
+    而那個數字事後一定可以調到好看。正負號是資料自己給的分界,
+    **零參數**。
+
+    funding: {幣: [(毫秒, 費率), ...]},由呼叫端備妥並負責回報缺漏。
+             缺資料的幣**不持有**,不假設它是 0。
+    """
+    def f(i, dates, idx):
+        w = base_fn(i, dates, idx) or {}
+        day = int(dates[i].timestamp() * 1000)
+        prev = day - 86_400_000
+        out = {}
+        for s in w:
+            rows = funding.get(s)
+            if not rows:
+                continue                 # 沒資料 = 不持有,不猜 0
+            recent = [r for t, r in rows if prev < t <= day]
+            if not recent:
+                continue
+            if sum(recent) <= 0:         # <=0:多方收錢或持平才留
+                out[s] = w[s]
+        return out
+    _forward_exit(base_fn, f)
+    return f
+
+
+def relative_strength(base_fn, bench: str, n: int = 50):
+    """B3:N 日報酬跑輸 bench(BTC)的幣不持有。
+
+    現役策略是時序動量(自己比自己的均線)。這一條加的是
+    **跨幣種的相對強弱**:同樣都站上均線,跑贏 BTC 的那些是不是
+    比較值得持有。n 沿用訊號本身的 50,不新增參數。
+
+    bench 自己不受這一條約束 —— 拿 BTC 跟 BTC 比永遠是平手。
+    """
+    def _ret(s, dates, idx, i):
+        a = idx.get(s, {}).get(dates[i - n])
+        b = idx.get(s, {}).get(dates[i])
+        return (b.c / a.c - 1) if (a and b and a.c) else None
+
+    def f(i, dates, idx):
+        w = base_fn(i, dates, idx) or {}
+        if i < n:
+            return {}
+        bm = _ret(bench, dates, idx, i)
+        if bm is None:
+            return {}                    # 基準算不出來 = 不持有,不放行
+        out = {}
+        for s in w:
+            if s == bench:
+                out[s] = w[s]
+                continue
+            r = _ret(s, dates, idx, i)
+            if r is not None and r > bm:
+                out[s] = w[s]
+        return out
+    _forward_exit(base_fn, f)
+    return f
+
+
+def chandelier(base_fn, n: int = 22, k: float = 3.0):
+    """B4:吊燈出場 —— 收盤跌破「持有期間最高價 − k×ATR」就出場。
+
+    只動**出場**,進場完全照現役。第一批 13 個假說全部在動進場,
+    而現役策略的價值本來就在回撤而不是報酬 —— 所以出場才是它
+    最該被挑戰的地方。
+
+    22 根 / 3 倍 ATR 是 Chuck LeBeau 原始版本的預設值,不搜。
+
+    ⚠️ 這條規則**有狀態**(要記得持有期間的最高點)。狀態放在
+    閉包裡,而模擬器是從頭逐日呼叫的,所以順序正確;但同一個
+    函式物件**不能拿去跑第二段日期**。hunt.py 每一段各建一次。
+    """
+    peak: dict[str, float] = {}
+    last_i = {"v": -1}
+
+    def f(i, dates, idx):
+        if i <= last_i["v"]:             # 換了一段日期軸 → 重置
+            peak.clear()
+        last_i["v"] = i
+        w = base_fn(i, dates, idx) or {}
+        out = {}
+        for s in w:
+            b = idx.get(s, {}).get(dates[i])
+            a = _atr(idx, s, dates, i, n)
+            if not b or a is None:
+                continue
+            p = max(peak.get(s, b.h), b.h)
+            if b.c < p - k * a:
+                peak.pop(s, None)        # 出場,下次重新起算
+                continue
+            peak[s] = p
+            out[s] = w[s]
+        for s in list(peak):
+            if s not in w:
+                peak.pop(s, None)
+        return out
+
+    f.exit_level = lambda sym, dates, idx, i: (
+        (peak[sym] - k * a) if (sym in peak and
+                                (a := _atr(idx, sym, dates, i, n)) is not None)
+        else None, f"跌破 波段高 − {k:g}×{n}日ATR")
+    return f
+
+
+def low_vol_only(base_fn, n: int = 50):
+    """B5:只在「自身波動低於它自己的歷史中位數」時持有。
+
+    低波動期報酬較好,是資產定價裡少數重複出現在多個市場的
+    實證規律(low-volatility anomaly)。這裡問的是它在這批幣上
+    成不成立。
+
+    ═══ 門檻為什麼是「自己的歷史中位數」═══
+    設一個絕對數字(年化 50% 以下之類)要憑空挑,而且每個幣的
+    尺度不一樣。中位數是**資料自己給的分界**,而且用的是
+    **到當日為止**的歷史 —— 不是全段的中位數。用全段的就是拿
+    未來的資訊當門檻,那是這類規則最常見的前視偏誤。
+
+    n 沿用 50,與訊號同一個窗口,不新增參數。
+    """
+    # 波動序列整條只算一次,不是每天重算一遍 —— 每天重算是
+    # O(天數 × 天數 × n),1900 天 × 7 幣要跑幾分鐘,而它算出來的
+    # 東西一模一樣。快取鍵含日期軸長度,換一段日期軸就重算。
+    cache: dict = {}
+
+    def _vols(s, dates, idx):
+        key = (s, len(dates), dates[0], dates[-1])
+        if key in cache:
+            return cache[key]
+        cs = [(j, b.c) for j in range(len(dates))
+              if (b := idx.get(s, {}).get(dates[j]))]
+        rets = [(cs[j][0], cs[j][1] / cs[j - 1][1] - 1)
+                for j in range(1, len(cs))]
+        # 同一趟就把「到當日為止的中位數」也算好(running median):
+        # 逐日插進一個排序好的串列,順手記下當下的中位數。
+        # 這樣每天只要查表,而**門檻永遠只看得到當天以前的資料**。
+        out: dict[int, tuple[float, float]] = {}
+        seen: list[float] = []
+        for j in range(n, len(rets) + 1):
+            v = statistics.pstdev([r for _, r in rets[j - n:j]])
+            bisect.insort(seen, v)
+            out[rets[j - 1][0]] = (v, statistics.median(seen))
+        cache[key] = out
+        return out
+
+    def f(i, dates, idx):
+        w = base_fn(i, dates, idx) or {}
+        if i < 2 * n:
+            return {}
+        out = {}
+        for s in w:
+            hit = _vols(s, dates, idx).get(i)
+            if hit is None:
+                continue
+            v, med = hit
+            if v <= med:
+                out[s] = w[s]
+        return out
+    _forward_exit(base_fn, f)
     return f

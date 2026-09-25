@@ -1,0 +1,315 @@
+"""
+SMC(Smart Money Concepts)的機械化定義 · 2026-09-25
+
+═══ 這支的由來 ═══
+執政官傳了一組 IG 貼文(@1336cryptoclub,帳號自己標示「AI 內容」,
+文案「用 SMC 搞定一天的餐錢」),內容是一套四步驟流程:
+
+  第一步 4H   畫出昨天高點 / 昨天低點  → 今天的流動性目標
+  第二步 15M  結構轉換 CHOCH + 下方出現看漲訂單塊(Bullish OB)→ 偏多
+  第三步 5M   等回踩訂單塊 + 拉漲後的失衡區(FVG),不追價
+  第四步      價格回補失衡區、出現吞沒陽 K → 進場做多
+  風控        停損:失衡區下方 · 止盈:4H 昨天高點
+
+貼文沒有附任何績效證據、樣本數或期間。**那不代表它錯,也不代表它對** ——
+它代表它是一個**還沒被檢驗的假說**,跟前面那 13 個一樣處理。
+
+═══ 這支為什麼必須先寫、先提交、才准跑 ═══
+SMC 在社群裡是**憑眼睛畫**的方法:同一張圖,十個人標出十組不同的
+訂單塊。那種東西回測不了 —— 不是因為它沒道理,是因為它不是一條規則。
+
+要檢驗它,得先把它翻譯成一條規則,而**翻譯本身就是選擇**。如果我
+先跑、看了結果再回頭調整「訂單塊該怎麼定義」,那我就是在搜參數,
+而且是在最不容易被抓到的地方搜 —— 因為每一次調整聽起來都像
+「我只是把它定義得更正確」。舊系統那 1391 次就是這樣長出來的。
+
+所以規矩是:**這份翻譯先寫死、先提交,然後才准跑第一次。**
+跑完不管結果好壞,定義一個字都不准改。要改就是新假說、重新計次。
+
+═══ 翻譯表(2026-09-25 寫死,對照貼文逐項)═══
+貼文用語            這裡的機械定義                            參數
+──────────────────────────────────────────────────────────────
+昨天高點 / 低點     前一個 UTC 日的最高價 / 最低價            0 個
+擺動高 / 低         分形:第 i 根的高點嚴格高於前後各 k 根     k=2
+                    ⚠️ 第 i 根的擺動要到第 i+k 根才**確認**
+結構轉換 CHOCH      收盤價突破「最近一個已確認的反向擺動點」   0 個
+                    且該突破讓趨勢狀態翻面(沒翻面的叫 BOS)
+看漲訂單塊 OB       造成突破的那一段推進之前,**最後一根陰 K**  0 個
+                    區間 = 該根的 (low, high)
+失衡區 FVG          三根 K 的定義:bars[i-2].high < bars[i].low 0 個
+                    區間 = (bars[i-2].high, bars[i].low)
+吞沒陽 K            實體吞沒:c>o 且 c>=前根 o 且 o<=前根 c     0 個
+
+k=2 是 Bill Williams 分形的教科書預設值。**這是全套唯一一個參數,
+而且不搜** —— 理由跟 hunt.py 一樣:每多搜一個參數就多一個過擬合入口。
+
+═══ 前視偏誤:這套方法最容易出錯的地方 ═══
+擺動點是「回頭看」才知道的。第 i 根是不是擺動高,要等第 i+k 根收完
+才能確定。任何在第 i 根就使用該擺動點的程式碼,回測會漂亮得不像話,
+而且**不會報錯**。所以這裡每個擺動點都帶 `confirmed_at`,
+消費端只准使用 `confirmed_at <= 當下` 的擺動點。donchian 的 `_extreme`
+當初栽在同一個坑,那次是靠註解擋下來的,這次靠型別。
+"""
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from portfolio.sim import Bar
+
+#: 分形的左右根數。教科書預設 2,**不搜**。
+FRACTAL_K = 2
+
+
+@dataclass(frozen=True)
+class Swing:
+    i: int                  # 擺動點所在的 K 棒索引
+    price: float
+    high: bool              # True=擺動高 / False=擺動低
+    confirmed_at: int       # 最早可以知道它存在的索引 = i + k
+
+
+@dataclass(frozen=True)
+class Zone:
+    lo: float
+    hi: float
+    i: int                  # 形成這個區間的 K 棒索引
+
+
+@dataclass(frozen=True)
+class Break:
+    """一次結構突破。"""
+    i: int                  # 突破的收盤 K 棒
+    up: bool                # True=向上突破
+    choch: bool             # True=CHOCH(趨勢翻面)/ False=BOS(順勢延續)
+    level: float            # 被突破的擺動點價位
+
+
+def swings(bars: list[Bar], k: int = FRACTAL_K) -> list[Swing]:
+    """分形擺動點。
+
+    第 i 根是擺動高 ⟺ 它的 high **嚴格**高於左右各 k 根的 high。
+    嚴格不等式是刻意的:平手不算突破,也不算擺動 —— 橫盤時
+    用非嚴格會標出一整排擺動點,結構訊號就變成雜訊產生器。
+    """
+    out: list[Swing] = []
+    n = len(bars)
+    for i in range(k, n - k):
+        win = bars[i - k:i + k + 1]
+        h, lo = bars[i].h, bars[i].l
+        if all(b.h < h for j, b in enumerate(win) if j != k):
+            out.append(Swing(i, h, True, i + k))
+        if all(b.l > lo for j, b in enumerate(win) if j != k):
+            out.append(Swing(i, lo, False, i + k))
+    out.sort(key=lambda s: (s.confirmed_at, s.i))
+    return out
+
+
+def breaks(bars: list[Bar], k: int = FRACTAL_K) -> list[Break]:
+    """逐根掃描,產出 CHOCH / BOS 事件。
+
+    狀態機只有三個狀態:up / down / 未定。
+      · 收盤突破「最近一個已確認的擺動高」→ 向上突破
+      · 收盤跌破「最近一個已確認的擺動低」→ 向下突破
+      · 突破方向與當前趨勢相反 = **CHOCH**(結構轉換)
+      · 方向相同 = BOS(延續),貼文要的是前者
+
+    ⚠️ 用**收盤價**判斷,不用盤中最高價。插針穿過再收回來不算突破。
+    這一條不花任何參數,而它擋掉的假突破最多 —— 與 donchian 同一條理由。
+    """
+    sw = swings(bars, k)
+    out: list[Break] = []
+    trend: str | None = None
+    hi_ref: Swing | None = None
+    lo_ref: Swing | None = None
+    p = 0
+    for i, b in enumerate(bars):
+        # 先吸收「到第 i 根為止已確認」的擺動點
+        while p < len(sw) and sw[p].confirmed_at <= i:
+            s = sw[p]
+            if s.high:
+                hi_ref = s
+            else:
+                lo_ref = s
+            p += 1
+        if hi_ref and b.c > hi_ref.price:
+            out.append(Break(i, True, trend == "down", hi_ref.price))
+            trend, hi_ref = "up", None
+        elif lo_ref and b.c < lo_ref.price:
+            out.append(Break(i, False, trend == "up", lo_ref.price))
+            trend, lo_ref = "down", None
+    return out
+
+
+def order_block(bars: list[Bar], break_i: int, up: bool,
+                max_lookback: int = 30) -> Zone | None:
+    """造成突破的推進段之前,最後一根反向 K 棒。
+
+    向上突破 → 找最後一根**陰 K**(close < open);向下突破 → 陽 K。
+    `max_lookback` 不是策略參數,是**防呆上限**:找不到就回 None,
+    而不是一路倒帶到序列開頭撿一根幾百根前的 K 棒當訂單塊。
+    """
+    for j in range(break_i, max(-1, break_i - max_lookback), -1):
+        b = bars[j]
+        if (b.c < b.o) if up else (b.c > b.o):
+            return Zone(b.l, b.h, j)
+    return None
+
+
+def fvg(bars: list[Bar], i: int, up: bool) -> Zone | None:
+    """第 i 根形成的失衡區(Fair Value Gap),三根 K 的定義。
+
+    看漲:bars[i-2].high < bars[i].low —— 中間那根跳過去了,
+    沒有人在那個價格區間成交過。**零參數,純定義。**
+    """
+    if i < 2:
+        return None
+    a, c = bars[i - 2], bars[i]
+    if up and a.h < c.l:
+        return Zone(a.h, c.l, i)
+    if not up and c.h < a.l:
+        return Zone(c.h, a.l, i)
+    return None
+
+
+def engulfing(bars: list[Bar], i: int, up: bool) -> bool:
+    """實體吞沒。用實體(open/close)不用影線 —— 這是通行定義。"""
+    if i < 1:
+        return False
+    a, b = bars[i - 1], bars[i]
+    if up:
+        return b.c > b.o and b.c >= a.o and b.o <= a.c
+    return b.c < b.o and b.c <= a.o and b.o >= a.c
+
+
+def prev_period_extremes(bars: list[Bar], now: datetime,
+                         period: str = "day") -> tuple[float, float] | None:
+    """前一個完整週期的 (最高, 最低)。貼文的「昨天高點 / 低點」。
+
+    period: day(前一個 UTC 日)/ week(前一個 ISO 週)。
+    **只用已經收完的週期** —— 用「今天到目前為止」的高點當目標,
+    是拿未來的資訊,而且它會隨著當天走勢移動。
+    """
+    if not bars:
+        return None
+    now = now.astimezone(timezone.utc)
+    if period == "week":
+        cur = now.isocalendar()[:2]
+        key = lambda t: t.astimezone(timezone.utc).isocalendar()[:2]  # noqa: E731
+    else:
+        cur = now.date()
+        key = lambda t: t.astimezone(timezone.utc).date()             # noqa: E731
+    prev = [b for b in bars if key(b.t) < cur]
+    if not prev:
+        return None
+    last = key(prev[-1].t)
+    sel = [b for b in prev if key(b.t) == last]
+    return (max(b.h for b in sel), min(b.l for b in sel))
+
+
+# ═══════════════════════════════════════════════════════════════
+#  貼文那四個步驟,接起來
+# ═══════════════════════════════════════════════════════════════
+#
+# 步驟對照(再寫一次,因為這段是整支最容易偷偷改掉的地方):
+#   1  目標   = 前一個完整週期的高 / 低(尚未被碰到的那一邊才算數)
+#   2  結構層 = CHOCH + 訂單塊
+#   3  進場層 = 回踩訂單塊 + 失衡區
+#   4  觸發   = 在失衡區裡出現吞沒 K
+#   風控      = 停損:失衡區的另一邊 · 止盈:步驟 1 的目標
+#
+# 「尚未被碰到的那一邊才算數」是貼文沒明講、但邏輯要求的:
+# 目標如果早就被穿過去了,它就不再是流動性目標,而拿一個已經在
+# 價格下方的高點當多單止盈,會得到負的風報比。這是我補的一條,
+# **而我把它寫在這裡,不是藏在程式裡。**
+
+def _bar_seconds(bars: list[Bar]) -> float:
+    if len(bars) < 2:
+        return 0.0
+    gaps = [(bars[i + 1].t - bars[i].t).total_seconds()
+            for i in range(min(20, len(bars) - 1))]
+    gaps = [g for g in gaps if g > 0]
+    return min(gaps) if gaps else 0.0
+
+
+def setups(struct: list[Bar], entry: list[Bar], *, symbol: str = "",
+           period: str = "day", both_sides: bool = False,
+           k: int = FRACTAL_K) -> list:
+    """把貼文那四步走完,產出可以交給 event_sim 的訊號。
+
+    struct  結構層 K 棒(貼文:15M)
+    entry   進場層 K 棒(貼文:5M)
+    period  流動性目標的週期(貼文:昨天 = day)
+    both_sides  False = 只做多(貼文原文)/ True = 加上鏡像做空
+
+    ⚠️ 兩個時間框的對齊:結構層第 bi 根要**收完**才算數,所以最早
+    能動作的進場棒是第一根 `t >= struct[bi].t + 一根結構棒` 的棒。
+    不這樣做就是用還沒收完的 K 棒下單 —— 回測會變好看,實單做不到。
+    """
+    from portfolio.event_sim import Setup
+
+    if len(struct) < 4 * k or len(entry) < 4:
+        return []
+    sec = _bar_seconds(struct)
+    if sec <= 0:
+        return []
+
+    def _key(t):
+        t = t.astimezone(timezone.utc)
+        return t.isocalendar()[:2] if period == "week" else t.date()
+
+    out: list = []
+    e_keys = [_key(b.t) for b in entry]
+    for br in breaks(struct, k):
+        if not br.choch:
+            continue                      # 貼文要的是 CHOCH,不是 BOS
+        if not br.up and not both_sides:
+            continue
+        ob = order_block(struct, br.i, br.up)
+        if ob is None:
+            continue
+        ready = struct[br.i].t.timestamp() + sec
+        e0 = next((j for j, b in enumerate(entry)
+                   if b.t.timestamp() >= ready), None)
+        if e0 is None or e0 >= len(entry) - 2:
+            continue
+
+        ext = prev_period_extremes(struct, entry[e0].t, period)
+        if ext is None:
+            continue
+        target = ext[0] if br.up else ext[1]
+        day = e_keys[e0]
+        # 這一段訊號活到本週期結束為止
+        expire = e0
+        while expire + 1 < len(entry) and e_keys[expire + 1] == day:
+            expire += 1
+
+        touched = False
+        zone: Zone | None = None
+        for j in range(e0, expire + 1):
+            b = entry[j]
+            if b.l <= ob.hi and b.h >= ob.lo:
+                touched = True            # 步驟 3:回踩訂單塊
+            z = fvg(entry, j, br.up)
+            if z is not None:
+                zone = z
+            if not (touched and zone):
+                continue
+            if not (b.l <= zone.hi and b.h >= zone.lo):
+                continue                  # 步驟 4 上半:價格回補失衡區
+            if not engulfing(entry, j, br.up):
+                continue                  # 步驟 4 下半:吞沒 K
+            px = b.c
+            sl = zone.lo if br.up else zone.hi
+            if (px - sl if br.up else sl - px) <= 0:
+                break
+            if (target - px if br.up else px - target) <= 0:
+                break                     # 目標已經被穿過去了,不再是目標
+            out.append(Setup(j, br.up, sl, target, expire, symbol,
+                             f"CHOCH{'多' if br.up else '空'}+OB+FVG+吞沒"))
+            break                         # 一次 CHOCH 只給一次機會
+    return out
