@@ -70,6 +70,8 @@
 | `analytics/series.py` | Stored rows to chart-ready series; cannot reach a tick | 17 |
 | `training/jobs.py` | One cancellable training job at a time, with progress | 18 |
 | `training/registry.py` | Saved policies, and whether each still means anything | 19 |
+| `core/errors.py` | One error shape, and a request id joining a 500 to its traceback | 20 |
+| `cli.py` | The `aifcs` command: doctor, serve, run, train, models, bench | 20 |
 
 ## Determinism
 

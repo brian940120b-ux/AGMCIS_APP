@@ -4,6 +4,11 @@ version = "0.1.0"
 description = "AI Flight Command & Simulation Platform — fictional multi-agent flight simulation for AI research."
 requires-python = ">=3.11"
 
+# Installing the project gives you the `aifcs` command directly. Without an
+# install, scripts/aifcs runs the same entry point out of the virtualenv.
+[project.scripts]
+aifcs = "cli:main"
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"

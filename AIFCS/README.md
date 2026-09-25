@@ -21,6 +21,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Project overview](#project-overview)
 - [Architecture](#architecture)
 - [Installation](#installation)
+- [The `aifcs` command](#the-aifcs-command)
 - [Running AIFCS](#running-aifcs)
 - [API](#api)
 - [Configuration](#configuration)
@@ -36,6 +37,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
+- [Deploying it](#deploying-it)
 - [Safety scope](#safety-scope)
 
 ---
@@ -139,6 +141,26 @@ AIFCS/
 > The Windows launcher is **not yet verified on a real Windows machine** — it
 > was written against the documented behaviour but never executed there. If it
 > fails, the error text is what to send back.
+
+### The `aifcs` command
+
+Everything the platform does without a browser, behind one name:
+
+```bash
+./scripts/aifcs doctor              # check the installation and say what is wrong
+./scripts/aifcs serve               # run the backend
+./scripts/aifcs run demo_alpha -s 60   # fly a scenario headless and report it
+./scripts/aifcs scenarios           # what can be flown
+./scripts/aifcs train --timesteps 20000
+./scripts/aifcs models              # saved policies and their verdicts
+./scripts/aifcs evaluate MODEL
+./scripts/aifcs bench               # how fast the simulation runs here
+```
+
+**Run `aifcs doctor` first when anything is wrong.** It checks Python, every
+dependency, the optional ones, whether the configs load, whether every scenario
+parses, whether the database opens and whether the frontend is installed — and
+tells you which of those failed, in about two seconds.
 
 ### Step 1 — Open a terminal and go to the project
 
@@ -1112,7 +1134,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `599 passed`, or `590 passed, 9 skipped` without the
+**Success looks like:** `655 passed`, or `646 passed, 9 skipped` without the
 optional JSBSim backend installed.
 
 ### End-to-end dashboard test
@@ -1233,9 +1255,35 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 17 | Analytics: run charts and comparison | **Complete** |
 | 18 | Training centre: start, watch and cancel a job | **Complete** |
 | 19 | Model centre: verdicts, evaluation, comparison, archive | **Complete** |
-| 20 | Production hardening | Planned |
+| 20 | Production hardening: CLI, error contract, security review | **Complete** |
 
 Detail: [`docs/PHASES.md`](docs/PHASES.md).
+
+---
+
+## Deploying it
+
+Full detail in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). The part that matters
+most:
+
+> **There is no authentication.** Not a weak scheme — none. Anyone who can reach
+> the backend can start and stop simulations, edit and delete scenarios, start
+> training jobs that consume the machine, and delete recordings and saved
+> policies.
+
+That is the right call for a tool on a researcher's laptop, where a login would
+be friction protecting nothing, and the wrong one the moment the port is
+reachable by anyone else. The default bind address is `127.0.0.1` for exactly
+this reason. Sharing it means putting an authenticating proxy in front.
+
+Two more properties worth knowing before you deploy: a training job started
+through the API will use the machine (there are ceilings in
+`configs/training.yaml`, and one job at a time), and saved policies are pickles,
+so anything dropped into `models/` executes when evaluated.
+
+Every response carries an `X-AIFCS-Request-Id`; a 500 names that id and
+deliberately does *not* include the exception text, so the operator gets a
+handle and the log keeps the detail.
 
 ---
 

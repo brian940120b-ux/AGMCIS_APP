@@ -12,6 +12,7 @@ recording cannot start, alter or interfere with a live run.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,20 @@ def _replay_directory(settings: Settings) -> Path:
     return directory if directory.is_absolute() else settings.project_root / directory
 
 
+# A run id is minted by the platform as `YYYYMMDD-HHMMSS-xxxx`. Anything else
+# is not a run id, and a path separator in one would turn every endpoint that
+# builds a filename from it into a way to reach the rest of the disk. The `path`
+# branch below was already guarded; the id branch was not, which made
+# `DELETE /api/runs/../../something` an arbitrary file delete.
+_VALID_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _require_run_id(run_id: str) -> str:
+    if not _VALID_RUN_ID.match(run_id):
+        raise HTTPException(status_code=400, detail=f"not a valid run id: {run_id!r}")
+    return run_id
+
+
 def _resolve_recording(settings: Settings, run_id: str | None, path: str | None) -> Path:
     """Turn a run id or a path into a file inside the replay directory.
 
@@ -86,6 +101,7 @@ def _resolve_recording(settings: Settings, run_id: str | None, path: str | None)
     if not run_id:
         raise HTTPException(status_code=400, detail="provide either run_id or path")
 
+    _require_run_id(run_id)
     for suffix in (".jsonl.gz", ".jsonl"):
         candidate = directory / f"{run_id}{suffix}"
         if candidate.is_file():
@@ -319,6 +335,7 @@ def run_delete(
 ) -> dict[str, Any]:
     """Delete a run's rows, and by default its recording file too."""
     repository = _require_repository(runs)
+    _require_run_id(run_id)
     if runs.active and runs.run_id == run_id:
         raise HTTPException(status_code=409, detail="that run is still recording — stop it first")
 

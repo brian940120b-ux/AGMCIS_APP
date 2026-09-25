@@ -25,6 +25,7 @@ from api.simulation import router as simulation_router
 from api.telemetry import router as telemetry_router
 from api.training import router as training_router
 from core.config import APP_TITLE, Settings, get_settings
+from core.errors import install_error_handlers
 from core.logging_config import configure_logging, get_logger
 from core.physics_backend import backend_status
 from core.runtime import get_broadcaster, get_engine, get_run_manager, get_status_registry
@@ -181,6 +182,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=settings.version,
         lifespan=lifespan,
     )
+
+    # One error shape for everything, and a request id joining a failed response
+    # to its traceback in the log (PHASE 20).
+    install_error_handlers(app)
 
     # The Vite dev server runs on a different origin during development.
     app.add_middleware(

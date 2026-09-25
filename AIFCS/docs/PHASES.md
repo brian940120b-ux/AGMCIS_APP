@@ -966,7 +966,138 @@ to its card; a policy with a stale observation layout marked INCOMPATIBLE, its
 evaluate button disabled, and its evaluation refused with 409; archive and
 restore round-tripping with the card following the policy. 599 backend tests.
 
-## PHASE 20 — Production hardening
+## PHASE 20 — Production hardening — **Complete**
 
-Performance profiling, error handling, plugin architecture polish, CLI (`aifcs`),
-deployment documentation.
+The last phase, and mostly a matter of going back over nineteen others rather
+than adding a twentieth feature.
+
+### One command
+
+`aifcs` replaces "which of these four scripts do I want":
+
+```
+aifcs doctor                    check the installation and say what is wrong
+aifcs serve                     run the backend
+aifcs run demo_alpha -s 60      fly a scenario headless and report it
+aifcs scenarios                 what can be flown
+aifcs train --timesteps 20000   train a policy
+aifcs models                    saved policies and their verdicts
+aifcs evaluate MODEL            measure one
+aifcs bench                     how fast the simulation runs here
+```
+
+`doctor` is the one that earns its place. A beginner whose dashboard will not
+load needs to know *which* part is wrong, and it checks Python, every
+dependency, the optional ones, whether the configs load, whether every scenario
+parses, whether the database opens and whether the frontend was installed — in
+about two seconds, with a line per check. A test drives it against a deliberately
+broken scenario directory, because a diagnostic that crashes on the broken
+installation it exists to diagnose is worse than none.
+
+### An error you can do something with
+
+An unhandled failure used to return the string `Internal Server Error`. Nothing
+leaked, which was the important part, but the dashboard — which reads `detail`
+from every deliberate refusal in this API — had nothing to show, and the
+traceback in the log could only be matched to the response by guessing at
+timestamps.
+
+Now every response carries `X-AIFCS-Request-Id`, every error body repeats it,
+and a 500 names it in a sentence. The exception text is still **not** returned:
+a message can carry a path, a configuration value or part of a payload, and the
+person holding a request id is not necessarily the person who should see those.
+The id is the handle; the log has the detail. Deliberate refusals keep their own
+words, and a malformed body now gets a 422 naming the field.
+
+### The security review
+
+Run over the whole branch, and it found something real.
+
+Several endpoints build a filename from an identifier that arrives in a request.
+Model ids were validated (PHASE 19) and scenario names were (PHASE 10), but
+**run ids were not**. `POST /api/replay/load` takes one in the *body*, where a
+path separator survives intact, and turned it straight into
+`data/replay/<run_id>.jsonl.gz` — an arbitrary read of any `.jsonl` file the
+process could reach. `DELETE /api/runs/{run_id}` did the same and then called
+`unlink()`.
+
+A run id is minted by the platform as `YYYYMMDD-HHMMSS-xxxx`; anything else is
+not one, and is refused by name. `test_path_safety.py` holds every identifier
+that becomes a filename to that rule, and ends with a structural check: a module
+under `api/` that joins a request value onto a directory must also name a
+validator, so the next such endpoint is caught in review rather than in a later
+security pass.
+
+The rest of the review came back clean, and is recorded here so the next person
+does not have to redo it: every YAML load is `safe_load`; the one SQL string
+built by formatting is `PRAGMA user_version = {int(version)}`, which cannot take
+a bound parameter and is coerced; no `subprocess`, `eval` or `exec` anywhere; no
+credentials in the repository; every numeric `limit` has a ceiling.
+
+Two findings that are properties rather than bugs, now written down in
+`docs/DEPLOYMENT.md` instead of being implicit: **there is no authentication at
+all**, which is the right call for a tool on a researcher's laptop and the wrong
+one the moment the port is reachable by anyone else; and **model files are
+pickles**, so anything dropped into `models/` executes on evaluation — no
+endpoint accepts an upload, but that directory is trusted input.
+
+### The Docker build, finally settled
+
+It has been carried as "unverified" since PHASE 0. The reason turned out not to
+be the registry: **this environment has the Docker client and no daemon**, so
+the images cannot be built here at all, and no amount of retrying changes that.
+
+What could be done was to check the class of mistake a build would catch, which
+found a real one: the backend image copied `backend/` and `configs/` but never
+`scenarios/`. Compose bind-mounts the scenarios in, so the stack worked and
+`docker run` of the image alone could not load a scenario. `test_docker.py` now
+checks that every `COPY` source exists, that the image carries everything it
+needs to start without a bind mount, that compose points at real Dockerfiles and
+existing mounts, that nginx proxies both `/api/` and `/ws/`, and that the
+healthcheck probes an endpoint that exists.
+
+The images still have not been *built*. That is stated in the deployment page
+rather than quietly dropped.
+
+### Measured, on this machine
+
+```
+aifcs bench
+scenario               units   us/tick   ticks/s  x real time
+demo_alpha                 4     933.4      1071        17.9x
+team_eight                 8    1990.5       502         8.4x
+```
+
+**Verified:** `aifcs doctor` reports a healthy installation and reports a broken
+scenario directory as broken rather than crashing on it; the CLI produces the
+same `state_hash` twice from the same seed, so it is not a second,
+differently-seeded way to fly; an unhandled failure returns a request id and not
+the exception text; every traversing identifier is refused. 655 backend tests,
+nine e2e suites.
+
+---
+
+## Where this leaves the platform
+
+Twenty phases, and the through-line held: **the AI never writes the truth
+state**. Every layer added since — the safety layer, the commander, the learned
+policy, the second physics backend, the analytics, the model centre — sits on
+one side or the other of that line, and each phase's tests say which.
+
+The three rules that did the most work, in the order they paid off:
+
+**A one-way pipeline makes things cheap to add.** Scoring, analytics and the
+model centre are all downstream of truth and cannot reach a tick, so a new chart
+or a new measurement carries no risk of changing how an aircraft flies. Three
+separate phases were fast because of a decision made in PHASE 1.
+
+**An honest empty state is worth more than a plausible one.** A run with no
+samples says so rather than drawing a flat line at zero; a backend that is not
+installed says so rather than falling back; a policy whose observation layout
+has moved on is refused rather than scored. Every one of those started as a
+temptation to show something reasonable.
+
+**Run it and look at it.** The layout defect that painted one panel over
+another, the stage that opened on an empty run, the model list that would not
+refresh, the header that overflowed on a phone — none of those were caught by a
+test suite that was passing. They were caught by opening the thing.

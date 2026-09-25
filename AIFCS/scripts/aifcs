@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# The aifcs command, without installing anything (PHASE 20).
+#
+#   ./scripts/aifcs doctor
+#   ./scripts/aifcs run demo_alpha -s 60
+#
+# It finds the project's virtualenv itself, so it works from any directory.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib.sh
+. "$ROOT/scripts/lib.sh"
+
+PY="$(venv_python)" || {
+  echo "No virtualenv found. Run: scripts/setup.sh" >&2
+  exit 1
+}
+exec "$PY" "$ROOT/backend/cli.py" "$@"

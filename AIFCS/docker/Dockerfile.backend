@@ -13,6 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 COPY configs/ ./configs/
+# Scenarios travel with the image. Compose bind-mounts over this so they can be
+# edited without a rebuild, but an image that cannot load a scenario on its own
+# is an image that does not run on its own.
+COPY scenarios/ ./scenarios/
 
 WORKDIR /app/backend
 
