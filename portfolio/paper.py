@@ -354,6 +354,73 @@ def benchmark_pct(a, prices: dict, now_ms: int) -> float | None:
     return bench
 
 
+def _funding_for(a, p: dict, since_ms: int, now_ms: int
+                 ) -> tuple[dict, list[str]]:
+    """逐檔算資金費。回傳 (費率表, 算不出來而被放行的幣)。
+
+    ═══ 2026-09-25:這一行曾經讓 PRIMARY 停擺 133 小時 ═══
+    原本是一行 dict comprehension:
+
+        daily_rates = {s: specs.funding_rate_sum(s, since_ms, now_ms)
+                       for s in a.positions}
+
+    而 funding_rate_sum() **刻意**在資料不全時拋 SpecMissing —— 那個
+    拒絕是對的(靜靜回 0 等於不收資金費、美化績效)。問題是沒有人接,
+    所以只要持倉裡有**任何一檔**沒有費率歷史,整個 tick() 當場死掉,
+    而它後面的每一件事都不會發生 —— **包括賣掉那一檔**。
+
+    於是形成死結:那一檔進不了資金費這一關,就永遠輪不到出場那一關,
+    於是明天還在,後天還在。實測:48 檔裡有 5 檔(BLUR / FLOKI /
+    GALA / ICP / RUNE)沒有費率歷史,而池子上限是 10 —— 它卡在
+    2026-09-19,一動也不動了五天半。
+
+    ═══ 分辨兩種「算不出來」═══
+    **這一檔還要不要留?** 這才是關鍵,而不是「有沒有資料」:
+
+    · **它在今天的交易池裡** → 第四關(資料齊全)漏了它。那是真的
+      錯誤,照舊拋例外。用不完整的資料替一個要繼續持有的部位記帳,
+      正是這座城邦一路在防的事。
+
+    · **它不在今天的交易池裡** → 它今天本來就要被賣掉。補抓一次,
+      還是沒有的話,這一檔這一輪記 0、**log.error 出來**、寫進
+      funding_gaps 讓面板看得見,然後讓出場那一關去處理它。
+      少收的範圍是「一檔、一輪」,而且是**看得見的**;
+      代價相對於「整本帳停擺」小到不成比例。
+
+    **這不是把拒絕放寬。** 拒絕仍然在,只是把「不能記帳」和
+    「不能出場」解耦 —— 一筆記不了帳的部位,應該被關掉,不是被凍結。
+    """
+    keep = set(p.get("symbols") or [])
+    rates: dict[str, float] = {}
+    gaps: list[str] = []
+    for s in a.positions:
+        try:
+            rates[s] = specs.funding_rate_sum(s, since_ms, now_ms)
+            continue
+        except specs.SpecMissing:
+            pass
+        try:                                  # 缺了就補抓一次再試
+            specs.refresh_funding([s])
+            rates[s] = specs.funding_rate_sum(s, since_ms, now_ms)
+            continue
+        except Exception:                     # noqa: BLE001
+            pass
+        if s in keep:
+            # 還要繼續持有卻沒有資料 —— 第四關漏了。這是真的錯誤。
+            raise specs.SpecMissing(
+                f"{s} 在今天的交易池裡,卻沒有資金費率歷史 —— "
+                "screened_universe 的第四關漏了它。不用不完整的資料記帳。")
+        rates[s] = 0.0
+        gaps.append(s)
+    if gaps:
+        log.error(
+            "這一輪有 %d 檔收不到資金費,已記 0 並準備出場:%s —— "
+            "它們不在今天的交易池裡,所以不讓它們擋住整本帳。"
+            "少收的範圍是一檔一輪,而且寫進 funding_gaps 看得見。",
+            len(gaps), "、".join(gaps))
+    return rates, gaps
+
+
 def plan(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     """算出今日該下的單,**不執行**。面板與 Telegram 用這個預覽。
 
@@ -449,8 +516,7 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
     # 跨日不會漏收。
     now_ms = int(now.timestamp() * 1000)
     since_ms = a.funding_through_ms or (now_ms - 24 * 3600 * 1000)
-    daily_rates = {s: specs.funding_rate_sum(s, since_ms, now_ms)
-                   for s in a.positions}
+    daily_rates, gaps = _funding_for(a, p, since_ms, now_ms)
     fund = a.charge_funding(prices, daily_rates)
     a.funding_through_ms = now_ms
 
@@ -605,6 +671,9 @@ def tick(now: datetime | None = None, cfg: "Config | None" = None) -> dict:
             # 交易池:主城是固定七幣,測試組每天重篩 —— 那個數字本身
             # 就是「篩選有沒有在動」的證據,所以要回得出來。
             "symbols": list(p.get("symbols") or []),
+            # 這一輪有哪幾檔收不到資金費(記 0 並準備出場)。
+            # **少收的東西要看得見**,不然它就跟沒少收一樣。
+            "funding_gaps": gaps,
             "holdings": sorted(a.positions), "orders": filled,
             "realized_pnl": a.realized_pnl,
             "unrealized_pnl": a.unrealized(prices),

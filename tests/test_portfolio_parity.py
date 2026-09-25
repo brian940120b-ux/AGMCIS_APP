@@ -134,13 +134,23 @@ def test_benchmark_and_portfolio_use_the_same_funding_source():
     因為它不會讓任何數字看起來不合理。
     """
     src = Path(paper.__file__).read_text(encoding="utf-8")
-    # 組合這一側:tick() 裡收資金費的那一段
+    # 組合這一側:tick() 收資金費的那一段。
+    # 2026-09-25 那段抽成 _funding_for() 了(為了讓收不到費率的部位
+    # 能夠出場而不是凍住整本帳),所以這裡跟著它走進去 ——
+    # **要守的不是那行程式碼待在哪個函式,是兩邊用同一個來源。**
     tick_body = src[src.index("def tick("):]
-    assert "specs.funding_rate_sum" in tick_body, \
+    assert "_funding_for(" in tick_body, \
+        "tick() 必須經由 _funding_for() 取資金費"
+    helper = src[src.index("def _funding_for("):src.index("def plan(")]
+    assert "specs.funding_rate_sum" in helper, \
         "組合的資金費必須用交易所實際結算值"
     # 基準這一側:同一個來源
     assert "specs.funding_rate_sum" in _benchmark_source(src), \
         "基準的資金費必須用同一個來源(交易所實際結算值)"
+    # 而且**只有被放掉的那一檔**可以記 0 —— 要留著的仍然拋例外,
+    # 否則「同一把尺」就從這個縫溜走了。
+    assert "raise specs.SpecMissing(" in helper, \
+        "還要繼續持有卻沒有費率資料時,必須照舊拒絕記帳"
 
 
 def test_the_benchmark_formula_exists_exactly_once():

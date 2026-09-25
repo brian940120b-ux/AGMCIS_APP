@@ -65,13 +65,27 @@ def logs() -> None:
     print(f"\n{LINE}\n  二、每個 unit 最近的錯誤(不猜名字,問出來的)\n{LINE}")
     raw = _run(["systemctl", "list-units", "--all", "--no-pager",
                 "--no-legend", "agmcis*"])
-    names = [ln.split()[0] for ln in raw.splitlines()
-             if ln.strip() and ln.split()[0].startswith("agmcis")]
+    # ⚠️ 2026-09-25:首版寫 `ln.split()[0].startswith("agmcis")`,
+    # 而 systemctl 會在**失敗**的 unit 前面加一個 ● 標記 —— 於是
+    # 第一個欄位變成 "●",判斷不成立,**剛好把三個 failed 的 unit
+    # 全部跳過**(archivist / sentinel / trial)。
+    #
+    # 一支「找出哪裡壞了」的工具,偏偏漏掉壞掉的那幾個,比沒有這支
+    # 還糟 —— 因為它會讓人以為查過了。這跟這支自己 docstring 寫的
+    # 「沒查出來不等於沒有」是同一個錯,而我在同一個檔案裡犯了它。
+    names = []
+    for ln in raw.splitlines():
+        for tok in ln.split():
+            if tok.startswith("agmcis"):
+                names.append(tok)
+                break
     if not names:
         print("\n  沒有 unit 可以查。")
         return
     for n in names:
         print(f"\n  ── {n} ──")
+        state = _run(["systemctl", "is-active", n]) or "?"
+        print(f"    狀態 {state}")
         out = _run(["journalctl", "-u", n, "-n", "400", "--no-pager"])
         hits = [ln for ln in out.splitlines()
                 if any(k in ln for k in
@@ -116,7 +130,11 @@ def ledgers() -> None:
                         continue
                     n += 1
                     try:
-                        last = json.loads(ln).get("ts") or last
+                        # 欄位叫 "t" 不是 "ts"(paper.py 的 _append)。
+                        # 首版找錯 key,於是兩組都印 None —— 一個
+                        # 看起來像「沒有時間戳」的空值,實際上是我問錯。
+                        row = json.loads(ln)
+                        last = row.get("t") or row.get("ts") or last
                     except json.JSONDecodeError:
                         continue
         except OSError as e:
