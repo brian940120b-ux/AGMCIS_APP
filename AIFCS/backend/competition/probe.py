@@ -35,6 +35,7 @@ import argparse
 import itertools
 import json
 import math
+import struct
 import sys
 import threading
 import time
@@ -191,6 +192,84 @@ def _separation_ft(frame: dict[str, Any]) -> float:
     return float(math.sqrt(north * north + east * east + up * up)) / FT_TO_M
 
 
+def selftest(args: argparse.Namespace) -> int:
+    """Send this probe synthetic packets and check the replies come back.
+
+    Answers the one question a silent session leaves: is the probe listening and
+    replying, or is nothing arriving? Those need opposite fixes — one is a bug
+    here, the other is the host, its ports or the firewall — and without this
+    they look identical from the terminal.
+    """
+    import socket as socket_module
+
+    print("self-test: sending synthetic packets to this probe\n")
+    recorder = Recorder()
+    client = CompetitionClient(LevelPolicy(), observer=recorder)
+    endpoint = Endpoint(
+        listen_ip=args.listen_ip,
+        listen_port=args.listen_port,
+        host_ip=args.host_ip,
+        host_port=args.host_port,
+    )
+
+    pretend_host = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
+    pretend_host.settimeout(3.0)
+    try:
+        pretend_host.bind((args.host_ip, args.host_port))
+    except OSError as exc:
+        print(f"FAIL  could not bind {args.host_ip}:{args.host_port} — {exc}")
+        print("      something else is using the host port; close it and try again")
+        return 1
+
+    listening = threading.Event()
+    stop = threading.Event()
+    worker = threading.Thread(
+        target=serve,
+        args=(client, endpoint),
+        kwargs={"timeout_s": 0.2, "ready": listening, "stop": stop},
+        daemon=True,
+    )
+    worker.start()
+    if not listening.wait(timeout=5.0):
+        print(f"FAIL  could not listen on {args.listen_ip}:{args.listen_port}")
+        return 1
+    print(f"  OK  listening on {args.listen_ip}:{args.listen_port}")
+
+    sender = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
+    replies = 0
+    try:
+        for frame in range(120):
+            values = np.zeros(26, dtype=np.float64)
+            values[0] = 23.060552 + (frame * 1e-5 if frame > 30 else 0.0)
+            values[1] = 121.948555
+            values[2] = 15_000.0
+            values[12] = values[13] = 574.0
+            values[20] = values[0] + 0.008
+            values[21] = 121.948555
+            values[22] = 15_000.0
+            sender.sendto(struct.pack("<26d", *values), (args.listen_ip, args.listen_port))
+            try:
+                pretend_host.recvfrom(4096)
+                replies += 1
+            except TimeoutError:
+                break
+    finally:
+        stop.set()
+        worker.join(timeout=3.0)
+        sender.close()
+        pretend_host.close()
+
+    print(f"  OK  {replies} of 120 synthetic frames were answered")
+    print(f"  OK  {len(recorder.frames)} frames recorded, {client.stats.rounds_seen} round(s) seen")
+    if replies < 120:
+        print("\nFAIL  the probe did not answer every frame")
+        return 1
+    print("\nPASS  the probe listens, decides and replies.")
+    print("      A silent session against the real host is therefore the host,")
+    print("      its ports, or the firewall — not this program.")
+    return 0
+
+
 def run(args: argparse.Namespace) -> int:
     recorder = Recorder()
     client = CompetitionClient(LevelPolicy(), observer=recorder)
@@ -207,27 +286,42 @@ def run(args: argparse.Namespace) -> int:
     print("Ctrl+C to stop early\n")
 
     listening = threading.Event()
+    stop = threading.Event()
     worker = threading.Thread(
         target=serve,
         args=(client, endpoint),
-        kwargs={"timeout_s": args.idle_timeout, "ready": listening},
+        # Wakes once a second to notice `stop`, and waits through any amount of
+        # silence: launching the host, pressing INIT, waiting for both players
+        # and pressing START takes as long as it takes.
+        kwargs={"timeout_s": 1.0, "ready": listening, "stop": stop},
         daemon=True,
     )
     worker.start()
     listening.wait(timeout=5.0)
 
     deadline = time.time() + args.seconds
+    waiting_since = time.time()
     try:
         while worker.is_alive() and time.time() < deadline:
             time.sleep(1.0)
-            print(
-                f"  {client.stats.packets_received:6d} packets, "
-                f"round {client.stats.rounds_seen}, "
-                f"frame {client.stats.frames_this_round}",
-                end="\r",
-            )
+            if client.stats.packets_received == 0:
+                print(
+                    f"  waiting for the host… {time.time() - waiting_since:.0f}s "
+                    f"(start it and press INIT, then START)",
+                    end="\r",
+                )
+            else:
+                print(
+                    f"  {client.stats.packets_received:6d} packets, "
+                    f"round {client.stats.rounds_seen}, "
+                    f"frame {client.stats.frames_this_round}          ",
+                    end="\r",
+                )
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        stop.set()
+        worker.join(timeout=3.0)
 
     report = {
         "recorded_at": datetime.now(UTC).isoformat(),
@@ -261,10 +355,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host-ip", default="127.0.0.1")
     parser.add_argument("--host-port", type=int, default=8099)
     parser.add_argument("--seconds", type=float, default=420.0)
-    parser.add_argument("--idle-timeout", type=float, default=60.0)
     parser.add_argument("--output", default="data/probe")
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="check this probe answers synthetic packets, without the host",
+    )
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
-    raise SystemExit(run(parse_args()))
+    _args = parse_args()
+    raise SystemExit(selftest(_args) if _args.selftest else run(_args))

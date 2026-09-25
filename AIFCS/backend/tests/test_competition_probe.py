@@ -220,3 +220,25 @@ def test_the_probe_flies_a_round_against_a_host_and_reports_on_it():
     assert report["initial"]["separation_ft"] > 0
     # The handshake has to have gone 1 then 2, or the host would never start.
     assert 1 in host.states_seen and 2 in host.states_seen
+
+
+def test_the_self_test_passes_against_itself():
+    """It has to be trustworthy, since it is what a silent session is judged by."""
+    from competition.probe import parse_args, selftest
+
+    args = parse_args(["--listen-port", str(_free_port()), "--host-port", str(_free_port())])
+    assert selftest(args) == 0
+
+
+def test_the_self_test_fails_when_the_host_port_is_taken():
+    """The one local cause it can distinguish: something else holds the port."""
+    from competition.probe import parse_args, selftest
+
+    host_port = _free_port()
+    squatter = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    squatter.bind(("127.0.0.1", host_port))
+    try:
+        args = parse_args(["--listen-port", str(_free_port()), "--host-port", str(host_port)])
+        assert selftest(args) == 1
+    finally:
+        squatter.close()

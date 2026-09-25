@@ -25,6 +25,24 @@
 1. 主辦方的資料夾放在你找得到的地方，例如 `C:\AirCombat_Train_Test`
 2. 確認裡面有 `D.比賽用主辦方連線程式.../JSB_host_GUI_publish.exe`
 
+### 步驟 0 — 先確認探針本身沒問題（10 秒）
+
+```bash
+cd ~/AGMCIS_APP/AIFCS
+.venv/Scripts/python.exe backend/competition/probe.py --selftest
+```
+
+要看到：
+
+```
+  OK  listening on 127.0.0.1:8199
+  OK  120 of 120 synthetic frames were answered
+PASS  the probe listens, decides and replies.
+```
+
+**看到 PASS 之後，任何「收不到封包」就一定是 HOST、port 或防火牆，不是這支程式。**
+這一步存在是因為第一次實測時收到 0 個封包，而當下沒有辦法分辨是哪一邊的問題。
+
 ### 步驟 1 — 先開我們的程式
 
 開一個 **Git Bash**，貼：
@@ -40,9 +58,11 @@ cd ~/AGMCIS_APP/AIFCS
 listening on 127.0.0.1:8199
 replying to  127.0.0.1:8099
 recording for up to 420 s — start the host and press INIT, then START
+
+  waiting for the host… 12s (start it and press INIT, then START)
 ```
 
-**這個視窗不要關。**
+**這個視窗不要關。** 它會一直等到 420 秒為止，慢慢來沒關係 —— 早期版本會在安靜 60 秒後自己收工，而那比啟動 HOST、按 INIT、等雙方初始化、再按 START 需要的時間還短。
 
 ### 步驟 2 — 開主辦方的 HOST
 
@@ -130,7 +150,12 @@ data/probe/probe-20261107-xxxxxx.jsonl   ← 每一幀的原始記錄
    ```
 3. Windows 防火牆：控制台 → Windows Defender 防火牆 → 允許應用程式，確認 `python.exe` 和 HOST 都被允許
 
-**報告說 `no packets arrived`：** 封包一個都沒到，就是上面那三項之一。
+**報告說 `no packets arrived`：** 先跑步驟 0 的 `--selftest`。
+
+- `--selftest` **PASS** → 探針正常，問題在 HOST／port／防火牆，照上面三項查
+- `--selftest` **FAIL** → 問題在我們這邊，把輸出貼給我
+
+`--seconds` 不夠長也會這樣。要更多時間就加大，例如 `--seconds 900`。
 
 ---
 

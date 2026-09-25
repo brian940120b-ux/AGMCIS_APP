@@ -18,6 +18,7 @@ import math
 import socket
 import struct
 import threading
+import time
 
 import numpy as np
 import pytest
@@ -325,3 +326,59 @@ def test_realtime_setup_reports_what_it_did_and_never_raises():
 
     torch = pytest.importorskip("torch")
     assert torch.get_num_threads() == 1
+
+
+def test_silence_is_not_a_reason_to_stop_listening():
+    """The host is started by hand, and that takes longer than any timeout.
+
+    An earlier version treated one socket timeout as the end of the session and
+    gave up after a minute of quiet — which is less than it takes to launch the
+    host, press INIT, wait for both players to initialise and press START. The
+    first real attempt at a probe recorded zero packets for exactly this reason.
+    """
+    listen_port = _free_udp_port()
+    host_port = _free_udp_port()
+    host = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    host.bind(("127.0.0.1", host_port))
+    host.settimeout(5.0)
+
+    client = CompetitionClient(level_flight())
+    endpoint = Endpoint(
+        listen_ip="127.0.0.1",
+        listen_port=listen_port,
+        host_ip="127.0.0.1",
+        host_port=host_port,
+    )
+    listening = threading.Event()
+    stop = threading.Event()
+    worker = threading.Thread(
+        target=serve,
+        args=(client, endpoint),
+        kwargs={"timeout_s": 0.05, "ready": listening, "stop": stop},
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert listening.wait(timeout=5.0)
+        # Several socket timeouts pass with nothing arriving.
+        time.sleep(0.4)
+        assert worker.is_alive(), "it should still be listening"
+
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sender.sendto(observation(own_lat=23.06, enemy_lat=23.07), ("127.0.0.1", listen_port))
+        reply, _ = host.recvfrom(4096)
+        sender.close()
+        assert decode_command(reply).player_state is PlayerState.INITIALISED
+    finally:
+        stop.set()
+        worker.join(timeout=5)
+        host.close()
+
+
+def test_a_caller_that_wants_to_give_up_on_silence_still_can():
+    listen_port = _free_udp_port()
+    client = CompetitionClient(level_flight())
+    endpoint = Endpoint(listen_ip="127.0.0.1", listen_port=listen_port, host_port=_free_udp_port())
+    started = time.monotonic()
+    serve(client, endpoint, timeout_s=0.05, give_up_after_idle_s=0.2)
+    assert time.monotonic() - started < 3.0

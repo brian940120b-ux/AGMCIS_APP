@@ -306,6 +306,8 @@ def serve(
     max_frames: int | None = None,
     timeout_s: float | None = None,
     ready: threading.Event | None = None,
+    stop: threading.Event | None = None,
+    give_up_after_idle_s: float | None = None,
 ) -> ClientStats:
     """Receive, decide, reply, until stopped.
 
@@ -314,8 +316,16 @@ def serve(
     answer — on the day that gap is between launching the client and pressing
     INIT, and nobody would notice; in a test it is a race that fails sometimes.
 
-    `max_frames` and `timeout_s` exist so a test can run a bounded loop; on the
-    day both are None and the loop ends when the operator ends it.
+    Silence is not a reason to stop. `timeout_s` is how often the socket wakes
+    up to check whether it has been asked to stop, and nothing more:
+    the operator has to launch the host, press INIT, wait for both players to
+    initialise and then press START, which takes as long as it takes. An earlier
+    version treated one socket timeout as the end of the session and gave up
+    after a minute of quiet — before the host had sent its first packet.
+    `give_up_after_idle_s` restores that behaviour for a caller that wants it.
+
+    `max_frames` and `stop` exist so a test or a supervisor can bound the loop;
+    on the day both are None and the loop ends when the operator ends it.
     """
     endpoint = endpoint or Endpoint()
     log.info(
@@ -338,12 +348,23 @@ def serve(
             "host": f"{endpoint.host_ip}:{endpoint.host_port}",
         },
     )
+    last_packet_at = time.monotonic()
     try:
         while max_frames is None or client.stats.packets_received < max_frames:
+            if stop is not None and stop.is_set():
+                break
             try:
                 payload, _ = inbound.recvfrom(endpoint.buffer_bytes)
             except TimeoutError:
-                break
+                idle_s = time.monotonic() - last_packet_at
+                if give_up_after_idle_s is not None and idle_s > give_up_after_idle_s:
+                    log.info(
+                        "no packets for a while, stopping",
+                        extra={"event": "COMPETITION_CLIENT_IDLE", "idle_s": round(idle_s, 1)},
+                    )
+                    break
+                continue
+            last_packet_at = time.monotonic()
             reply = client.on_observation(payload)
             if reply is not None:
                 outbound.sendto(reply, (endpoint.host_ip, endpoint.host_port))
