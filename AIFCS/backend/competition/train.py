@@ -1,16 +1,20 @@
-"""Training entry point for the competition policy.
+"""Training that resumes: start it, stop it, shut the machine down, carry on.
 
-    python backend/competition/train.py --algorithm ppo --timesteps 200000
+    python backend/competition/train.py --name run1 --timesteps 5000000
 
-Run as a module with a `__main__` guard, which is not a style preference:
-`SubprocVecEnv` starts each worker as a fresh interpreter on Windows, and each
-worker re-imports the launching module. Without the guard the script re-runs
-itself, spawns more workers, and the machine stops.
+`--timesteps` is a **total**, not an increment. Run that line on a session with
+three million steps and it trains two million more; run it again and it says the
+target is met and stops. "Train until it has had five million steps" is the
+sentence someone means, and it is the one that survives being run twice.
 
-Every run records what it was trained against — reward, opponent, initial
-conditions, which F-16, whether the rudder was unlocked — because none of those
-are obvious from a `.zip` and a policy is only meaningful against the
-environment that shaped it.
+Nothing survives a shutdown except what is on disk, so a checkpoint goes down
+every `--checkpoint-every` steps and on the way out of any exit that is not a
+power cut — Ctrl+C included. Losing the process costs one interval.
+
+Run it as a file, with the `__main__` guard it has: `SubprocVecEnv` starts each
+worker as a fresh interpreter on Windows, and each worker re-imports the
+launching module. Without the guard the script re-runs itself and spawns workers
+that spawn workers.
 """
 
 from __future__ import annotations
@@ -22,12 +26,23 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-if __package__ in (None, ""):  # running the file directly
+if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from competition.environment import EnvConfig, RoundSetup
 from competition.gym_env import make_vec_env
 from competition.rewards import RewardMode
+from competition.session import (
+    IncompatibleSession,
+    KeepAwake,
+    Session,
+    SessionState,
+    checkpoint_callback,
+    describe_progress,
+    human_duration,
+    save_checkpoint,
+    tensorboard_log_dir,
+)
 
 ALGORITHMS = ("ppo", "sac")
 
@@ -43,102 +58,173 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
     )
 
 
-def train(args: argparse.Namespace) -> Path:
+def train(args: argparse.Namespace) -> int:
     import torch as th
     from stable_baselines3 import PPO, SAC
 
     config = build_config(args)
-    env = make_vec_env(args.workers, config, args.reward, seed=args.seed)
+    session = Session(Path(args.output) / args.name)
+    wanted = SessionState(
+        name=args.name,
+        algorithm=args.algorithm,
+        target_timesteps=args.timesteps,
+        reward=str(args.reward),
+        environment=config.describe(),
+        seed=args.seed,
+        workers=args.workers,
+        created_at=datetime.now(UTC).isoformat(),
+    )
 
+    existing = session.read_state()
+    if existing is not None:
+        session.check_compatible(existing, wanted)
+        state = existing
+        state.target_timesteps = args.timesteps
+        state.workers = args.workers
+        remaining = args.timesteps - state.timesteps_done
+        print(f"resuming {args.name}: {describe_progress(state, None)}")
+        if remaining <= 0:
+            print(f"target already met after {human_duration(state.wall_clock_s)} of training")
+            return 0
+        print(f"training {remaining:,} more steps\n")
+    else:
+        state = wanted
+        print(f"starting {args.name}: {args.timesteps:,} steps\n")
+
+    env = make_vec_env(args.workers, config, args.reward, seed=args.seed + state.runs)
     policy_kwargs = {"net_arch": [256, 256], "activation_fn": th.nn.Tanh}
     common = {
-        "policy": "MlpPolicy",
         "env": env,
-        "seed": args.seed,
         "verbose": 1,
         "device": args.device,
-        "policy_kwargs": policy_kwargs,
+        "tensorboard_log": tensorboard_log_dir(session.root),
     }
+    algorithm = PPO if args.algorithm == "ppo" else SAC
+
     model: PPO | SAC
-    if args.algorithm == "ppo":
-        model = PPO(n_steps=args.n_steps, batch_size=args.batch_size, **common)
+    if session.exists:
+        # The policy, its optimiser and — for SAC — everything it has seen.
+        model = algorithm.load(session.model_path, **common)
+        model.set_env(env)
+        if isinstance(model, SAC):
+            if session.buffer_path.is_file():
+                model.load_replay_buffer(session.buffer_path)
+                size_mb = session.buffer_path.stat().st_size / 1e6
+                print(f"replay buffer restored ({size_mb:.0f} MB)")
+            else:
+                # PPO has no buffer to lose; SAC's is most of what it knows, and
+                # resuming without it keeps the policy and restarts the experience.
+                print("no replay buffer on disk — SAC restarts its experience, not its policy")
     else:
-        # SAC has no n_steps: it learns from a replay buffer, not from rollouts.
-        model = SAC(batch_size=args.batch_size, **common)
+        extra = {"n_steps": args.n_steps} if args.algorithm == "ppo" else {}
+        model = algorithm(
+            "MlpPolicy",
+            seed=args.seed,
+            batch_size=args.batch_size,
+            policy_kwargs=policy_kwargs,
+            **common,
+            **extra,
+        )
+
+    remaining = args.timesteps - state.timesteps_done
+    state.runs += 1
+    callback = checkpoint_callback(session, state, args.checkpoint_every, args.save_buffer)
 
     started = time.perf_counter()
-    model.learn(total_timesteps=args.timesteps, progress_bar=False)
-    elapsed = time.perf_counter() - started
+    interrupted = False
+    try:
+        with KeepAwake():
+            model.learn(
+                total_timesteps=remaining,
+                reset_num_timesteps=True,
+                progress_bar=False,
+                callback=callback,
+            )
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\nstopped — saving before exit")
+    finally:
+        elapsed = time.perf_counter() - started
+        # The callback's own counter is the authority on steps taken this run.
+        save_checkpoint(
+            model,
+            session,
+            state,
+            steps_this_run=int(getattr(callback, "num_timesteps", 0)),
+            started_steps=callback.started_steps,
+            elapsed_s=elapsed,
+            save_buffer=args.save_buffer,
+        )
+        env.close()
 
-    directory = Path(args.output)
-    directory.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    name = f"comp-{args.algorithm}-{stamp}"
-    model_path = directory / f"{name}.zip"
-    model.save(model_path)
+    rate = (state.timesteps_done - callback.started_steps) / elapsed if elapsed else None
+    print(f"\n{describe_progress(state, rate)}")
+    if rate:
+        print(f"this run: {rate:.0f} steps/s over {human_duration(elapsed)}")
+    print(f"session:  {session.root}")
+    if state.timesteps_done < state.target_timesteps:
+        print("\nrun the same command again to carry on — it resumes from here.")
+    else:
+        _write_card(session, state)
+        print(f"card:     {session.card_path}")
+    return 130 if interrupted else 0
 
-    card = {
-        "training_id": name,
-        "algorithm": args.algorithm,
-        "requested_timesteps": args.timesteps,
-        "trained_timesteps": int(getattr(model, "num_timesteps", args.timesteps)),
-        "elapsed_s": round(elapsed, 1),
-        "steps_per_second": round(args.timesteps / elapsed, 1) if elapsed else None,
-        "seed": args.seed,
-        "workers": args.workers,
-        "device": args.device,
-        "reward": str(args.reward),
-        "environment": config.describe(),
-    }
-    (directory / f"{name}.json").write_text(json.dumps(card, indent=2), encoding="utf-8")
-    env.close()
 
-    print(f"\ntrained {card['trained_timesteps']} steps in {elapsed:.1f}s")
-    print(f"model: {model_path}")
-    print(f"card:  {directory / (name + '.json')}")
-    return model_path
+def _write_card(session: Session, state: SessionState) -> None:
+    """What this policy was trained against, for the registry and for a person."""
+    card = state.as_dict()
+    card["finished_at"] = datetime.now(UTC).isoformat()
+    card["steps_per_second_mean"] = (
+        round(state.timesteps_done / state.wall_clock_s, 1) if state.wall_clock_s else None
+    )
+    session.card_path.write_text(json.dumps(card, indent=2), encoding="utf-8")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--algorithm", choices=ALGORITHMS, default="ppo")
-    parser.add_argument("--timesteps", type=int, default=200_000)
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--name", default="run1", help="session directory name; resumed if it exists")
+    parser.add_argument("--algorithm", choices=ALGORITHMS, default="sac")
+    parser.add_argument(
+        "--timesteps", type=int, default=5_000_000, help="TOTAL steps to reach, not additional"
+    )
+    parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--n-steps", type=int, default=2048)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--output", default="models/competition")
     parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=25_000,
+        help="steps between checkpoints; a crash costs at most this many",
+    )
+    parser.add_argument(
+        "--no-save-buffer",
+        dest="save_buffer",
+        action="store_false",
+        help="skip SAC's replay buffer (smaller and faster checkpoints, colder resume)",
+    )
+    parser.add_argument(
         "--reward",
         choices=[mode.value for mode in RewardMode],
         default=RewardMode.REFERENCE.value,
-        help="reference reproduces the package's shaping; score optimises what the judges add up",
     )
-    parser.add_argument(
-        "--opponent",
-        choices=["reference", "level"],
-        default="reference",
-        help="reference is the ported auto_run; level flies a fixed throttle and runs away",
-    )
+    parser.add_argument("--opponent", choices=["reference", "level"], default="reference")
     parser.add_argument("--rudder", action="store_true", help="unlock the rudder channel")
-    parser.add_argument(
-        "--jsbsim-root",
-        default=None,
-        help="data root holding aircraft/f16; unset uses the installed JSBSim",
-    )
-    parser.add_argument(
-        "--reference-setup",
-        action="store_true",
-        help="train on the package's initial conditions instead of the published ones",
-    )
+    parser.add_argument("--jsbsim-root", default=None)
+    parser.add_argument("--reference-setup", action="store_true")
     parser.add_argument(
         "--reference-speed-order",
         action="store_true",
-        help="reproduce the package's initial-condition ordering, 106 knots slow",
+        help="reproduce the package's 106-knot-slow start; the real host does NOT do this",
     )
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
-    train(parse_args())
+    try:
+        raise SystemExit(train(parse_args()))
+    except IncompatibleSession as exc:
+        print(f"\n{exc}", file=sys.stderr)
+        raise SystemExit(2) from exc

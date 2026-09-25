@@ -1,4 +1,8 @@
 @echo off
+REM The messages below are UTF-8, and CMD defaults to the system codepage —
+REM 950 on a Traditional Chinese machine — so without this they print as
+REM mojibake. >nul hides chcp's own report.
+chcp 65001 >nul
 REM Bring this machine up to date and start AIFCS. Double-click this file.
 REM 一個指令做完：更新、安裝、檢查、啟動。
 REM

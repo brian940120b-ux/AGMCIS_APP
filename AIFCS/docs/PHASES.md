@@ -1193,3 +1193,36 @@ a reported 3,604 and made the rules look wrong instead of the arithmetic. The
 state encoder always had the cosine. This was the one place that grew a second
 copy of it — the exact mistake the package is arranged to avoid, made in the
 tool built to check the arrangement.
+
+### Training that survives the machine being turned off (COMP PHASE 7)
+
+Asked for: training that continues after the computer is shut down. That is not
+a thing — no process runs on a powered-off machine. What was actually wanted is
+that shutting down costs nothing, and that is a matter of writing enough to disk
+often enough.
+
+A session is a directory holding the policy, its optimiser, SAC's replay buffer
+and a state file saying how many steps have been taken and what they were taken
+against. `state.json` is written after the model, never before: a crash between
+the two loses one checkpoint interval and leaves a consistent pair, where the
+other order would leave a state file claiming steps the model does not have.
+
+`--timesteps` is a total rather than an increment, because "train until it has
+had five million steps" is the sentence someone means and it is the one that
+survives being run twice. Resuming with a changed reward or environment is
+refused and the difference named — steps spent on two problems make a card that
+can only be right about one of them.
+
+Two things found by running it. Handing Stable-Baselines3 a `tensorboard_log`
+when tensorboard is absent raises ImportError out of `learn()` — not at
+construction and not as a warning — so an optional way of drawing graphs killed
+an overnight run outright. And a Windows laptop suspends, which loses nothing
+but stops training, so the run asks the system to stay awake while letting the
+display sleep.
+
+The double-click launchers needed two things that are invisible when they work:
+CRLF line endings, and `chcp 65001`, without which UTF-8 messages print as
+mojibake under the codepage a Traditional Chinese machine uses. The shortcut
+installer asks Windows where the Desktop is rather than assuming
+`%USERPROFILE%\Desktop`, because OneDrive redirects it — and this machine's
+nearly was.
