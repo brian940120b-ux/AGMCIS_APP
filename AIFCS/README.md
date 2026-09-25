@@ -1147,7 +1147,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `655 passed`, or `646 passed, 9 skipped` without the
+**Success looks like:** `657 passed`, or `648 passed, 9 skipped` without the
 optional JSBSim backend installed.
 
 ### End-to-end dashboard test
