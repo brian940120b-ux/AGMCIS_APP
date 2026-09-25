@@ -23,6 +23,14 @@ that a round begins when the position starts to change. This records the frames
 either side of INIT and START so the inference can be checked against what the
 host does.
 
+ANSWERED, 2026-09-25, against the real host over two rounds: it starts at 339.9
+KCAS and Mach 0.673, so the published figure is the real one and the reference
+package's ordering defect is the reference's alone; and 6,729 frames repeated
+the previous position exactly, from which both rounds were detected, so the
+inferred boundary is the host's actual behaviour. Decision latency on the
+competition laptop was 0.20 ms mean and 1.11 ms worst against a 16.67 ms budget,
+with no malformed packets.
+
 The probe replies to every frame, because a host that gets no command sees a
 player that has not initialised. It flies wings-level and holds its starting
 altitude — enough to keep the aircraft out of the ground for five minutes

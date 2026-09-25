@@ -122,7 +122,14 @@ class Aircraft:
         #
         # 106 knots, and it is why the Mach 0.8 elevator limit never fires in
         # the reference environment: nothing there ever gets close to Mach 0.8.
-        # `speed_before_altitude` reproduces the reference for comparison.
+        #
+        # MEASURED AGAINST THE REAL HOST, 2026-09-25: it starts a round at
+        # 339.9 KCAS, 444.5 KTAS, Mach 0.673 at 19,116 ft. The host has the
+        # correct ordering, so the published 340 knots is what a round actually
+        # begins at and the default here is right. The reference package
+        # therefore trained its policy at Mach 0.47 for a competition that runs
+        # at Mach 0.67. `speed_before_altitude` reproduces that for comparison,
+        # and is not what to train with.
         if speed_before_altitude:
             self.fdm["ic/vc-kts"] = speed_kcas
         self.fdm["ic/lat-gc-deg"] = lat_deg

@@ -1149,3 +1149,28 @@ and at 180 s, and in the third round never got inside the envelope at all.
 
 That is the baseline. It is beatable, and now there is a ruler that says by how
 much.
+
+### What the host actually said (COMP PHASE 6)
+
+Three questions had been carried since PHASE 4 with no way to settle them from
+any document. The probe asked the host and it answered all three in one session
+of two rounds.
+
+**A round starts at 340 knots.** 339.9 KCAS, 444.5 KTAS, Mach 0.673 at 19,116 ft.
+The host does not have the initial-condition ordering defect, so the published
+figure is the real one and the default here — altitude before speed — was right.
+The consequence runs the other way: the reference package trained its 314M-step
+policy at Mach 0.47 for a competition that runs at Mach 0.67, which is its
+mismatch and not ours.
+
+**The round boundary is a held position.** 6,729 frames repeated the previous
+position exactly, and both rounds were detected from that pattern alone. PHASE 2
+inferred that mechanism from a note in the rules; the host does it.
+
+**There is time to think.** 0.20 ms mean and 1.11 ms worst decision latency on
+the competition laptop, against a 16.67 ms frame — 1.2% and 6.7%. No malformed
+packets and no non-finite values in 33,090 frames.
+
+One thing did not match and is open: the initial separation measured 3,604 ft
+where the rules give 3,000 / 6,000 / 9,000. The probe measures a 3D range and
+the rules may mean a horizontal one, which the recorded frames will settle.
