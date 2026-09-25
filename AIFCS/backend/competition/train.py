@@ -58,9 +58,30 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
     )
 
 
+# Built line by line rather than as one block so the lint suppression can sit
+# on the line that needs it. Inside a triple-quoted string a suppression is
+# just text, and would be printed to the person reading this.
+BANNER = "\n".join(
+    (
+        "AIFCS competition training",
+        "==========================",
+        "  Ctrl+C, or closing this window, stops it. Nothing is lost.",
+        "  按 Ctrl+C 或關掉視窗就會停止，進度不會遺失。",  # noqa: RUF001
+        "  Run it again to carry on from where it stopped.",
+        "  再執行一次就會從停的地方繼續。",
+        "",
+    )
+)
+
+
 def train(args: argparse.Namespace) -> int:
     import torch as th
     from stable_baselines3 import PPO, SAC
+
+    # Printed here rather than by train.bat: CMD's batch parser and UTF-8 do
+    # not mix, and these lines in a .bat were taken as commands to run. Python
+    # writes to the Windows console through an API that ignores the codepage.
+    print(BANNER)
 
     config = build_config(args)
     session = Session(Path(args.output) / args.name)

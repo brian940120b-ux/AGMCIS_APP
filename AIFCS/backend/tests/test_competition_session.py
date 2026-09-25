@@ -172,27 +172,40 @@ def test_keep_awake_is_harmless_where_it_does_not_apply():
 # -------------------------------------------------- the double-click scripts
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+BATCH_FILES = ["train.bat", "install_shortcuts.bat", "update.bat", "start.bat", "stop.bat"]
 
 
-@pytest.mark.parametrize("name", ["train.bat", "install_shortcuts.bat", "update.bat"])
-def test_a_batch_file_has_the_line_endings_and_codepage_windows_needs(name: str):
+@pytest.mark.parametrize("name", BATCH_FILES)
+def test_a_batch_file_is_ascii_with_the_line_endings_windows_needs(name: str):
     """Two things that make a .bat work, and are invisible when they do not.
 
-    CMD needs CRLF: a file with bare LF fails in ways that look like the
-    commands being wrong. And it decodes with the system codepage, which on a
-    Traditional Chinese machine is 950, so UTF-8 messages print as mojibake
-    without `chcp 65001`.
+    CMD needs CRLF: bare LF fails in ways that look like the commands being
+    wrong. And CMD's batch parser and UTF-8 do not mix — setting the codepage
+    to 65001 fixes output but not the parsing of the file itself. This line::
+
+        echo   AIFCS 訓練    開始或繼續競賽訓練
+
+    produced::
+
+        '開始或繼續競賽訓練' is not recognized as an internal or external command
+
+    because the parser lost its place inside the multibyte text. The line above
+    it, with different characters, printed correctly — which is what makes this
+    worth a test rather than a note.
+
+    So: .bat files are ASCII. Anything a person reads in Chinese is printed by
+    PowerShell or by Python, both of which reach the Windows console through an
+    API that does not go through the codepage at all.
     """
     raw = (SCRIPTS / name).read_bytes()
     assert b"\r\n" in raw
     assert raw.count(b"\n") == raw.count(b"\r\n"), "every newline must be CRLF"
-    text = raw.decode("utf-8")
-    assert "chcp 65001" in text
-    assert text.splitlines()[0] == "@echo off"
+    offenders = [byte for byte in raw if byte > 127]
+    assert not offenders, f"{name} has {len(offenders)} non-ASCII bytes"
 
 
 def test_the_training_launcher_points_at_the_training_program():
-    text = (SCRIPTS / "train.bat").read_text(encoding="utf-8")
+    text = (SCRIPTS / "train.bat").read_text(encoding="ascii")
     assert "backend\\competition\\train.py" in text
     assert "%*" in text, "arguments typed after the file name have to reach argparse"
     assert "--timesteps" in text
@@ -201,12 +214,27 @@ def test_the_training_launcher_points_at_the_training_program():
 def test_the_shortcut_installer_asks_windows_where_the_desktop_is():
     """It may be redirected to OneDrive, as this machine's nearly was.
 
-    Only the lines CMD runs are examined. A first version searched the whole
-    file and failed on the REM comment that explains why %USERPROFILE%\\Desktop
-    is not used — a test that cannot tell an instruction from a note about one.
+    The work is in the .ps1: PowerShell reads UTF-8 properly, and the shortcut
+    names are Chinese. start.bat has used this shape all along, for the same
+    reason this one had to adopt it.
     """
-    text = (SCRIPTS / "install_shortcuts.bat").read_text(encoding="utf-8")
-    executable = "\n".join(line for line in text.splitlines() if not line.strip().upper().startswith("REM"))
+    script = (SCRIPTS / "install_shortcuts.ps1").read_text(encoding="utf-8")
+    executable = "\n".join(line for line in script.splitlines() if not line.strip().startswith("#"))
     assert "GetFolderPath('Desktop')" in executable
-    assert "%USERPROFILE%" not in executable
+    assert "$env:USERPROFILE" not in executable
     assert "start.bat" in executable and "train.bat" in executable
+
+    launcher = (SCRIPTS / "install_shortcuts.bat").read_text(encoding="ascii")
+    assert "install_shortcuts.ps1" in launcher
+
+
+def test_the_bilingual_banner_comes_from_python_not_from_the_batch_file():
+    """Because that is the half of the pair that can carry it safely."""
+    from competition.train import BANNER
+
+    assert "Ctrl+C" in BANNER
+    assert any(ord(character) > 127 for character in BANNER), "the Chinese lines"
+    assert "noqa" not in BANNER, "a suppression inside a string would be printed"
+
+    launcher = (SCRIPTS / "train.bat").read_bytes()
+    assert all(byte < 128 for byte in launcher)
