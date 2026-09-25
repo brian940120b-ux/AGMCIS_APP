@@ -119,6 +119,35 @@ def funding_history() -> tuple[dict, list[str]]:
     return out, missing
 
 
+def funding_covers(funding: dict, dates: list) -> int | None:
+    """資金費資料**最早**涵蓋到日期軸的哪一格。回傳索引,沒有就 None。
+
+    ═══ 為什麼要有這一支(2026-09-25 的教訓)═══
+    快取修好之後 B2 第一次真的跑出數字:訓練 0.00 · 驗證 **1.07** ·
+    回撤 3.2%。1.07 是現役 0.51 的兩倍多,回撤是全場最低 ——
+    看起來像突破。
+
+    **它不是。**
+
+    交易所的 /quote/fundingRate 最多給 1000 筆結算 = 333 天。
+    而訓練段是 2023-05-25 ~ 2025-08-14 —— **完全沒有費率資料**。
+    B2 在整個訓練段一檔都沒持有,所以 0.00 不是「表現差」,
+    是「沒有資料」。而那個 1.07 只算了驗證段裡**有資料的那一截**,
+    現役的 0.51 卻是整段。
+
+    **兩個數字不是同一把尺量出來的。** 並排放著,任何人都會去比,
+    而比出來的東西沒有意義 —— 這跟主城 12 天對測試組 1 天是
+    同一種錯,只是這次藏在資料涵蓋範圍裡,不在起算日裡。
+    """
+    if not funding:
+        return None
+    first = min(rows[0][0] for rows in funding.values() if rows)
+    for i, d in enumerate(dates):
+        if int(d.timestamp() * 1000) >= first:
+            return i
+    return None
+
+
 def hypotheses(funding: dict) -> list:
     """18 個預先登記的假說,回傳 (代號, 說明, **工廠**)。
 
@@ -176,6 +205,35 @@ def rets(res) -> list:
     return [(eq[i] / eq[i - 1] - 1) for i in range(1, len(eq))]
 
 
+def _report_b2(b2, dates, idx, cov, inc) -> None:
+    """B2 只跟**同一段期間**的現役比。不同期間的兩個數字不能並排。"""
+    key, label, make = b2
+    win = dates[max(0, cov - WARMUP):]
+    print(f"\n{LINE}\n  B2 資金費 · 單獨一段(資料只到"
+          f" {dates[cov].date()})\n{LINE}")
+    if len(win) < WARMUP + 60:
+        print("\n  這段太短,連跑都不該跑。等費率歷史再長一點。")
+        return
+    try:
+        _, b_m = run(win, idx, make())
+        _, i_m = run(win, idx, inc)
+    except Exception as e:                           # noqa: BLE001
+        print(f"\n  跑不起來:{type(e).__name__}: {e}")
+        return
+    print(f"\n  {'':<14}{'Calmar':>10}{'回撤':>10}")
+    print(f"  {'現役(同期)':<14}{i_m.get('calmar') or 0:>10.2f}"
+          f"{i_m.get('max_dd_pct', 0):>9.1f}%")
+    print(f"  {'B2 資金費':<14}{b_m.get('calmar') or 0:>10.2f}"
+          f"{b_m.get('max_dd_pct', 0):>9.1f}%")
+    print("\n  ⚠️ **這不是通過,也不是沒通過 —— 是還不能判。**")
+    print("     這一段只有一個市場週期,而且它同時是現役策略被挑出來")
+    print("     之後的那一段。要判它得有訓練段,而訓練段要有費率資料。")
+    print("\n  能做的事只有一件:**從今天起把費率歷史存起來**。")
+    print("     交易所只給最近 1000 筆,但我們自己的快取已經改成")
+    print("     只進不出(2026-09-25),所以從現在開始每天都會加深。")
+    print("     大約再一年,B2 才有資格上那張表。")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="跑預先登記的指標與動量假說")
@@ -210,6 +268,21 @@ def main(argv=None) -> int:
         print("     一個什麼都沒量到的格子不是一次嘗試。")
         print("     查:.venv/bin/python scripts/probe_oi_history.py")
 
+    # ── B2:資料涵蓋不到訓練段的話,它不能用那四關評判 ──────
+    cov = funding_covers(funding, dates)
+    b2 = None
+    if cov is not None and cov > cut:
+        b2 = next((h for h in hyps if h[0] == "B2資金費"), None)
+        if b2:
+            hyps = [h for h in hyps if h[0] != "B2資金費"]
+            print(f"\n  ⚠️ **B2 抽出來單獨看,不進下面那張表。**")
+            print(f"     交易所的費率歷史只到 {dates[cov].date()} ——"
+                  f" 訓練段({train_dates[0].date()} ~"
+                  f" {train_dates[-1].date()})完全沒有資料。")
+            print("     它在訓練段一檔都不會持有,所以第一關**不是輸,"
+                  "是沒得比**。")
+            print("     硬放進表裡,那一行的尺就跟其他 17 行不一樣。")
+
     inc = ma_filter(SYMBOLS, 50)
     inc_tr_res, inc_tr = run(train_dates, idx, inc)
     inc_te_res, inc_te = run(test_dates, idx, inc)
@@ -237,6 +310,9 @@ def main(argv=None) -> int:
         return 1
 
     # ── 驗收:四關,2026-09-08 寫死 ────────────────────
+    if b2 is not None:
+        _report_b2(b2, dates, idx, cov, inc)
+
     survivors = [r for r in rows
                  if (r[2].get("calmar") or -99) > (c_tr or -99)
                  and (r[3].get("calmar") or -99) > (c_te or -99)

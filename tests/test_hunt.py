@@ -154,3 +154,42 @@ def test_the_daily_job_runs_it_and_isolates_its_failures():
     assert "scripts/hunt.py" in src
     at = src.index("scripts/hunt.py")
     assert "不影響記帳" in src[at - 700:at + 700]
+
+
+def test_b2_is_pulled_out_when_funding_does_not_reach_the_training_segment():
+    """**不同期間的兩個數字不可以並排。**
+
+    2026-09-25:快取修好之後 B2 第一次跑出數字 —— 訓練 0.00、
+    驗證 1.07、回撤 3.2%。1.07 是現役 0.51 的兩倍多,回撤全場最低。
+    看起來像突破,實際上:交易所的費率歷史只有 333 天,訓練段
+    (2023-05 ~ 2025-08)一筆都沒有,所以 B2 整個訓練段空手。
+    那個 1.07 只算了驗證段裡有資料的那一截,現役的 0.51 是整段。
+
+    這跟「主城 12 天 +4.24% 對測試組 1 天 -0.03%」是同一種錯,
+    只是這次藏在資料涵蓋範圍裡,不在起算日裡。
+    """
+    from datetime import datetime, timedelta, timezone
+    h = _hunt()
+    d0 = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    dates = [d0 + timedelta(days=i) for i in range(1000)]
+
+    # 費率只涵蓋最後 200 天
+    late = int(dates[800].timestamp() * 1000)
+    assert h.funding_covers({"BTC-USDT": [(late, 0.0)]}, dates) == 800
+    # 完全沒有資料 → None
+    assert h.funding_covers({}, dates) is None
+    # 涵蓋整段 → 第 0 格
+    early = int(dates[0].timestamp() * 1000)
+    assert h.funding_covers({"BTC-USDT": [(early, 0.0)]}, dates) == 0
+
+
+def test_the_b2_side_report_refuses_to_call_it_a_pass_or_a_fail():
+    """抽出來單獨看 ≠ 給它一條比較寬鬆的路。
+
+    單獨那一段只有一個市場週期,而且它**就是**現役策略被挑出來
+    之後的那一段。那種條件下的漂亮數字,誰都做得出來。
+    """
+    src = (ROOT / "scripts/hunt.py").read_text(encoding="utf-8")
+    assert "這不是通過,也不是沒通過 —— 是還不能判" in src
+    assert "不進下面那張表" in src
+    assert "所以第一關**不是輸," in src and "是沒得比**" in src
