@@ -27,6 +27,7 @@ import html
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -677,6 +678,32 @@ def status_checks() -> list:
     else:
         err = (hit[1] or {}).get("error")
         out.append(("交易所", not err, "問得到" if not err else "問不到"))
+
+    # 六、**警報送得出去嗎**
+    #
+    # 2026-09-25:PRIMARY 的記帳停了 133 小時,而檢修官每 10 分鐘就
+    # 報一次「交易所一致性徹查未通過」。那個警報一次都沒有送到 ——
+    # 旁邊同一份 log 寫著 `Telegram 回應 401`。
+    #
+    # **警鈴一直在響,而電話線是斷的。**
+    #
+    # 這件事有先天的循環:通知管道壞掉的時候,它不可能用自己來通知你。
+    # 面板是另一條獨立的管道,所以這一格放在這裡,循環才斷得掉。
+    try:
+        from notify.telegram import is_configured, last_delivery
+        d = last_delivery()
+        if not d:
+            # 沒有紀錄 ≠ 正常。有設定卻從來沒送過,那就是還沒證明它會通。
+            out.append(("通知", not is_configured(),
+                        "未設定(不送)" if not is_configured()
+                        else "設定了但從沒送成功過"))
+        else:
+            hrs = (time.time() - float(d.get("at") or 0)) / 3600
+            out.append(("通知", bool(d.get("ok")),
+                        ("正常" if d.get("ok") else str(d.get("why") or "失敗"))
+                        + f" · {hrs:.0f}h 前"))
+    except Exception as e:                           # noqa: BLE001
+        out.append(("通知", False, f"問不到:{type(e).__name__}"))
 
     return out
 

@@ -78,7 +78,6 @@ DORMANT = {
     "check_freshness": "事件日曆新鮮度;同上",
     # ── 小工具 ────────────────────────────────────────
     "new_trace_id": "logging 內部使用,由 context 設定",
-    "is_configured": "Telegram 設定檢查,send() 內部自行判斷",
     "freshness_ms": "行情新鮮度,由 health 另行計算",
     "ohlc_sanity": "K 棒健全性,history 層另有檢查",
     "get_klines": "舊 client 的方法,history 走 load_or_download",
