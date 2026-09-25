@@ -9,11 +9,24 @@ SMC 獵場 —— 把 IG 上那套四步驟流程,當成假說跑一遍 · 2026-
 先提交,然後才准跑第一次。翻譯表在 portfolio/smc.py 的 docstring,
 跑完不准改。
 
-═══ 預先登記的階梯,剛好四套(2026-09-25 寫死)═══
+═══ 預先登記的階梯,剛好六套(2026-09-25 寫死)═══
   L1  原版做多      結構 15m · 進場 5m  · 目標 前一日高
   L2  原版加鏡像    同上,另外接受向下 CHOCH 做空
   L3  慢一級做多    結構 4h  · 進場 1h  · 目標 前一週高
   L4  慢一級加鏡像  同上,雙向
+  L5  原版+獵取     L2 再加上「CHOCH 之前要先掃過流動性」
+  L6  慢一級+獵取   L4 再加上同一個前提
+
+L5 / L6 來自執政官同日給的另一支教學影片。影片與 IG 那則大部分
+重疊(都是 CHOCH / BOS / 結構),但多了一項:**先穿破前低、再收
+回來**,然後才看結構改變。IG 那則把前一日高低當**止盈目標**,
+不是當**進場前提** —— 是不同的東西,所以它獨立佔兩格,
+而不是偷偷併進 L1~L4。影片是雙向的,所以 L5 / L6 一律雙向。
+
+⚠️ 影片裡的「馬腳做多」與「3+1 做空」**沒有實作**:提供的內容
+   整理沒有給它們的定義,只說了它們出現在圖上的位置。我不知道
+   「3+1」的 3 和 1 各是什麼。猜一個出來就是我自己發明規則、
+   然後掛上別人的名字 —— 那比不做還糟。要做得先拿到定義。
 
 L3 / L4 存在的唯一理由是**樣本**:交易所給的 5m 只有約 33 天,
 15m 約 100 天,而 4h 有 333 天。一個月的樣本量得到的任何結論都
@@ -39,7 +52,7 @@ L3 / L4 存在的唯一理由是**樣本**:交易所給的 5m 只有約 33 天,
       ← 這關最重要:固定 R:R 拉大的話,亂進場也會有漂亮的盈虧比。
         策略要贏的是同樣停損 / 止盈距離、隨機時點的那一組,不是贏「零」
   四、前半段與後半段的平均 R **都**要 > 0(只贏一半 = 樣本運氣)
-  五、自助法 p,乘上試過的階梯數(Bonferroni ×4),要 < 0.05
+  五、自助法 p,乘上試過的階梯數(Bonferroni ×6),要 < 0.05
   六、固定 1% 風險的權益曲線,最大回撤 <= 合約上限 15%
 
 沒過就蓋棺,**不換分形 k、不換時間框、不換幣種再試一次**。
@@ -76,12 +89,21 @@ MAX_DD_PCT = 15.0
 #: 幣種數量。2026-09-25 在跑之前定死,理由見 docstring(樣本量)。
 UNIVERSE_N = 30
 
-#: 四套階梯:(代號, 說明, 結構週期, 進場週期, 目標週期, 是否雙向, 抓幾天)
+#: 六套階梯。欄位:(代號, 說明, 結構週期, 進場週期, 目標週期,
+#:                  是否雙向, 是否要求先獵取流動性, 抓幾天)
 LADDERS = [
-    ("L1", "原版做多      15m/5m · 前一日高", "15m", "5m", "day", False, 120),
-    ("L2", "原版雙向      15m/5m · 前一日高低", "15m", "5m", "day", True, 120),
-    ("L3", "慢一級做多    4h/1h · 前一週高", "4h", "1h", "week", False, 400),
-    ("L4", "慢一級雙向    4h/1h · 前一週高低", "4h", "1h", "week", True, 400),
+    ("L1", "原版做多      15m/5m · 前一日高",
+     "15m", "5m", "day", False, False, 120),
+    ("L2", "原版雙向      15m/5m · 前一日高低",
+     "15m", "5m", "day", True, False, 120),
+    ("L3", "慢一級做多    4h/1h · 前一週高",
+     "4h", "1h", "week", False, False, 400),
+    ("L4", "慢一級雙向    4h/1h · 前一週高低",
+     "4h", "1h", "week", True, False, 400),
+    ("L5", "原版+獵取     15m/5m · 先掃流動性再 CHOCH",
+     "15m", "5m", "day", True, True, 120),
+    ("L6", "慢一級+獵取   4h/1h · 先掃流動性再 CHOCH",
+     "4h", "1h", "week", True, True, 400),
 ]
 
 
@@ -103,7 +125,7 @@ def bars_of(symbol: str, interval: str, days: int) -> list[Bar]:
 
 
 def run_ladder(lad, symbols: list[str], verbose: bool) -> dict:
-    code, label, si, ei, period, both, days = lad
+    code, label, si, ei, period, both, sweep, days = lad
     trades, skipped = [], {}
     # 對照組的 p95 逐幣算(每個幣的 K 棒不同),**按訊號數加權**彙總 ——
     # 直接取平均的話,只有 2 個訊號的幣會跟有 80 個訊號的幣一樣重。
@@ -114,7 +136,8 @@ def run_ladder(lad, symbols: list[str], verbose: bool) -> dict:
         if len(st) < 200 or len(en) < 200:
             skipped[sym] = f"資料不足 {si}={len(st)} {ei}={len(en)}"
             continue
-        ss = smc.setups(st, en, symbol=sym, period=period, both_sides=both)
+        ss = smc.setups(st, en, symbol=sym, period=period,
+                        both_sides=both, require_sweep=sweep)
         if not ss:
             if verbose:
                 print(f"      {sym:<14}{si}={len(st):>6} {ei}={len(en):>6}"

@@ -38,6 +38,25 @@ SMC 在社群裡是**憑眼睛畫**的方法:同一張圖,十個人標出十組�
 所以規矩是:**這份翻譯先寫死、先提交,然後才准跑第一次。**
 跑完不管結果好壞,定義一個字都不准改。要改就是新假說、重新計次。
 
+═══ 第二個來源:教學影片(2026-09-25 同日補進來)═══
+執政官另外給了一支交易教學影片的內容整理。它講的是下跌段裡怎麼
+找底:下跌 → 形成低點 → **獵取低點** → 觀察是否有承接 → 反彈 →
+CHOCH → 找做多;上漲則鏡像做空。
+
+跟 IG 那則**大部分重疊**(都是 CHOCH / BOS / 結構),但有一項是新的:
+
+  **獵取低點**(掃流動性)。IG 那則把前一日高低當**止盈目標**;
+  影片把「先穿破前低、再收回來」當成**進場的前提**。
+  這是不同的東西,所以它是一個新的機械元素 → 見 sweeps()。
+
+影片是**雙向**的(做多與做空並列),所以用它的階梯一律雙向。
+
+⚠️ 影片裡有兩個標記,**這裡沒有實作**:「馬腳做多」與「3+1 做空」。
+   原因很簡單:提供的內容整理**沒有給它們的定義**,只說了它們
+   出現在圖上的哪個位置。我不知道「3+1」的 3 和 1 各是什麼。
+   猜一個出來就是我自己在發明規則,然後掛上別人的名字 ——
+   那比不做還糟。要做的話,得先拿到定義。
+
 ═══ 翻譯表(2026-09-25 寫死,對照貼文逐項)═══
 貼文用語            這裡的機械定義                            參數
 ──────────────────────────────────────────────────────────────
@@ -51,6 +70,7 @@ SMC 在社群裡是**憑眼睛畫**的方法:同一張圖,十個人標出十組�
 失衡區 FVG          三根 K 的定義:bars[i-2].high < bars[i].low 0 個
                     區間 = (bars[i-2].high, bars[i].low)
 吞沒陽 K            實體吞沒:c>o 且 c>=前根 o 且 o<=前根 c     0 個
+獵取低點(影片)    影線跌破當時最近的已確認擺動低,收盤收回  0 個
 
 k=2 是 Bill Williams 分形的教科書預設值。**這是全套唯一一個參數,
 而且不搜** —— 理由跟 hunt.py 一樣:每多搜一個參數就多一個過擬合入口。
@@ -75,6 +95,12 @@ from portfolio.sim import Bar
 
 #: 分形的左右根數。教科書預設 2,**不搜**。
 FRACTAL_K = 2
+
+#: 獵取事件要在 CHOCH 前幾根之內才算數。這**不是策略參數**,是
+#: 防呆上限 —— 沒有上限的話,三百根之前的一次插針也能算成
+#: 「這次結構轉換之前先掃過流動性」,那條件就等於沒有。
+#: 與 order_block 的 max_lookback 取同一個數,不另外挑。
+SWEEP_WINDOW = 30
 
 
 @dataclass(frozen=True)
@@ -154,6 +180,51 @@ def breaks(bars: list[Bar], k: int = FRACTAL_K) -> list[Break]:
         elif lo_ref and b.c < lo_ref.price:
             out.append(Break(i, False, trend == "up", lo_ref.price))
             trend, lo_ref = "down", None
+    return out
+
+
+def sweeps(bars: list[Bar], k: int = FRACTAL_K) -> list[int]:
+    """「獵取低點 / 獵取高點」—— 影線穿過前低,收盤又收回來。
+
+    ═══ 這一條是 2026-09-25 從執政官傳來的教學影片加的 ═══
+    影片講的是下跌段裡怎麼找底:價格跌到某個重要低點附近,先把
+    那個低點**穿破**(掃掉停損),然後收回來,接著才看結構改變。
+
+    IG 那則貼文沒有這一段 —— 它把前一日高低當**止盈目標**,
+    不是當進場的前提。所以這是一個**新的機械元素**,而不是
+    同一件事換句話說。
+
+    ═══ 定義(零新參數)═══
+    第 j 根是一次「獵低」⟺
+        j 的 **最低價** 跌破當時最近一個**已確認**的擺動低,
+        而 j 的 **收盤價** 又收在它上面。
+
+    影線穿過、收盤收回 —— 這就是「掃掉停損之後沒有跟著跌」。
+    用收盤與影線的分工,跟 breaks() 是同一條理由,不花任何參數。
+
+    ⚠️ 用的是**當時**已確認的擺動點(confirmed_at <= j),不是事後
+    回頭看整段才知道的那個。這條規則如果偷看未來,回測會漂亮得
+    不像話,而且不會報錯。
+
+    回傳:發生獵取的 K 棒索引清單。
+    """
+    sw = swings(bars, k)
+    out: list[int] = []
+    hi_ref: Swing | None = None
+    lo_ref: Swing | None = None
+    p = 0
+    for j, b in enumerate(bars):
+        while p < len(sw) and sw[p].confirmed_at <= j:
+            s = sw[p]
+            if s.high:
+                hi_ref = s
+            else:
+                lo_ref = s
+            p += 1
+        if lo_ref and b.l < lo_ref.price <= b.c:
+            out.append(j)
+        elif hi_ref and b.h > hi_ref.price >= b.c:
+            out.append(j)
     return out
 
 
@@ -250,13 +321,14 @@ def _bar_seconds(bars: list[Bar]) -> float:
 
 def setups(struct: list[Bar], entry: list[Bar], *, symbol: str = "",
            period: str = "day", both_sides: bool = False,
-           k: int = FRACTAL_K) -> list:
+           require_sweep: bool = False, k: int = FRACTAL_K) -> list:
     """把貼文那四步走完,產出可以交給 event_sim 的訊號。
 
     struct  結構層 K 棒(貼文:15M)
     entry   進場層 K 棒(貼文:5M)
     period  流動性目標的週期(貼文:昨天 = day)
     both_sides  False = 只做多(貼文原文)/ True = 加上鏡像做空
+    require_sweep  True = CHOCH 之前必須先有一次獵取(教學影片那一版)
 
     ⚠️ 兩個時間框的對齊:結構層第 bi 根要**收完**才算數,所以最早
     能動作的進場棒是第一根 `t >= struct[bi].t + 一根結構棒` 的棒。
@@ -276,11 +348,16 @@ def setups(struct: list[Bar], entry: list[Bar], *, symbol: str = "",
 
     out: list = []
     e_keys = [_key(b.t) for b in entry]
+    # 獵取事件只算一次,不是每個 CHOCH 重掃一遍。
+    swept = sweeps(struct, k) if require_sweep else []
     for br in breaks(struct, k):
         if not br.choch:
             continue                      # 貼文要的是 CHOCH,不是 BOS
         if not br.up and not both_sides:
             continue
+        if require_sweep and not any(br.i - SWEEP_WINDOW < j <= br.i
+                                     for j in swept):
+            continue                      # 結構轉換之前沒先掃過流動性
         ob = order_block(struct, br.i, br.up)
         if ob is None:
             continue

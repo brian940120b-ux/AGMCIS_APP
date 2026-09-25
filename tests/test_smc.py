@@ -129,6 +129,54 @@ class Zones(unittest.TestCase):
         self.assertFalse(smc.engulfing(bs, 1, True))
 
 
+class Sweep(unittest.TestCase):
+    """獵取低點:影線穿過前低、收盤收回來。教學影片加的那一條。"""
+
+    def _with_low(self):
+        bs = flat(12)
+        bs[2] = bar(2, 100, 100.1, 94.0, 100)        # 擺動低 94
+        return bs
+
+    def test_wick_below_and_close_above_is_a_sweep(self):
+        bs = self._with_low()
+        bs[8] = bar(8, 100, 100.2, 92.0, 99.0)       # 穿到 92,收在 99
+        self.assertIn(8, smc.sweeps(bs))
+
+    def test_closing_below_is_a_breakdown_not_a_sweep(self):
+        """收在下面就是跌破,不是獵取。**兩者意思相反。**"""
+        bs = self._with_low()
+        bs[8] = bar(8, 100, 100.2, 92.0, 92.5)       # 收在 94 之下
+        self.assertNotIn(8, smc.sweeps(bs))
+
+    def test_not_reaching_the_low_is_not_a_sweep(self):
+        bs = self._with_low()
+        bs[8] = bar(8, 100, 100.2, 95.0, 99.0)       # 沒碰到 94
+        self.assertNotIn(8, smc.sweeps(bs))
+
+    def test_a_sweep_cannot_use_a_low_that_is_not_confirmed_yet(self):
+        """只能用**當時**已確認的擺動點。偷看未來的話回測會太漂亮。"""
+        bs = flat(12)
+        bs[6] = bar(6, 100, 100.1, 94.0, 100)        # 擺動低在第 6 根
+        bs[7] = bar(7, 100, 100.2, 92.0, 99.0)       # 第 7 根就想掃它
+        # 第 6 根的擺動要到第 8 根才確認 —— 第 7 根不算獵取
+        self.assertNotIn(7, smc.sweeps(bs))
+
+    def test_requiring_a_sweep_can_only_remove_setups_never_add(self):
+        """多一個前提只能讓訊號變少。變多就代表它改了別的東西。"""
+        st = [Bar(T0 + timedelta(minutes=15 * i), 100, 100.2, 99.8, 100, 1.0)
+              for i in range(96)]
+        st[20] = Bar(st[20].t, 100, 100.2, 94.0, 100, 1.0)
+        st[30] = Bar(st[30].t, 100, 100.2, 99.8, 93.0, 1.0)
+        st[40] = Bar(st[40].t, 93, 97.0, 92.8, 93, 1.0)
+        st[50] = Bar(st[50].t, 93, 93.2, 92.8, 92.5, 1.0)
+        st[51] = Bar(st[51].t, 92.5, 98.5, 92.4, 98.0, 1.0)
+        en = [Bar(T0 + timedelta(days=1, minutes=5 * i),
+                  95, 95.1, 94.9, 95, 1.0) for i in range(288)]
+        loose = smc.setups(st, en, both_sides=True)
+        tight = smc.setups(st, en, both_sides=True, require_sweep=True)
+        self.assertLessEqual(len(tight), len(loose))
+
+
 class Liquidity(unittest.TestCase):
     def test_prev_day_only_uses_closed_days(self):
         d1 = [Bar(datetime(2026, 9, 1, h, tzinfo=timezone.utc),

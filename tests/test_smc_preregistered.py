@@ -60,19 +60,56 @@ def test_swings_carry_the_bar_they_can_first_be_known_at():
     assert "confirmed_at <= i" in src, "breaks 沒有檢查確認時點"
 
 
-def test_the_ladders_are_fixed_at_four():
-    """四套,寫死。跑完之後多加一套 = 用結果挑假說。"""
+def test_the_ladders_are_fixed_at_six_and_the_denominator_follows():
+    """六套,寫死。**跑完之後多加一套 = 用結果挑假說。**
+
+    2026-09-25 從四套加到六套(教學影片的「獵取低點」前提),而且是
+    在跑第一次**之前**加的 —— 分母同時從 ×4 變 ×6。加假說不是問題,
+    加了而分母沒跟著動才是。
+    """
     tree = ast.parse(HUNT)
     node = next(n for n in tree.body
                 if isinstance(n, ast.Assign)
                 and getattr(n.targets[0], "id", "") == "LADDERS")
-    assert len(node.value.elts) == 4
+    assert len(node.value.elts) == 6
     assert f"Bonferroni ×{len(node.value.elts)}" in HUNT
+
+
+def test_the_sweep_is_a_separate_ladder_not_folded_into_the_old_ones():
+    """影片的「獵取低點」是**新的機械元素**,不是同一件事換句話說。
+
+    IG 那則把前一日高低當止盈目標;影片把「先穿破前低、再收回來」
+    當進場前提。偷偷把它併進 L1~L4,等於悄悄換掉已經登記的假說。
+    """
+    from portfolio import smc                          # noqa: PLC0415
+    assert hasattr(smc, "sweeps")
+    assert "require_sweep" in HUNT
+    # L1~L4 不得要求獵取,L5/L6 必須要求
+    tree = ast.parse(HUNT)
+    node = next(n for n in tree.body
+                if isinstance(n, ast.Assign)
+                and getattr(n.targets[0], "id", "") == "LADDERS")
+    flags = [e.elts[6].value for e in node.value.elts]
+    assert flags == [False, False, False, False, True, True], flags
+
+
+def test_the_undefined_labels_are_not_guessed_at():
+    """「馬腳做多」「3+1 做空」沒有定義 → **不實作**。
+
+    猜一個出來就是自己發明規則、然後掛上別人的名字。那比不做還糟:
+    跑出來的東西會被當成「影片那套方法的檢驗結果」,而它不是。
+    """
+    from portfolio import smc                          # noqa: PLC0415
+    src = SMC + HUNT
+    assert "馬腳做多" in src and "3+1 做空" in src, "沒有記錄這兩個標記"
+    assert "沒有實作" in src or "沒有給它們的定義" in src
+    for bad in ("ma_jiao", "three_plus_one", "馬腳", "3plus1"):
+        assert not hasattr(smc, bad), f"不該憑空實作 {bad}"
 
 
 def test_the_acceptance_criteria_are_in_the_file_before_any_result():
     for phrase in ("樣本 >= 100 筆", "贏過**隨機對照組的第 95 百分位**",
-                   "前半段與後半段", "Bonferroni ×4",
+                   "前半段與後半段", "Bonferroni ×6",
                    "沒過就蓋棺"):
         assert phrase in HUNT, phrase
 
