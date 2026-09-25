@@ -74,6 +74,31 @@ def heading(message: str) -> None:
 # ------------------------------------------------------------------- doctor
 
 
+def _report_compute() -> None:
+    """Say plainly whether torch can reach a GPU, and which build is installed.
+
+    A CPU-only wheel and a CUDA one are both called "torch" and both import
+    cleanly. The difference is a training run that takes hours against one that
+    takes days, so it is worth a line of its own rather than a footnote.
+    """
+    try:
+        import torch
+    except Exception as exc:  # torch is optional; this never stops doctor
+        warn(f"torch could not be inspected: {exc}")
+        return
+
+    build = torch.__version__
+    if torch.cuda.is_available():
+        names = {torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())}
+        ok(f"GPU available — {', '.join(sorted(names))} (torch {build})")
+    elif "+cpu" in build:
+        warn(f"torch {build} is a CPU-only build — training runs on the CPU")
+        print("       For an NVIDIA GPU, install a CUDA build: https://pytorch.org/get-started/locally/")
+    else:
+        warn(f"torch {build} sees no usable GPU — training runs on the CPU")
+        print("       Check the driver with `nvidia-smi`; a CPU-only run is many times slower.")
+
+
 def command_doctor(args: argparse.Namespace) -> int:
     """Check the installation and say plainly what is wrong with it."""
     problems = 0
@@ -126,6 +151,12 @@ def command_doctor(args: argparse.Namespace) -> int:
         else:
             warn("reinforcement learning not installed — the training centre will say so")
             warnings += 1
+
+        if rl.available:
+            # Whether training will use the GPU is the single biggest factor in
+            # how long a run takes, and "did my CUDA install work?" is otherwise
+            # a question you can only answer from a Python prompt.
+            _report_compute()
     except Exception as exc:  # doctor reports, never raises
         warn(f"reinforcement learning could not be checked: {exc}")
         warnings += 1

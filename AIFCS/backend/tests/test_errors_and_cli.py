@@ -191,3 +191,58 @@ def test_the_run_command_output_is_not_json_by_accident():
     """A sanity check that the CLI prints for people, not for machines."""
     with pytest.raises(json.JSONDecodeError):
         json.loads("scenario demo_alpha: 4 units")
+
+
+# ------------------------------------------------- doctor's compute report
+
+
+def test_doctor_names_the_gpu_when_torch_can_reach_one(monkeypatch, capsys):
+    """A CPU wheel and a CUDA wheel are both called "torch" and both import.
+
+    The difference is a training run of hours against one of days, so doctor
+    says which this machine has rather than leaving it to a Python prompt.
+    """
+    torch = pytest.importorskip("torch")
+    from cli import _report_compute
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda i: "NVIDIA GeForce RTX 4050 Laptop GPU")
+
+    _report_compute()
+
+    printed = capsys.readouterr().out
+    assert "GPU available" in printed
+    assert "RTX 4050" in printed
+
+
+def test_doctor_says_so_when_there_is_no_gpu(monkeypatch, capsys):
+    torch = pytest.importorskip("torch")
+    from cli import _report_compute
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    _report_compute()
+
+    printed = capsys.readouterr().out
+    assert "CPU" in printed
+    assert "GPU available" not in printed
+
+
+def test_doctor_survives_a_torch_that_will_not_import(monkeypatch, capsys):
+    """The compute report is a nicety; it must never be what breaks doctor."""
+    import builtins
+
+    from cli import _report_compute
+
+    real_import = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == "torch":
+            raise OSError("[WinError 1114] c10.dll")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    _report_compute()
+
+    assert "could not be inspected" in capsys.readouterr().out
