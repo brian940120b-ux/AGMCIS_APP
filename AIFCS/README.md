@@ -31,6 +31,7 @@ Every aircraft, sensor, parameter and scenario in AIFCS is **fictional and abstr
 - [Swapping the physics](#swapping-the-physics)
 - [Analytics](#analytics)
 - [The training centre](#the-training-centre)
+- [The model centre](#the-model-centre)
 - [Testing](#testing)
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
@@ -329,6 +330,13 @@ Interactive documentation: **http://127.0.0.1:8000/docs**
 | `GET` | `/api/training/jobs/{id}` | One job, with its progress curve |
 | `POST` | `/api/training/start` | Start a training job in the background |
 | `POST` | `/api/training/stop` | Stop it at the next step boundary, keeping what it trained |
+| `GET` | `/api/models` | Every saved policy, each with a verdict on whether it still means anything |
+| `GET` | `/api/models/compare` | Several policies side by side, and whether that comparison is valid |
+| `GET` | `/api/models/{id}` | One policy, its card and its verdict |
+| `POST` | `/api/models/{id}/evaluate` | Measure it over real episodes, as a background job |
+| `POST` | `/api/models/{id}/archive` | Move it out of the active list, keeping the file |
+| `POST` | `/api/models/{id}/restore` | Bring an archived policy back |
+| `DELETE` | `/api/models/{id}` | Delete the policy and its card for good |
 
 Endpoints for phases not yet built are absent rather than stubbed — this API
 never answers for a capability the backend does not have.
@@ -955,6 +963,40 @@ by a restart is recorded as INTERRUPTED at the next startup instead of being
 left looking like it is still going. A long run still belongs on the command
 line, where it outlives the dashboard.
 
+### The model centre
+
+Below the training centre, in the same **TRAINING** stage. Every saved policy is
+listed with a **verdict**, because a `.zip` on its own is not a usable policy —
+it is weights that expect a particular observation vector, shaped by a
+particular reward.
+
+| Verdict | What it means |
+|---|---|
+| `COMPATIBLE` | Same observation layout, same reward. It means what it meant. |
+| `OTHER REWARD` | Same layout, so it runs — but it was optimising something else, so its score is real and not comparable. |
+| `INCOMPATIBLE` | The layout has moved on. **It cannot be evaluated.** |
+| `UNKNOWN` | No card, so nothing can be said about it. |
+
+**The refusal is the feature.** An incompatible policy loads cleanly, produces
+actions and returns a score — from numbers that stopped meaning what they meant.
+It would look exactly like a real measurement. So the evaluate button is
+disabled for it and the API answers 409 with the reason.
+
+Press the gauge icon to measure a policy over real episodes. That is slow —
+three episodes took 76 seconds here — so it runs as a background job on the same
+one-at-a-time runner training uses, and you watch it in the panel above. The
+score is written onto the policy's card, so it survives a restart. A *cancelled*
+evaluation is not: a mean over two of five episodes is a different measurement,
+and filing it as the policy's score would misrepresent it ever after.
+
+**Archiving is not deleting.** It moves the policy and its card into
+`models/archive/`. Tick ARCHIVED to see them, and restore any of them. Delete is
+separate and permanent.
+
+Tick two or more and press **COMPARE**. The comparison says plainly when lining
+them up means nothing — different layouts, different rewards, different
+scenarios, or simply not all measured yet.
+
 ### Install the stack
 
 The RL dependencies are large and optional, so they are kept out of the default
@@ -1070,7 +1112,7 @@ Backend tests only:
 cd backend && ../.venv/bin/python -m pytest
 ```
 
-**Success looks like:** `570 passed`, or `561 passed, 9 skipped` without the
+**Success looks like:** `599 passed`, or `590 passed, 9 skipped` without the
 optional JSBSim backend installed.
 
 ### End-to-end dashboard test
@@ -1088,6 +1130,7 @@ npm run test:e2e:editor # build a scenario in the UI, save it, then fly it
 npm run test:e2e:coordination  # eight units, two commanders, and no panel overlaps
 npm run test:e2e:analytics     # record a run, then chart it
 npm run test:e2e:training      # train a real policy from the browser
+npm run test:e2e:models        # measure one, and refuse a stale one
 ```
 
 Each suite sets up the scenario it asserts against, so they can be run in any
@@ -1189,7 +1232,7 @@ with `.venv/bin/pip install -r requirements-ml.txt` when you reach that phase.
 | 16 | JSBSim adapter (swappable physics backend) | **Complete** |
 | 17 | Analytics: run charts and comparison | **Complete** |
 | 18 | Training centre: start, watch and cancel a job | **Complete** |
-| 19 | Model centre | Planned |
+| 19 | Model centre: verdicts, evaluation, comparison, archive | **Complete** |
 | 20 | Production hardening | Planned |
 
 Detail: [`docs/PHASES.md`](docs/PHASES.md).

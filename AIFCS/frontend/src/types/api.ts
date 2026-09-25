@@ -798,6 +798,10 @@ export interface TrainingMetricPoint {
 
 export interface TrainingJob {
   job_id: string
+  /** Training and evaluation share one runner: both saturate the same cores. */
+  kind: 'TRAIN' | 'EVALUATE'
+  /** Which policy is being measured, when this is an evaluation. */
+  model_id: string | null
   algorithm: string
   requested_timesteps: number
   /** What it actually trained for. PPO collects in blocks, so it can overshoot. */
@@ -831,4 +835,67 @@ export interface StartTrainingRequest {
   timesteps?: number
   seed?: number
   evaluate_episodes?: number
+}
+
+/* --------------------------------------------------------------- PHASE 19 */
+
+export type ModelVerdict = 'COMPATIBLE' | 'INCOMPATIBLE' | 'DIFFERENT_REWARD' | 'UNKNOWN'
+
+export interface ModelCompatibility {
+  verdict: ModelVerdict
+  detail: string
+  /** False means it cannot be evaluated: its inputs no longer line up. */
+  runnable: boolean
+  trained_layout: number | null
+  current_layout: number
+  /** term -> [what it was trained with, what it is now] */
+  reward_differences: Record<string, [number, number]>
+}
+
+export interface ModelEvaluation {
+  episodes: number
+  episodes_requested: number
+  cancelled: boolean
+  deterministic: boolean
+  mean_reward: number
+  std_reward: number
+  min_reward: number
+  max_reward: number
+  mean_episode_steps: number
+  mean_goals_reached: number
+  endings: Record<string, number>
+}
+
+export interface SavedModel {
+  model_id: string
+  path: string
+  archived: boolean
+  size_bytes: number
+  created_at: number
+  algorithm: string
+  card: Record<string, unknown> | null
+  card_error: string | null
+  compatibility: ModelCompatibility
+  total_timesteps: number | null
+  seed: number | null
+  scenario: string | null
+  evaluation: ModelEvaluation | null
+}
+
+export interface ModelList {
+  count: number
+  models: SavedModel[]
+  current_layout: number
+  available: boolean
+  install_hint: string | null
+  notice: string
+}
+
+export interface ModelComparison {
+  count: number
+  models: SavedModel[]
+  /** False when the policies were shaped differently, and why. */
+  comparable: boolean
+  detail: string
+  current_layout: number
 }

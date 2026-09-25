@@ -891,9 +891,80 @@ progress samples, a reward curve climbing from -82 to -58 — followed across a
 page reload, refused on top of a running simulation with the reason on screen,
 and cancelled part way with the partial policy saved. 570 backend tests.
 
-## PHASE 19 — Model centre
+## PHASE 19 — Model centre — **Complete**
 
-Model comparison and lifecycle: load, unload, evaluate, compare, archive.
+A `.zip` on disk is not a usable policy. It is weights that expect a particular
+observation vector, shaped by a particular reward. Run one against a different
+one and **nothing fails**: it loads, it flies, it returns a score, and the score
+looks exactly like a real measurement. That silent wrongness is what this phase
+is built around, which is why most of it is a refusal.
+
+Every saved policy now leads with a verdict rather than a size and a date:
+
+| Verdict | Meaning |
+|---|---|
+| `COMPATIBLE` | Same observation layout, same reward. It means what it meant. |
+| `DIFFERENT_REWARD` | Same layout, so it runs — but it was optimising something else, so its score is real and *not comparable*. |
+| `INCOMPATIBLE` | The layout has moved on. Its inputs no longer line up, so **evaluation is refused**. |
+| `UNKNOWN` | No card, or one that cannot be read. Nothing can be said about it, which is itself worth saying. |
+
+`DIFFERENT_REWARD` is deliberately still runnable. Measuring a policy shaped by
+another reward is exactly how you find out what that reward produced; what must
+not happen is quietly ranking it against one that was optimising something else.
+
+### Evaluation is a job, because it is slow
+
+Measured before building anything: three episodes took **76 seconds**. Far too
+long to hold an HTTP request open, so evaluation goes through the same runner
+training uses — which also settles the question of what happens when both are
+asked for at once. One job at a time now spans *both kinds*, because they
+saturate the same cores and running one of each would make both of their
+numbers meaningless.
+
+Cancellation lands between episodes rather than inside one: an episode is the
+smallest unit that can be stopped without reporting a partial one as if it had
+finished. A cancelled evaluation says how many episodes actually ran, and
+**does not write itself onto the card** — a mean over two of five episodes is a
+different measurement, and filing it as the policy's score would misrepresent it
+every time it was read afterwards.
+
+A complete one does go on the card, because a measurement that lived only in a
+job's memory would be gone at the next restart.
+
+### Archiving is not deleting
+
+A model that stops being interesting is usually not a model that should be
+destroyed, and an experiment that is no longer in the list is still evidence.
+Archiving moves the policy **and its card** into a subdirectory; a policy
+without its card is one nobody can judge. Delete is there too, and says what it
+does.
+
+### Two things the tests were written to stop
+
+*A model id is a path.* Ids arrive from the API, so `../` in one must not be
+able to read or unlink a file elsewhere. `path_for` refuses any id containing a
+separator or starting with a dot and checks the resolved parent, and a
+parametrised test walks the obvious attempts.
+
+*A comparison that quietly means nothing.* Lining up two policies is only
+meaningful when they were shaped alike and both have been measured, so the
+comparison states which of those conditions fail — different layouts, different
+rewards, different scenarios, or simply not evaluated yet. Same discipline as
+PHASE 17's `weights_hash`: numbers from different rulers do not go in one table
+without a warning.
+
+### What running it turned up
+
+The model list did not refresh when an evaluation finished. The score was
+written to the card correctly, the job showed COMPLETED in the panel above, and
+the list below still said "not evaluated" until the page was reloaded — asking
+the operator to reload to see the number they had just asked for. It now watches
+the job and refreshes itself when one ends.
+
+**Verified:** a real policy measured from the browser with the score persisted
+to its card; a policy with a stale observation layout marked INCOMPATIBLE, its
+evaluate button disabled, and its evaluation refused with 409; archive and
+restore round-tripping with the card following the policy. 599 backend tests.
 
 ## PHASE 20 — Production hardening
 

@@ -39,6 +39,9 @@ import type {
   TrainingEnvironmentSpec,
   TrainingJob,
   TrainingJobs,
+  ModelComparison,
+  ModelList,
+  SavedModel,
   TrainingReward,
   TrainingStatus,
   SensorStatus,
@@ -194,6 +197,22 @@ export const api = {
   trainingJob: (jobId: string) => request<TrainingJob>(`/api/training/jobs/${jobId}`),
   startTraining: (body: StartTrainingRequest) => post<TrainingJob>('/api/training/start', body),
   stopTraining: () => post<TrainingJob>('/api/training/stop'),
+
+  // Model centre (PHASE 19). Every policy carries a verdict on whether it
+  // still means anything against the environment as it is now.
+  models: (includeArchived = false) =>
+    request<ModelList>(`/api/models?include_archived=${includeArchived}`),
+  model: (modelId: string) => request<SavedModel>(`/api/models/${encodeURIComponent(modelId)}`),
+  compareModels: (modelIds: string[]) =>
+    request<ModelComparison>(`/api/models/compare?models=${encodeURIComponent(modelIds.join(','))}`),
+  evaluateModel: (modelId: string, episodes: number, seed?: number) =>
+    post<TrainingJob>(`/api/models/${encodeURIComponent(modelId)}/evaluate`, { episodes, seed: seed ?? null }),
+  archiveModel: (modelId: string) => post<SavedModel>(`/api/models/${encodeURIComponent(modelId)}/archive`),
+  restoreModel: (modelId: string) => post<SavedModel>(`/api/models/${encodeURIComponent(modelId)}/restore`),
+  deleteModel: (modelId: string) =>
+    request<{ model_id: string; removed: string[] }>(`/api/models/${encodeURIComponent(modelId)}`, {
+      method: 'DELETE',
+    }),
   // Teams, tasks and commanders (PHASE 14-15). Read-only: allocation happens
   // inside the tick, and a second source of orders would disagree with it.
   teams: () => request<{ count: number; teams: TeamPicture[] }>('/api/teams'),

@@ -79,13 +79,20 @@ class MetricPoint:
 
 @dataclass
 class TrainingJob:
-    """One training run, as the dashboard sees it."""
+    """One background job, as the dashboard sees it.
+
+    Training and evaluation share this because they share the machine: both
+    saturate the same cores, so allowing one of each at once would make both
+    of their timings meaningless. ``kind`` says which this is.
+    """
 
     job_id: str
     algorithm: str
     requested_timesteps: int
     seed: int
     evaluate_episodes: int
+    kind: str = "TRAIN"
+    model_id: str | None = None
     state: str = "PENDING"
     timesteps: int = 0
     started_at: float = field(default_factory=time.time)
@@ -104,6 +111,10 @@ class TrainingJob:
         bar is clamped; ``timesteps`` is not, and it is the figure the card and
         the history record.
         """
+        if self.kind == "EVALUATE":
+            if self.evaluate_episodes <= 0:
+                return 0.0
+            return min(1.0, self.timesteps / self.evaluate_episodes)
         if self.requested_timesteps <= 0:
             return 0.0
         return min(1.0, self.timesteps / self.requested_timesteps)
@@ -111,6 +122,8 @@ class TrainingJob:
     def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
+            "kind": self.kind,
+            "model_id": self.model_id,
             "algorithm": self.algorithm,
             "requested_timesteps": self.requested_timesteps,
             "timesteps": self.timesteps,
@@ -236,6 +249,7 @@ class TrainingJobRunner:
             "current": current.to_dict() if current else None,
             "history": [j.to_dict() for j in self.history()],
             "max_timesteps": self.settings.training.max_timesteps_per_job,
+            "max_evaluation_episodes": self.settings.training.max_evaluation_episodes,
             "algorithms": list(ALGORITHMS),
             "notice": (
                 "Training runs in this server process. One job at a time, and a job "
@@ -313,6 +327,74 @@ class TrainingJobRunner:
         )
         return job
 
+    def start_evaluation(
+        self,
+        model_id: str,
+        *,
+        episodes: int = 5,
+        seed: int | None = None,
+    ) -> TrainingJob:
+        """Measure a saved policy against the current environment.
+
+        Refused for a policy whose observation layout has moved on. That is not
+        caution: such a policy loads cleanly and produces actions, from numbers
+        that stopped meaning what they meant, and a score for it would look
+        exactly like a real one.
+        """
+        from training.registry import ModelRegistry
+
+        if not rl_available():
+            raise TrainingUnavailableError(
+                "The reinforcement-learning stack is not installed. Install it with:\n"
+                "    pip install -r requirements-ml.txt"
+            )
+        if episodes < 1:
+            raise TrainingRefusedError("episodes must be at least 1")
+        if episodes > self.settings.training.max_evaluation_episodes:
+            raise TrainingRefusedError(
+                f"{episodes} episodes is above the "
+                f"{self.settings.training.max_evaluation_episodes} cap in configs/training.yaml"
+            )
+        if self.simulation_is_running():
+            raise TrainingRefusedError(
+                "a simulation is running — evaluating would compete with it for the same "
+                "cores and both would slow down. Stop the simulation first."
+            )
+
+        # Raises if the model is missing or cannot mean anything here.
+        entry = ModelRegistry(self.settings).require_runnable(model_id)
+
+        with self._lock:
+            if self._current is not None and self._current.state not in FINISHED:
+                raise TrainingBusyError(
+                    f"job {self._current.job_id} is already running — stop it before starting another"
+                )
+            job = TrainingJob(
+                job_id=f"JOB-{int(time.time() * 1000) % 100_000_000:08d}-{next(_job_counter):03d}",
+                kind="EVALUATE",
+                model_id=model_id,
+                algorithm=str(entry.get("algorithm") or "ppo"),
+                requested_timesteps=0,
+                seed=seed if seed is not None else self.settings.simulation.seed,
+                evaluate_episodes=episodes,
+            )
+            self._current = job
+            self._thread = threading.Thread(
+                target=self._run_evaluation, args=(job, entry), name=f"evaluate-{job.job_id}", daemon=True
+            )
+            self._thread.start()
+
+        log.info(
+            "evaluation job started",
+            extra={
+                "event": "EVALUATION_JOB_STARTED",
+                "job_id": job.job_id,
+                "model": model_id,
+                "episodes": episodes,
+            },
+        )
+        return job
+
     def stop(self) -> TrainingJob | None:
         """Ask the running job to stop at the next step boundary."""
         with self._lock:
@@ -332,6 +414,68 @@ class TrainingJobRunner:
             thread.join(timeout)
 
     # ----------------------------------------------------------------- worker
+
+    def _run_evaluation(self, job: TrainingJob, entry: dict[str, Any]) -> None:
+        from training.registry import ModelRegistry
+
+        pipeline = TrainingPipeline(self.settings, repository=self.repository)
+        registry = ModelRegistry(self.settings)
+        with self._lock:
+            job.state = "RUNNING"
+
+        started = time.perf_counter()
+
+        def on_episode(done: int, total: int, mean_reward: float) -> bool:
+            with self._lock:
+                job.timesteps = done
+                job.metrics.append(
+                    MetricPoint(
+                        timesteps=done,
+                        elapsed_s=time.perf_counter() - started,
+                        episode_reward_mean=round(mean_reward, 4),
+                    )
+                )
+                return not job.cancel_requested
+
+        try:
+            evaluation = pipeline.evaluate_saved(
+                entry["path"],
+                episodes=job.evaluate_episodes,
+                seed=job.seed,
+                on_episode=on_episode,
+            )
+            # Only a complete evaluation goes on the card. A mean over two of
+            # five episodes is a different measurement, and writing it as the
+            # policy's score would misrepresent it every time it was read after.
+            if not evaluation.get("cancelled"):
+                registry.save_evaluation(job.model_id or "", evaluation)
+
+            with self._lock:
+                job.state = "CANCELLED" if evaluation.get("cancelled") else "COMPLETED"
+                job.result = {"model_id": job.model_id, "evaluation": evaluation}
+                job.ended_at = time.time()
+            log.info(
+                "evaluation job finished",
+                extra={
+                    "event": "EVALUATION_JOB_FINISHED",
+                    "job_id": job.job_id,
+                    "state": job.state,
+                    "episodes": evaluation.get("episodes"),
+                },
+            )
+        except BaseException as exc:  # the thread must report a failure, not vanish
+            with self._lock:
+                job.state = "FAILED"
+                job.error = f"{type(exc).__name__}: {exc}"
+                job.ended_at = time.time()
+            log.exception(
+                "evaluation job failed",
+                extra={"event": "EVALUATION_JOB_FAILED", "job_id": job.job_id},
+            )
+        finally:
+            with self._lock:
+                self._history.append(job)
+                self._history = self._history[-50:]
 
     def _run(self, job: TrainingJob) -> None:
         pipeline = TrainingPipeline(self.settings, repository=self.repository)

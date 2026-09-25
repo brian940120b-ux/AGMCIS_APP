@@ -69,6 +69,7 @@
 | `simulation/jsbsim_adapter.py` | JSBSim behind the Integrator protocol, one FDM per entity | 16 |
 | `analytics/series.py` | Stored rows to chart-ready series; cannot reach a tick | 17 |
 | `training/jobs.py` | One cancellable training job at a time, with progress | 18 |
+| `training/registry.py` | Saved policies, and whether each still means anything | 19 |
 
 ## Determinism
 
@@ -231,6 +232,31 @@ differently would disagree about the same run.
 **Empty is a fact, not a chart.** A run that recorded nothing returns
 `available: false` with the reason, never empty series. Drawing a flat line at
 zero would be a claim about the run rather than an absence of data.
+
+## A model is only meaningful against the environment that shaped it
+
+A saved policy is weights plus an implicit contract: this observation vector,
+this reward. Break either and nothing throws — the policy loads, acts, and
+scores. `training/registry.py` exists to make that contract explicit and to
+refuse the cases where it no longer holds.
+
+```
+model.zip + model.json ─┐
+                        ├─> assess() ─> COMPATIBLE       → run and compare
+current layout ─────────┤              DIFFERENT_REWARD  → run, do not compare
+current reward ─────────┘              INCOMPATIBLE      → refuse
+                                       UNKNOWN           → refuse
+```
+
+The distinction between the two refusable verdicts and the two runnable ones is
+the design. `DIFFERENT_REWARD` runs because measuring a policy shaped by another
+reward is how you learn what that reward produced. `INCOMPATIBLE` does not,
+because its inputs no longer line up and its output would be noise wearing the
+shape of a decision.
+
+This is the same rule PHASE 9 applied to scores and PHASE 17 to run comparisons:
+**numbers measured against different rulers do not go in one table without a
+warning**. Here the ruler is the environment itself.
 
 ## Scenarios are written through one door
 

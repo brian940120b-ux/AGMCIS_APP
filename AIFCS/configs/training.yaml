@@ -13,6 +13,9 @@ training:
   # should not be able to commit the server to a week of compute. The command
   # line has no cap — a long run belongs there, where it can be watched.
   max_timesteps_per_job: 500000
+  # Ceiling on an evaluation started from the dashboard (PHASE 19). Each episode
+  # runs to the episode limit above, so this is minutes, not seconds.
+  max_evaluation_episodes: 20
 
 ppo:
   total_timesteps: 200000

@@ -16,6 +16,7 @@ import { SafetyPanel } from '@/components/SafetyPanel'
 import { SimulationControls } from '@/components/SimulationControls'
 import { StateBadge } from '@/components/StateBadge'
 import { SystemStatusPanel } from '@/components/SystemStatusPanel'
+import { ModelCentre } from '@/components/ModelCentre'
 import { TrainingCentre } from '@/components/TrainingCentre'
 import { TrainingPanel } from '@/components/TrainingPanel'
 import { TacticalPlot } from '@/components/TacticalPlot'
@@ -164,9 +165,13 @@ export function CommandCenter() {
         </div>
       )}
 
+      {/* Training and the model centre are one stage: a policy is trained and
+          then judged, and the evaluation runs on the same one-at-a-time job
+          runner the training does. */}
       {stageMode === 'training' && (
-        <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col p-3">
+        <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-3 overflow-y-auto p-3">
           <TrainingCentre />
+          <ModelCentre />
         </div>
       )}
 

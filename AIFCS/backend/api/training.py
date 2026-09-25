@@ -36,6 +36,11 @@ from training.pipeline import (
     resolve_device,
     rl_available,
 )
+from training.registry import (
+    ModelIncompatibleError,
+    ModelNotFoundError,
+    ModelRegistry,
+)
 from training.reward import TERM_NAMES
 
 log = get_logger("api.training")
@@ -198,3 +203,125 @@ def training_stop(runner: TrainingJobRunner = Depends(get_training_runner)) -> d
     if job is None:
         raise HTTPException(status_code=409, detail="no training job is running")
     return job.to_dict()
+
+
+# ------------------------------------------------------------------- PHASE 19
+
+
+class EvaluateRequest(BaseModel):
+    """How thoroughly to measure a saved policy."""
+
+    episodes: int = Field(default=5, ge=1, le=50)
+    seed: int | None = Field(default=None, description="Defaults to the simulation seed")
+
+
+def _registry(settings: Settings) -> ModelRegistry:
+    return ModelRegistry(settings)
+
+
+def _model_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ModelNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    # 409: the model exists, but running it here would not mean anything.
+    return HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/models")
+def models_list(
+    include_archived: bool = Query(default=False),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Every saved policy with a verdict on whether it still means anything."""
+    from training.observation_encoder import LAYOUT_VERSION
+
+    found = _registry(settings).list_models(include_archived=include_archived)
+    return {
+        "count": len(found),
+        "models": found,
+        "current_layout": LAYOUT_VERSION,
+        "available": rl_available(),
+        "install_hint": None if rl_available() else INSTALL_HINT,
+        "notice": (
+            "A policy trained against a different observation layout still loads and still "
+            "produces actions — from numbers that stopped meaning what they meant. Those are "
+            "marked INCOMPATIBLE and cannot be evaluated."
+        ),
+    }
+
+
+@router.get("/models/compare")
+def models_compare(
+    models: str = Query(description="Two or more model ids, comma separated"),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Line several policies up, and say whether lining them up means anything."""
+    wanted = [m.strip() for m in models.split(",") if m.strip()]
+    if len(wanted) < 2:
+        raise HTTPException(status_code=400, detail="give at least two model ids to compare")
+    if len(wanted) > 6:
+        raise HTTPException(status_code=400, detail="compare at most six models at once")
+    try:
+        return _registry(settings).compare(wanted)
+    except ModelNotFoundError as exc:
+        raise _model_error(exc) from exc
+
+
+@router.get("/models/{model_id}")
+def model_detail(model_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """One policy, its card and its verdict."""
+    try:
+        return _registry(settings).get(model_id)
+    except ModelNotFoundError as exc:
+        raise _model_error(exc) from exc
+
+
+@router.post("/models/{model_id}/evaluate")
+def model_evaluate(
+    model_id: str,
+    request: EvaluateRequest,
+    runner: TrainingJobRunner = Depends(get_training_runner),
+) -> dict[str, Any]:
+    """Measure a saved policy, as a background job.
+
+    Evaluation is not quick — an episode runs to the episode limit — so it goes
+    through the same one-at-a-time runner as training rather than holding a
+    request open for minutes.
+    """
+    try:
+        job = runner.start_evaluation(model_id, episodes=request.episodes, seed=request.seed)
+    except TrainingUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except TrainingBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TrainingRefusedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ModelNotFoundError, ModelIncompatibleError) as exc:
+        raise _model_error(exc) from exc
+    return job.to_dict()
+
+
+@router.post("/models/{model_id}/archive")
+def model_archive(model_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Move a policy out of the active list, keeping the file and its card."""
+    try:
+        return _registry(settings).archive(model_id)
+    except ModelNotFoundError as exc:
+        raise _model_error(exc) from exc
+
+
+@router.post("/models/{model_id}/restore")
+def model_restore(model_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Bring an archived policy back into the active list."""
+    try:
+        return _registry(settings).restore(model_id)
+    except ModelNotFoundError as exc:
+        raise _model_error(exc) from exc
+
+
+@router.delete("/models/{model_id}")
+def model_delete(model_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Delete a policy and its card. Archiving is usually what is wanted."""
+    try:
+        return _registry(settings).delete(model_id)
+    except ModelNotFoundError as exc:
+        raise _model_error(exc) from exc

@@ -467,6 +467,9 @@ class TrainingSettings(BaseModel):
     # should not be able to commit the server to a week of compute; the command
     # line is still there for a long run.
     max_timesteps_per_job: int = Field(default=500_000, ge=1)
+    # Ceiling on an evaluation started from the dashboard (PHASE 19). An episode
+    # runs to the episode limit, so a large number here is a long wait.
+    max_evaluation_episodes: int = Field(default=20, ge=1)
 
     @field_validator("device")
     @classmethod

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -256,18 +257,27 @@ class TrainingPipeline:
         episodes: int = 5,
         seed: int | None = None,
         deterministic: bool = True,
+        on_episode: Callable[[int, int, float], bool] | None = None,
     ) -> dict[str, Any]:
         """Run finished episodes and report what the policy actually did.
 
         Deliberately not just a mean reward: a policy that scores well by
         circling and one that scores well by flying the route are very
         different, and only the extra fields tell them apart.
+
+        ``on_episode`` is called after each finished episode with the number
+        done, the number asked for and the running mean reward. Returning False
+        stops early — an episode is the smallest unit that can be stopped
+        without reporting a partial one as if it had finished. The result then
+        says how many episodes actually ran and that it was cut short, because
+        a mean over two episodes is not a mean over five.
         """
         env = self.make_env(seed=seed)
         rewards: list[float] = []
         lengths: list[int] = []
         goals: list[int] = []
         endings: dict[str, int] = {}
+        cancelled = False
 
         for episode in range(episodes):
             observation, _ = env.reset(seed=(seed or 0) + episode)
@@ -285,9 +295,15 @@ class TrainingPipeline:
             ending = str(info.get("terminated_reason") or "time_limit")
             endings[ending] = endings.get(ending, 0) + 1
 
+            if on_episode is not None and not on_episode(episode + 1, episodes, float(np.mean(rewards))):
+                cancelled = True
+                break
+
         env.close()
         return {
-            "episodes": episodes,
+            "episodes": len(rewards),
+            "episodes_requested": episodes,
+            "cancelled": cancelled,
             "deterministic": deterministic,
             "mean_reward": round(float(np.mean(rewards)), 3),
             "std_reward": round(float(np.std(rewards)), 3),
@@ -299,10 +315,15 @@ class TrainingPipeline:
         }
 
     def evaluate_saved(
-        self, model_path: str | Path, *, episodes: int = 5, seed: int | None = None
+        self,
+        model_path: str | Path,
+        *,
+        episodes: int = 5,
+        seed: int | None = None,
+        on_episode: Callable[[int, int, float], bool] | None = None,
     ) -> dict[str, Any]:
         model, _ = self.load(model_path)
-        return self.evaluate(model, episodes=episodes, seed=seed)
+        return self.evaluate(model, episodes=episodes, seed=seed, on_episode=on_episode)
 
     # ------------------------------------------------------- saving, loading
 

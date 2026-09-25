@@ -139,7 +139,7 @@ export function TrainingCentre() {
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 [&>*]:shrink-0">
+    <div className="flex min-h-0 flex-col gap-3 [&>*]:shrink-0">
       <Panel
         title="Training Centre"
         subtitle={jobs?.notice ?? 'reinforcement learning'}
