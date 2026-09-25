@@ -25,6 +25,13 @@ tests assert that what one produces the other produces.
 """
 
 from competition.action import JoystickState, shape_command
+from competition.client import (
+    CONNECTED_AFTER_FRAMES,
+    ClientStats,
+    CompetitionClient,
+    Endpoint,
+    serve,
+)
 from competition.protocol import (
     CMD_PACKET_BYTES,
     OBS_PACKET_BYTES,
@@ -38,15 +45,20 @@ from competition.state import STATE_SIZE, StateEncoder, Telemetry
 
 __all__ = [
     "CMD_PACKET_BYTES",
+    "CONNECTED_AFTER_FRAMES",
     "OBS_PACKET_BYTES",
     "PLAYER_CMD_TRAILER",
     "STATE_SIZE",
+    "ClientStats",
     "Command",
+    "CompetitionClient",
+    "Endpoint",
     "JoystickState",
     "PlayerState",
     "StateEncoder",
     "Telemetry",
     "decode_observation",
     "encode_command",
+    "serve",
     "shape_command",
 ]
