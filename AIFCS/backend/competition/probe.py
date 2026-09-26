@@ -162,6 +162,31 @@ class Recorder:
         )
 
 
+def _from_first_motion(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop the frames where the host is holding the aircraft still.
+
+    The host freezes both aircraft between INIT and START and keeps sending
+    packets while it does, so a round begins with a stretch where the position
+    is byte-identical frame to frame. `analyse` already counts them: the
+    2026-09-26 recording has 374, which is 6.23 seconds.
+
+    Starting a replay at frame zero flies ours through those 6.23 seconds while
+    the host sits still, and then compares t against t+6.23. That is what the
+    "+14%, a different aeroplane" verdict was measuring. Aligned on first
+    motion the two pitch traces agree to a tenth of a degree at ten and twenty
+    seconds, and the aeroplanes turn out to be the same one.
+    """
+    for index, (previous, current) in enumerate(itertools.pairwise(frames)):
+        moved = (previous["lat"], previous["lon"], previous["alt_ft"]) != (
+            current["lat"],
+            current["lon"],
+            current["alt_ft"],
+        )
+        if moved:
+            return frames[index:]
+    return frames
+
+
 def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[str, Any]:
     """Fly our own plant through the host's recorded dive and compare the traces.
 
@@ -183,7 +208,9 @@ def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[
     from competition.action import JoystickState, shape_command
     from competition.environment import Aircraft, resolve_jsbsim_root
 
-    flying = [f for f in frames if f["round"] >= 1]
+    in_round = [f for f in frames if f["round"] >= 1]
+    flying = _from_first_motion(in_round)
+    held = len(in_round) - len(flying)
     if len(flying) < 10 * 60:
         return {"verdict": "need at least 10 s of flying frames to compare"}
 
@@ -285,6 +312,14 @@ def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[
             "and a policy is trained on the aeroplane"
         )
     return {
+        # How many frames of the round the host spent holding the aircraft
+        # still before letting it go. Reported rather than assumed: a shift of
+        # 6.2 s aligns the two pitch traces to a tenth of a degree, and 6.2 s
+        # is 374 frames, which is what the 2026-09-26 recording counted. That
+        # is suggestive, not proof, until this number says the hold was inside
+        # the round and this replay skipped it.
+        "held_frames_skipped": held,
+        "held_seconds_skipped": round(held / 60.0, 2),
         "host_opening": {
             "pitch_deg": round(first["pitch"], 2),
             "alpha_deg": round(first["alpha"], 2),

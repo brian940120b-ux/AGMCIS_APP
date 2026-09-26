@@ -494,3 +494,45 @@ def test_two_aircraft_starting_level_and_only_one_dropping_its_nose_is_named():
     assert "drops its nose" in verdict
     assert "elevator trim, CG, or pitching moment" in verdict
     assert result["host_opening"]["nose_gap_at_10s_deg"] < -5.0, "ours is nose-down by then"
+
+
+def test_the_replay_starts_where_the_host_lets_the_aircraft_go():
+    """The host freezes both aircraft between INIT and START and keeps sending
+    packets while it does. Flying ours through that stretch compares t against
+    t plus the hold, which is what produced "+14%, a different aeroplane"."""
+    from competition.probe import _from_first_motion
+
+    held = [{"lat": 0.0, "lon": 0.0, "alt_ft": 18084.0, "frame_in_round": i} for i in range(374)]
+    moving = [
+        {"lat": 1e-6 * i, "lon": 0.0, "alt_ft": 18084.0 - i, "frame_in_round": 374 + i} for i in range(1, 600)
+    ]
+    kept = _from_first_motion(held + moving)
+
+    assert len(kept) == len(moving) + 1, "the last held frame is where motion begins"
+    assert kept[1]["frame_in_round"] == 375
+
+
+def test_a_recording_that_never_holds_loses_nothing():
+    from competition.probe import _from_first_motion
+
+    moving = [{"lat": 1e-6 * i, "lon": 0.0, "alt_ft": 18084.0 - i} for i in range(100)]
+    assert _from_first_motion(moving) == moving
+
+
+def test_the_comparison_itself_skips_the_hold_and_says_how_much():
+    """The wiring, which a correct helper does not give you.
+
+    Removing the alignment call from replay_locally left every test green the
+    first time — the third time in this file that a helper was tested and the
+    call site was not. What this asserts is the reported count, because that
+    number is also how the real recording settles whether the hold is inside
+    the round at all: 374 would confirm it, 0 would sink the theory.
+    """
+    from competition.probe import replay_locally
+
+    flying = _host_shaped_dive()
+    held = [dict(flying[0], lat=0.0, lon=0.0, frame_in_round=i) for i in range(374)]
+
+    result = replay_locally(held + flying)
+    assert result["held_frames_skipped"] == 374
+    assert result["held_seconds_skipped"] == pytest.approx(6.23, abs=0.01)
