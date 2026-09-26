@@ -532,3 +532,57 @@ cd ~/AGMCIS_APP/AIFCS && cat models/competition/run1/state.json
 **但是已經寫壞的舊數值不會自己變對。** 如果你的 session 是在這個修正之前開始
 練的，`state.json` 和模型卡上的 `wall_clock_s` 都偏大。步數（`timesteps_done`）
 **沒有受影響**，那個一直是對的。
+
+
+---
+
+# 一鍵驗收:`tryout.bat`
+
+新加的東西全部在你的機器上跑一遍,**每個數字都是當場量的**。
+
+## 怎麼開
+
+用檔案總管走到 `C:\Users\user\AGMCIS_APP\AIFCS\scripts\`,雙擊 **`tryout.bat`**。
+
+或在 Git Bash:
+
+```bash
+cd ~/AGMCIS_APP/AIFCS && scripts/tryout.bat
+```
+
+**大約兩分鐘。什麼都不會存,現有的訓練不受影響。**
+
+## 它會檢查六件事
+
+| # | 檢查 | 看什麼 |
+|---|---|---|
+| 1 | **防墜地板** | 墜毀率應該從 100% 掉到 0% |
+| 2 | **四種獎勵** | `score` 對墜毀給正分,`margin` 給負分 |
+| 3 | **觀測特徵** | 20 維 vs 30 維,以及十個新輸入的實際值 |
+| 4 | **對手** | 靶機五分鐘後在 45 km 外,`pursuit` 轉向我方 |
+| 5 | **Action repeat** | 兩種設定都是每幀回一個封包 |
+| 6 | **訓練** | 全部選項打開跑一段,確認你的 GPU 吃得下 |
+
+## 最後會給結論
+
+```
+=============================================
+  OK    ground avoidance
+  OK    reward modes
+  OK    observation
+  OK    opponents
+  OK    action repeat
+  OK    training
+  Everything works here. 全部正常。
+```
+
+**任何一項 FAIL,把整段貼給我。** 它會印出失敗的原因,不是只說失敗。
+
+## 跑快一點 / 跑仔細一點
+
+```bash
+scripts/tryout.bat --rounds 1 --steps 200     # 快
+scripts/tryout.bat --rounds 6 --steps 5000    # 仔細
+```
+
+`--rounds` 是每個比較跑幾個回合,`--steps` 是最後那段訓練的決策數。

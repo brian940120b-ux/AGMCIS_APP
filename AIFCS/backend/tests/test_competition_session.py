@@ -173,7 +173,14 @@ def test_keep_awake_is_harmless_where_it_does_not_apply():
 # -------------------------------------------------- the double-click scripts
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
-BATCH_FILES = ["train.bat", "install_shortcuts.bat", "update.bat", "start.bat", "stop.bat"]
+BATCH_FILES = [
+    "train.bat",
+    "install_shortcuts.bat",
+    "update.bat",
+    "start.bat",
+    "stop.bat",
+    "tryout.bat",
+]
 
 
 @pytest.mark.parametrize("name", BATCH_FILES)
@@ -525,3 +532,25 @@ def test_the_components_that_are_imported_are_the_ones_that_are_used():
     assert "<Html" in aircraft
     assert "@react-three/drei/core/OrbitControls" in camera
     assert "<OrbitControls" in camera
+
+
+def test_the_tryout_runs_every_upgrade_and_says_which_one_broke():
+    """One command that exercises the new options on the machine that matters.
+
+    The suite answers "is it correct"; this answers "does it work on your
+    hardware, and what are the numbers there". Pinned because a check that
+    quietly stops covering something is worse than no check — the point of it
+    is the list.
+    """
+    source = (SCRIPTS.parent / "backend" / "competition" / "tryout.py").read_text(encoding="utf-8")
+    for upgrade in (
+        "ground_avoidance",
+        "reward",
+        "observation",
+        "opponent",
+        "action_repeat",
+        "training",
+    ):
+        assert upgrade in source, f"the tryout should exercise {upgrade}"
+    # And it has to fail loudly rather than print numbers and exit zero.
+    assert "return 1" in source
