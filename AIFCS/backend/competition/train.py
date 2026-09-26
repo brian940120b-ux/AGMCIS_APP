@@ -30,9 +30,11 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from competition.action import RUDDER_LIMIT
 from competition.environment import EnvConfig, RoundSetup
 from competition.gym_env import make_vec_env
 from competition.rewards import RewardMode
+from competition.safety import GroundAvoidance
 from competition.session import (
     IncompatibleSession,
     KeepAwake,
@@ -54,8 +56,11 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
         setup=setup,
         jsbsim_root=args.jsbsim_root,
         rudder_enabled=args.rudder,
+        rudder_limit=args.rudder_limit,
         opponent=args.opponent,
         speed_before_altitude=args.reference_speed_order,
+        action_repeat=args.action_repeat,
+        ground_avoidance=GroundAvoidance() if args.ground_avoidance else None,
     )
 
 
@@ -75,25 +80,35 @@ BANNER = "\n".join(
 )
 
 
-def _horizon_seconds(gamma: float, tick_hz: float = 60.0) -> float:
+def _horizon_seconds(gamma: float, action_repeat: int = 1, tick_hz: float = 60.0) -> float:
     """How far ahead the value function can see, in seconds.
 
-    1/(1-gamma) frames is the standard reading of a discount as a horizon. It
-    is printed because 0.99 sounds like "almost everything" and means 1.7
-    seconds here, against a kill that needs three.
+    1/(1-gamma) *decisions* is the standard reading of a discount as a horizon,
+    and a decision lasts `action_repeat` frames — which is the whole point of
+    repeating one. At 60 Hz and gamma 0.99 that is 1.7 s deciding every frame
+    and 10 s deciding every sixth, from the same discount.
+
+    Printed because 0.99 sounds like "almost everything", and because the first
+    version of this line ignored the repeat and so reported the one number the
+    reader would use to choose a discount, wrongly.
     """
     if gamma >= 1.0:
         return float("inf")
-    return 1.0 / (1.0 - gamma) / tick_hz
+    return 1.0 / (1.0 - gamma) * action_repeat / tick_hz
 
 
 def describe_hyperparameters(args: argparse.Namespace) -> dict[str, Any]:
     """The settings that make a run a different experiment, not a longer one."""
     described: dict[str, Any] = {
         "gamma": args.gamma,
+        # Recorded beside it because a discount only means a horizon once you
+        # know how long a decision lasts.
+        "horizon_s": round(_horizon_seconds(args.gamma, args.action_repeat), 2),
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
         "sde": bool(args.sde),
+        "hidden": list(args.hidden),
+        "activation": "relu" if args.relu else "tanh",
     }
     if args.algorithm == "sac":
         described["gradient_steps"] = args.gradient_steps
@@ -142,7 +157,10 @@ def train(args: argparse.Namespace) -> int:
         print(f"starting {args.name}: {args.timesteps:,} steps\n")
 
     env = make_vec_env(args.workers, config, args.reward, seed=args.seed + state.runs)
-    policy_kwargs: dict[str, Any] = {"net_arch": [256, 256], "activation_fn": th.nn.Tanh}
+    policy_kwargs: dict[str, Any] = {
+        "net_arch": list(args.hidden),
+        "activation_fn": th.nn.ReLU if args.relu else th.nn.Tanh,
+    }
     if args.sde:
         policy_kwargs["use_sde"] = True
         policy_kwargs["log_std_init"] = -2
@@ -194,7 +212,14 @@ def train(args: argparse.Namespace) -> int:
     # used?" should not require reading the library's source.
     print(f"device:   {model.device}")
     print(f"workers:  {args.workers} parallel simulations")
-    print(f"horizon:  gamma {args.gamma} — {_horizon_seconds(args.gamma):.1f} s of future at 60 Hz")
+    horizon = _horizon_seconds(args.gamma, args.action_repeat)
+    if args.action_repeat > 1:
+        rate = 60.0 / args.action_repeat
+        print(
+            f"decisions: every {args.action_repeat} frames ({rate:.0f} Hz) — "
+            f"{int(300 * rate):,} per round, and --timesteps counts these, not frames"
+        )
+    print(f"horizon:  gamma {args.gamma} — {horizon:.1f} s of future")
 
     remaining = args.timesteps - state.timesteps_done
     state.runs += 1
@@ -308,6 +333,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--opponent", choices=["reference", "level"], default="reference")
     parser.add_argument("--rudder", action="store_true", help="unlock the rudder channel")
+    parser.add_argument(
+        "--rudder-limit",
+        type=float,
+        default=RUDDER_LIMIT,
+        help=(
+            "how far the rudder may deflect. 表 2 of the specification allows "
+            "-1~+1; the sample client clips itself to 0.2, which is the default here"
+        ),
+    )
+    parser.add_argument(
+        "--action-repeat",
+        type=int,
+        default=1,
+        help=(
+            "frames one decision is held for. 1 is the reference's 60 Hz and "
+            "18,000 decisions a round; 6 is 10 Hz, the rate PHANG-MAN's "
+            "high-level policy ran at. A command still goes back every frame"
+        ),
+    )
+    parser.add_argument(
+        "--ground-avoidance",
+        action="store_true",
+        help="a rule-based pull-up under the policy; allowed by 公告說明 一.1.(2)",
+    )
+    parser.add_argument(
+        "--hidden",
+        type=int,
+        nargs="+",
+        default=[256, 256],
+        help=(
+            "hidden layer widths. The sample uses 256 256; PHANG-MAN used a "
+            "single layer of 12288, citing that wide and shallow beats narrow "
+            "and deep at equal neuron count"
+        ),
+    )
+    parser.add_argument("--relu", action="store_true", help="ReLU instead of Tanh, as PHANG-MAN used")
     parser.add_argument("--jsbsim-root", default=None)
     parser.add_argument("--reference-setup", action="store_true")
     parser.add_argument(

@@ -34,7 +34,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -43,9 +43,11 @@ import numpy as np
 from competition.action import (
     ELEVATOR_LIMIT_HIGH_SPEED,
     INITIAL_THROTTLE,
+    RUDDER_LIMIT,
     JoystickState,
     shape_command,
 )
+from competition.safety import GroundAvoidance
 from competition.scoring import (
     COLLISION_DISTANCE_M,
     CRASH_ALTITUDE_M,
@@ -325,6 +327,11 @@ class EnvConfig:
     #: The reference pins the rudder to zero through its action space, so its
     #: policy has never used one. False reproduces that exactly.
     rudder_enabled: bool = False
+    #: How far the rudder may actually deflect once unlocked. 表 2 of the
+    #: 公告說明 allows -1~+1; the sample client clips itself to 0.2 and its
+    #: training action space pins it shut. The default is the sample's, because
+    #: that is what has a trained policy behind it.
+    rudder_limit: float = RUDDER_LIMIT
     round_seconds: float = ROUND_SECONDS
     #: 0.4 is what the competition client applies above Mach 0.8. 1.0 is what
     #: the reference *trainer* applies, which is no limit at all — and is what
@@ -336,6 +343,27 @@ class EnvConfig:
     #: "reference" ports the package's own auto_run; "level" is a simpler
     #: hold that flies straight on a fixed throttle and outruns the pursuer.
     opponent: str = "reference"
+    #: A rule-based pull-up under the policy. None is the reference's
+    #: behaviour: nothing catches the aircraft. See `safety.py`.
+    ground_avoidance: GroundAvoidance | None = None
+    #: How many 60 Hz frames one decision is held for.
+    #:
+    #: 1 reproduces the reference, which decides sixty times a second — 18,000
+    #: decisions in a round, which is a great many to assign credit across. It
+    #: is also more often than the aircraft can answer: the stick's own rate
+    #: limit moves the elevator 0.026 per frame, so full deflection takes 38
+    #: frames and most of that decision bandwidth goes nowhere. 6 gives 10 Hz,
+    #: which is the rate the PHANG-MAN agent's high-level policy ran at.
+    #:
+    #: The rules are unaffected: a command still goes back every frame (注意
+    #: 事項 10), it is simply the same command. What changes is how often the
+    #: policy is asked, and that must change identically in training and on the
+    #: day — which is why it lives in the config both sides read.
+    action_repeat: int = 1
+
+    def __post_init__(self) -> None:
+        if self.action_repeat < 1:
+            raise ValueError(f"action_repeat is a number of frames, not {self.action_repeat}")
 
     def describe(self) -> dict[str, Any]:
         """What a model card needs to say this policy is comparable."""
@@ -345,9 +373,12 @@ class EnvConfig:
             "speed_kcas": self.setup.speed_kcas,
             "jsbsim_root": self.jsbsim_root or "installed package",
             "rudder_enabled": self.rudder_enabled,
+            "rudder_limit": self.rudder_limit,
             "high_speed_elevator_limit": self.high_speed_elevator_limit,
             "speed_before_altitude": self.speed_before_altitude,
             "opponent": self.opponent,
+            "action_repeat": self.action_repeat,
+            "ground_avoidance": None if self.ground_avoidance is None else asdict(self.ground_avoidance),
             "round_seconds": self.round_seconds,
             "attack_half_angle_deg": self.envelope.half_angle_deg,
             "attack_range_ft": [self.envelope.min_range_ft, self.envelope.max_range_ft],
@@ -452,6 +483,15 @@ class CompetitionRound:
     def geometry(self) -> Geometry:
         return self.encoder.geometry(self.telemetry())
 
+    def foe_geometry(self) -> Geometry:
+        """The same frame from the opponent's side.
+
+        Already computed each step to score them; exposed because a reward that
+        is the score *margin* needs both halves, and recomputing it somewhere
+        else is how two copies of a thing start to disagree.
+        """
+        return self.encoder.geometry(self.foe.telemetry_against(self.own))
+
     def observe(self) -> np.ndarray:
         return self.encoder.encode(self.telemetry())
 
@@ -460,11 +500,14 @@ class CompetitionRound:
     def step(self, raw_action: np.ndarray) -> tuple[np.ndarray, Geometry, bool, str]:
         """Advance one frame. Returns the new state, the geometry, and why it ended."""
         telemetry = self.telemetry()
+        if self.config.ground_avoidance is not None:
+            raw_action = self.config.ground_avoidance(raw_action, telemetry)
         command = shape_command(
             raw_action,
             self.joystick,
             telemetry.reference_mach,
             high_speed_elevator_limit=self.config.high_speed_elevator_limit,
+            rudder_limit=self.config.rudder_limit,
         )
         self.own.apply(command)
 

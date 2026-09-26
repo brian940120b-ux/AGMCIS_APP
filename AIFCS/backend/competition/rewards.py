@@ -37,6 +37,13 @@ FT_PER_M = 1.0 / 0.3048
 class RewardMode(StrEnum):
     REFERENCE = "reference"
     SCORE = "score"
+    #: The score, minus the opponent's. The rules decide a round that reaches
+    #: time by 作戰優勢分高者勝 — whose advantage score is larger — so what
+    #: settles it is the difference, and denying a point is worth scoring one.
+    MARGIN = "margin"
+    #: The margin plus shaping the score cannot provide, because the score is a
+    #: measurement and not a teacher. See `ShapedReward`.
+    SHAPED = "shaped"
 
 
 def sigmoid(x: float, rate: float, midpoint: float) -> float:
@@ -118,6 +125,21 @@ class ScoreReward:
     def reset(self) -> None:  # no memory, but the interface is shared
         return None
 
+    #: Subtract the opponent's own advantage for this frame, making the reward
+    #: the per-frame change in the score *margin*. Off by default so that
+    #: `score` stays exactly the competition's own number for one side.
+    defensive: bool = False
+
+    def frame_advantage(self, geometry: Geometry, g_load: float) -> float:
+        """One side's contribution to `S_advantage` for one frame, unscaled."""
+        dt = 1.0 / self.tick_hz
+        value = self.weights.position * position_advantage(geometry)
+        if self.envelope.contains(geometry):
+            value += self.weights.attack_time * dt
+        if abs(g_load) > G_LIMIT:
+            value -= self.weights.high_g * dt
+        return value
+
     def __call__(
         self,
         geometry: Geometry,
@@ -126,6 +148,9 @@ class ScoreReward:
         crashed: bool,
         foe_crashed: bool,
         killed_at_s: float | None = None,
+        foe_geometry: Geometry | None = None,
+        foe_g_load: float = 0.0,
+        foe_killed_at_s: float | None = None,
     ) -> float:
         if crashed:
             return self.crash_penalty
@@ -134,13 +159,131 @@ class ScoreReward:
             # sky is not an achievement, and paying for it teaches patience.
             return 0.0
 
-        dt = 1.0 / self.tick_hz
-        reward = self.weights.position * position_advantage(geometry)
-        if self.envelope.contains(geometry):
-            reward += self.weights.attack_time * dt
-        if abs(g_load) > G_LIMIT:
-            reward -= self.weights.high_g * dt
-
+        reward = self.frame_advantage(geometry, g_load)
         if killed_at_s is not None:
             reward += self.weights.kill_base + (self.weights.kill_time_budget_s - killed_at_s)
+
+        if self.defensive and foe_geometry is not None:
+            reward -= self.frame_advantage(foe_geometry, foe_g_load)
+            if foe_killed_at_s is not None:
+                reward -= self.weights.kill_base + (self.weights.kill_time_budget_s - foe_killed_at_s)
+        return reward / self.scale
+
+
+@dataclass
+class ShapedReward:
+    """The margin, plus the gradient the score does not provide.
+
+    A score is a measurement, not a teacher. The competition's attack term is
+    an indicator on a one-degree cone: worth 2000 a second inside it and
+    nothing at all outside, with no slope in between. A policy that has never
+    been inside it therefore gets no signal pointing that way — the needle is
+    the reward, and finding needles is not what gradient ascent is for.
+
+    The terms below are from the PHANG-MAN agent's reward function (Pope, Ide
+    et al., DARPA AlphaDogfight Trials, arXiv 2105.00990, table I), which is
+    also where the organiser's own reference reward came from: its deck
+    penalty and its closure term carry that paper's constants — 1/20 and 1300,
+    1/500 and 2900 — unchanged. What the organiser dropped, and what is put
+    back here, is everything that gives the geometry a slope.
+
+    * **tracking** — a soft version of the attack condition, so pointing more
+      nearly at the target is worth more than pointing less nearly, at every
+      angle rather than only inside one degree.
+    * **range window** — the paper's `Gamma_B(d)`: the tracking bonus is worth
+      most inside the firing envelope and fades outside it, so closing to a
+      range where a shot counts is itself rewarded.
+    * **too close** — inside 150 m the score's distance factor collapses to a
+      twelfth and a collision ends the round for both. Overshooting is a
+      mistake the score punishes only indirectly.
+    * **deck** — the reference's own term, kept, because a policy that flies
+      into the ground scores nothing and ours does exactly that.
+
+    None of it is free: shaping that does not point at the score is a way to
+    lose while looking good, which is why `margin` exists unshaped as the
+    control in any comparison.
+    """
+
+    weights: ScoringWeights
+    envelope: AttackEnvelope
+    tick_hz: float = 60.0
+    scale: float = 10.0
+    crash_penalty: float = -10.0
+    #: Weight on the soft tracking bonus, in the same units as the score.
+    tracking: float = 400.0
+    #: Weight on the overshoot penalty.
+    too_close: float = 200.0
+    #: Weight on the deck penalty, the reference's own value.
+    deck: float = 5.0
+
+    def __post_init__(self) -> None:
+        self._score = ScoreReward(
+            weights=self.weights,
+            envelope=self.envelope,
+            tick_hz=self.tick_hz,
+            scale=1.0,  # scaled once, at the end
+            crash_penalty=self.crash_penalty,
+            defensive=True,
+        )
+
+    def reset(self) -> None:
+        self._score.reset()
+
+    def range_factor(self, distance_ft: float) -> float:
+        """`Gamma_B(d)`: how much a shot at this range is worth pursuing.
+
+        One inside the envelope, falling away outside it. The paper uses a pair
+        of sigmoids around a midpoint; this uses the envelope the rules
+        actually publish, because we have that and the paper's agent did not.
+        """
+        low, high = self.envelope.min_range_ft, self.envelope.max_range_ft
+        if low <= distance_ft <= high:
+            return 1.0
+        if distance_ft < low:
+            # Closing inside the minimum is going the wrong way.
+            return max(0.0, distance_ft / low) ** 2
+        return float(sigmoid(distance_ft, -1.0 / 500.0, high + 900.0))
+
+    def __call__(
+        self,
+        geometry: Geometry,
+        *,
+        g_load: float,
+        crashed: bool,
+        foe_crashed: bool,
+        killed_at_s: float | None = None,
+        foe_geometry: Geometry | None = None,
+        foe_g_load: float = 0.0,
+        foe_killed_at_s: float | None = None,
+    ) -> float:
+        if crashed:
+            return self.crash_penalty
+        if foe_crashed:
+            return 0.0
+
+        reward = self._score(
+            geometry,
+            g_load=g_load,
+            crashed=False,
+            foe_crashed=False,
+            killed_at_s=killed_at_s,
+            foe_geometry=foe_geometry,
+            foe_g_load=foe_g_load,
+            foe_killed_at_s=foe_killed_at_s,
+        )
+
+        dt = 1.0 / self.tick_hz
+        # A slope towards the cone, worth most where a shot would count.
+        aim = max(0.0, 1.0 - geometry.track_angle_deg / 180.0)
+        reward += self.tracking * dt * aim * self.range_factor(geometry.distance_ft)
+
+        # Overshoot. Below the envelope's minimum the score collapses anyway,
+        # and a collision ends the round for both sides.
+        if geometry.distance_m < 150.0:
+            reward -= self.too_close * dt * (1.0 - geometry.distance_m / 150.0)
+
+        # The deck, from the reference's own reward, in its own shape.
+        altitude_ft = geometry.own_alt_m * FT_PER_M
+        reward -= self.deck * (1.0 - sigmoid(altitude_ft, 1 / 20, 1300))
+
         return reward / self.scale

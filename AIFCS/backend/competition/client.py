@@ -35,7 +35,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from competition.action import JoystickState, shape_command
+from competition.action import (
+    ELEVATOR_LIMIT_HIGH_SPEED,
+    RUDDER_LIMIT,
+    JoystickState,
+    shape_command,
+)
 from competition.protocol import (
     Command,
     PlayerState,
@@ -43,6 +48,7 @@ from competition.protocol import (
     decode_observation,
     encode_command,
 )
+from competition.safety import GroundAvoidance
 from competition.state import StateEncoder, Telemetry
 from core.logging_config import get_logger
 
@@ -72,6 +78,8 @@ class ClientStats:
     packets_malformed: int = 0
     packets_non_finite: int = 0
     frames_this_round: int = 0
+    #: Policy evaluations, which is frames divided by the action repeat.
+    decisions_made: int = 0
     rounds_seen: int = 0
     frozen_frames: int = 0
     teleports_seen: int = 0
@@ -110,7 +118,28 @@ class CompetitionClient:
     commands, which is what makes a five-minute round a unit test.
     """
 
-    def __init__(self, policy: Policy, observer: Observer | None = None) -> None:
+    def __init__(
+        self,
+        policy: Policy,
+        observer: Observer | None = None,
+        *,
+        action_repeat: int = 1,
+        rudder_limit: float = RUDDER_LIMIT,
+        high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
+        ground_avoidance: GroundAvoidance | None = None,
+    ) -> None:
+        if action_repeat < 1:
+            raise ValueError(f"action_repeat is a number of frames, not {action_repeat}")
+        #: Must match `EnvConfig.action_repeat`, or the policy meets a control
+        #: rate on the day that it never trained against. A command still goes
+        #: back every frame — it is the same command, held.
+        self.action_repeat = action_repeat
+        self.rudder_limit = rudder_limit
+        self.high_speed_elevator_limit = high_speed_elevator_limit
+        #: Must match `EnvConfig.ground_avoidance`. A policy trained with a
+        #: floor under it and flown without one has never met the aircraft it
+        #: is flying, and the reverse is worse.
+        self.ground_avoidance = ground_avoidance
         self.policy = policy
         #: Called with every accepted frame, after the round tracking has run.
         #: A tap, not a filter: it cannot change the command, so recording a
@@ -122,6 +151,8 @@ class CompetitionClient:
         self.player_state = PlayerState.NOT_READY
         self._last_own_position: tuple[float, float, float] | None = None
         self._moving = False
+        self._held_action: np.ndarray | None = None
+        self._frames_since_decision = 0
 
     # ------------------------------------------------------------- rounds
 
@@ -138,6 +169,9 @@ class CompetitionClient:
         self.stats.frames_this_round = 0
         self.stats.rounds_seen += 1
         self._moving = False
+        # A held decision belongs to the round it was made in.
+        self._held_action = None
+        self._frames_since_decision = 0
 
     def _track_round(self, telemetry: Telemetry) -> None:
         position = (telemetry.own_lat_deg, telemetry.own_lon_deg, telemetry.own_alt_ft)
@@ -229,8 +263,24 @@ class CompetitionClient:
             self.observer(telemetry, self.stats)
 
         state = self.encoder.encode(telemetry)
-        raw_action = np.asarray(self.policy(state), dtype=np.float64)
-        shaped = shape_command(raw_action, self.joystick, telemetry.reference_mach)
+        if self._held_action is None or self._frames_since_decision >= self.action_repeat:
+            self._held_action = np.asarray(self.policy(state), dtype=np.float64)
+            self._frames_since_decision = 0
+            self.stats.decisions_made += 1
+        self._frames_since_decision += 1
+        raw_action = self._held_action
+        if self.ground_avoidance is not None:
+            # Applied every frame, not every decision: the ground does not wait
+            # for the policy's next turn to think.
+            raw_action = self.ground_avoidance(raw_action, telemetry)
+
+        shaped = shape_command(
+            raw_action,
+            self.joystick,
+            telemetry.reference_mach,
+            high_speed_elevator_limit=self.high_speed_elevator_limit,
+            rudder_limit=self.rudder_limit,
+        )
 
         reply = encode_command(
             Command(

@@ -24,7 +24,8 @@ from competition.environment import (
     action_space,
     observation_space,
 )
-from competition.rewards import ReferenceReward, RewardMode, ScoreReward
+from competition.rewards import ReferenceReward, RewardMode, ScoreReward, ShapedReward
+from competition.state import Geometry
 from core.logging_config import get_logger
 
 log = get_logger("competition.gym")
@@ -54,14 +55,24 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         self.round = CompetitionRound(self.config, seed=seed)
         self._reward = self._build_reward()
         self._previous_kill: float | None = None
+        self._previous_foe_kill: float | None = None
 
-    def _build_reward(self) -> ReferenceReward | ScoreReward:
+    def _build_reward(self) -> ReferenceReward | ScoreReward | ShapedReward:
         if self.reward_mode is RewardMode.REFERENCE:
             return ReferenceReward()
+        if self.reward_mode is RewardMode.SHAPED:
+            return ShapedReward(
+                weights=self.config.weights,
+                envelope=self.config.envelope,
+                tick_hz=float(SIM_HZ),
+            )
         return ScoreReward(
             weights=self.config.weights,
             envelope=self.config.envelope,
             tick_hz=float(SIM_HZ),
+            # `score` is the competition's own number for one side; `margin` is
+            # what the rules compare when a round reaches time.
+            defensive=self.reward_mode is RewardMode.MARGIN,
         )
 
     # ------------------------------------------------------------ gymnasium
@@ -73,10 +84,35 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         state = self.round.reset(seed=seed)
         self._reward.reset()
         self._previous_kill = None
+        self._previous_foe_kill = None
         return state, {}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        state, geometry, finished, reason = self.round.step(np.asarray(action, dtype=np.float64))
+        """One decision, held for `action_repeat` frames of physics.
+
+        The rewards of the held frames are summed rather than averaged, because
+        a frame's reward is a rate — points per frame — and holding a good
+        position for six frames is worth six frames of it. Averaging would make
+        a decision that lasts longer worth no more than one that does not.
+        """
+        raw = np.asarray(action, dtype=np.float64)
+        reward = 0.0
+        for _ in range(self.config.action_repeat):
+            state, _, finished, reason, frame_reward = self._frame(raw)
+            reward += frame_reward
+            if finished:
+                break
+
+        truncated = reason == "TIME"
+        terminated = finished and not truncated
+        info: dict[str, Any] = {"reason": reason} if finished else {}
+        if finished:
+            info["score"] = self.round.score.as_dict()
+            info["opponent_score"] = self.round.opponent_score.as_dict()
+        return state, float(reward), terminated, truncated, info
+
+    def _frame(self, raw: np.ndarray) -> tuple[np.ndarray, Geometry, bool, str, float]:
+        state, geometry, finished, reason = self.round.step(raw)
 
         crashed = reason == "CRASH"
         foe_crashed = reason == "FOE_CRASH"
@@ -88,20 +124,23 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         if isinstance(self._reward, ReferenceReward):
             reward = self._reward(geometry, crashed=crashed, foe_crashed=foe_crashed)
         else:
+            foe_killed_at = self.round.opponent_score.killed_at_s
+            foe_newly_killed = foe_killed_at if foe_killed_at != self._previous_foe_kill else None
+            self._previous_foe_kill = foe_killed_at
             reward = self._reward(
                 geometry,
                 g_load=self.round.own.g_load,
                 crashed=crashed,
                 foe_crashed=foe_crashed,
                 killed_at_s=newly_killed,
+                # The opponent's side of the same frame. Computed by the round
+                # already, because it scores both sides to decide the winner.
+                foe_geometry=self.round.foe_geometry(),
+                foe_g_load=self.round.foe.g_load,
+                foe_killed_at_s=foe_newly_killed,
             )
 
-        truncated = reason == "TIME"
-        terminated = finished and not truncated
-        info: dict[str, Any] = {"reason": reason} if finished else {}
-        if finished:
-            info["score"] = self.round.score.as_dict()
-        return state, float(reward), terminated, truncated, info
+        return state, geometry, finished, reason, float(reward)
 
 
 def make_env(

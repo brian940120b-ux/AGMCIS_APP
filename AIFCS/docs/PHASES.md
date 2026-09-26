@@ -1400,3 +1400,58 @@ forgetting what a session had already spent.
 Steps were never affected. Only the clock was, and only for sessions trained
 before this — the wrong number on disk does not correct itself, and the
 documentation says so rather than pretending the fix is retroactive.
+
+### The whole adjustable surface, upgraded (COMP PHASE 14)
+
+Asked to do all of it at once. Four things shipped, and two of them were found
+by measurement contradicting what I had written an hour earlier.
+
+**The reward I had recommended teaches the policy to crash.** `--reward score`
+was last turn's advice, on the sound argument that the reference reward is flat
+in distance. Running a centred stick to its crash, every frame: `reference`
+scores -10,477, `score` scores **+174.6**. Position advantage is never
+negative and the crash costs -10 once, so 2,928 frames of it swamp the ending.
+`margin` — our per-frame advantage minus theirs — is -29.9, and it is what the
+rules actually compare when a round reaches time (作戰優勢分高者勝 is a
+difference). `score` stays as the honest thing to *measure* with.
+
+`shaped` adds what the organiser dropped when they copied the PHANG-MAN reward:
+a soft slope towards the nose, because the competition's attack term is an
+indicator on a one-degree cone and a policy that has never been inside it gets
+no gradient pointing there; the paper's range factor, here the published
+envelope; an overshoot penalty; and the deck term.
+
+**The safety floor pulled the wrong way.** A rule-based pull-up, which
+公告說明 一.1.(2) allows by listing Rule-Base beside 強化學習. First version
+made things worse — the aircraft hit the ground 160 frames *sooner*. Measured
+the sign rather than reasoning about it: +0.5 elevator from level takes the
+pitch to -14.7 degrees in three seconds, -0.5 to +4.7. Positive is nose down.
+
+With the sign right, against the reference opponent, with a policy that does
+nothing at all:
+
+    crashed   100%  ->  0%
+    won         0%  ->  67%
+    margin     -19  ->  +32
+
+Every round now runs the full five minutes. Three tests fail if the sign flips
+back, including the end-to-end one.
+
+**Action repeat** holds one decision for N frames, on both sides, because a
+policy trained at 10 Hz and flown at 60 Hz has never met the aircraft it is
+flying. Legal: 注意事項 10 wants a command every frame and a held decision
+sends one. The trainer's horizon line had to be fixed for it — the first
+version divided by 60 Hz regardless of the repeat, and so reported wrongly the
+one number a reader would use to choose a discount.
+
+Also now flags: the rudder limit (表 2 allows ±1, the sample clips itself to
+0.2), hidden layer widths and ReLU (PHANG-MAN used one layer of 12,288, citing
+wide-and-shallow over narrow-and-deep; the sample and we use two of 256).
+
+Left undone, deliberately, and said rather than half-built: the observation
+features, which would end compatibility with the organiser's own policies and
+deserve their own pass; and the opponent pool with PFSP, which is an
+architecture rather than a setting. Both are in docs/STRATEGY.md with the
+paper's own thresholds.
+
+Tests: 910 passed.

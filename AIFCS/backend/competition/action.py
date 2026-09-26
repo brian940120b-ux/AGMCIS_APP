@@ -108,6 +108,7 @@ def shape_command(
     reference_mach: float,
     *,
     high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
+    rudder_limit: float = RUDDER_LIMIT,
 ) -> np.ndarray:
     """One frame of stick shaping. Mutates `joystick`, returns the new command.
 
@@ -118,7 +119,7 @@ def shape_command(
         [
             AILERON_LIMIT,
             elevator_limit_for(reference_mach, high_speed_elevator_limit),
-            RUDDER_LIMIT,
+            rudder_limit,
         ],
         dtype=np.float64,
     )
