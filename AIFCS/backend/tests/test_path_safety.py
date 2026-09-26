@@ -36,6 +36,19 @@ TRAVERSALS = [
 REFUSED = {400, 404, 405, 422}
 
 
+def in_url(value: str) -> str:
+    """Percent-encode every byte, so the identifier survives to the handler.
+
+    Written after COMP PHASE 10 noticed these tests were weaker than they
+    looked. Starlette normalises a URL before routing, so `/api/models/../../x`
+    never arrives as a model id at all — it arrives as a request for `/x`, and
+    the endpoint whose validation is under test is never called. Encoding the
+    separators puts the traversing id back in front of the code that has to
+    refuse it.
+    """
+    return "".join(f"%{byte:02X}" for byte in value.encode("utf-8"))
+
+
 # --------------------------------------------------------------- replay ids
 
 
@@ -78,10 +91,11 @@ def test_a_recording_path_outside_the_replay_directory_is_refused(client):
 
 @pytest.mark.parametrize("evil", TRAVERSALS)
 def test_a_traversing_model_id_cannot_be_read_archived_or_deleted(client, evil):
+    encoded = in_url(evil)
     for call in (
-        lambda: client.get(f"/api/models/{evil}"),
-        lambda: client.post(f"/api/models/{evil}/archive"),
-        lambda: client.delete(f"/api/models/{evil}"),
+        lambda: client.get(f"/api/models/{encoded}"),
+        lambda: client.post(f"/api/models/{encoded}/archive"),
+        lambda: client.delete(f"/api/models/{encoded}"),
     ):
         assert call().status_code in REFUSED
 
@@ -91,8 +105,9 @@ def test_a_traversing_model_id_cannot_be_read_archived_or_deleted(client, evil):
 
 @pytest.mark.parametrize("evil", TRAVERSALS)
 def test_a_traversing_scenario_name_cannot_be_written_or_deleted(client, evil):
-    assert client.get(f"/api/scenarios/{evil}").status_code in REFUSED
-    assert client.delete(f"/api/scenarios/{evil}").status_code in REFUSED
+    encoded = in_url(evil)
+    assert client.get(f"/api/scenarios/{encoded}").status_code in REFUSED
+    assert client.delete(f"/api/scenarios/{encoded}").status_code in REFUSED
 
 
 def test_a_scenario_cannot_be_created_under_a_traversing_name(client):

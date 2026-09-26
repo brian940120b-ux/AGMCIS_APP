@@ -1298,3 +1298,49 @@ Verified in the same session: the platform starts and every subsystem reports
 ONLINE, the dashboard serves, training runs (3,000 steps), and resuming works
 — a second run took the same session from 3,000 to 5,000 steps with the replay
 buffer restored from disk.
+
+### The dashboard stopped needing a dev server (COMP PHASE 10)
+
+With the backend deadline fixed, the laptop got further and then stopped:
+
+```
+Backend ready - http://127.0.0.1:8080/docs
+==> Starting dashboard / 啟動儀表板…
+    ...still waiting (149s of 180s)
+    Listening on 5173:
+!!  Dashboard did not answer in 180s.
+```
+
+Nothing was listening. Vite never reached the point of binding the port, and
+this time it produced no output at all — which the failure did not say, because
+`Show-Log` returned quietly when a log was missing or empty. That is the same
+defect as the timeout with no evidence, in the one place it had not been fixed:
+"the process wrote nothing in three minutes" is the most useful line in such a
+report, not the absence of one. Both launchers now always print the section.
+
+The larger point is that the dev server was never the right tool here. It
+exists for hot reload while editing the frontend, and starting the platform is
+not editing it. The frontend already addresses the API with relative paths, so
+the backend can serve the built bundle from the same origin with no proxy at
+all: one process instead of two, no Node at run time, and none of the
+dependency pre-bundling that exhausted the machine's file handles.
+
+`built` is now the default and `dev` is a flag. The launcher builds the bundle
+when it is missing or older than the sources, and skips the build otherwise —
+measured here at 6.8 s to build and 3 s to start once built. Node is required
+only when something has to be built, so a machine with a bundle and no Node can
+still run the platform.
+
+Honesty about what this does not fix: `vite build` also reads a great many
+files and could hit the same Windows limit. It is Rollup rather than esbuild,
+which opens far fewer at once, and it only has to succeed once — but that is a
+better chance, not a guarantee, and the documentation says so.
+
+The security-relevant part is the single-page catch-all, which is one wildcard
+away from swallowing the API. Tests cover both, and the traversal test needed
+two corrections before it was worth anything: the first version put its bait
+file two directories above the bundle and probed a path that climbed one, so it
+passed with the containment check deleted. It now includes the percent-encoded
+forms that reach the handler with `..` intact, and a symlink whose name is
+inside the bundle and whose target is not. With the check removed, two cases
+fail.

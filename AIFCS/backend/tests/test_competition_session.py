@@ -343,6 +343,39 @@ def test_a_slow_start_says_it_is_still_working(name: str):
     assert "PyTorch" in text, "say which slow thing is being waited for"
 
 
+@pytest.mark.parametrize("name", sorted(LAUNCHERS))
+def test_the_dashboard_does_not_need_the_dev_server(name: str):
+    """Reported from the laptop, after the backend deadline was fixed:
+
+        Backend ready - http://127.0.0.1:8080/docs
+        ==> Starting dashboard / 啟動儀表板…
+            ...still waiting (149s of 180s)
+        Listening on 5173:
+        !!  Dashboard did not answer in 180s.
+
+    Nothing was listening: Vite never got as far as binding the port. The dev
+    server is a development tool, and starting the platform is not development
+    — so the default stopped being the thing that had failed twice. The backend
+    serves the built bundle, and the dev server stays one flag away.
+    """
+    raw = (SCRIPTS / name).read_bytes()
+    text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+    assert "built" in text and "dev" in text, f"{name} should offer both ways of serving"
+    assert "npm run build" in text or "npm run build" in text.replace("'", "")
+    # And the default is the one that does not need Vite running.
+    assert re.search(r"(AIFCS_DASHBOARD[^\n]*built|else \{ 'built' \})", text), (
+        f"{name} should default to the built bundle"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(LAUNCHERS))
+def test_a_dead_dev_server_points_at_the_way_that_works(name: str):
+    """A failure that names no next step leaves its reader where they started."""
+    raw = (SCRIPTS / name).read_bytes()
+    text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+    assert "The dev server is not the only way to run the dashboard." in text
+
+
 def test_the_shell_launcher_is_still_valid_shell():
     """bash -n, because a launcher that does not parse fails at the worst time."""
     import subprocess

@@ -19,7 +19,16 @@ param(
     [int] $BackendTimeoutSeconds = $(
         if ($env:AIFCS_BACKEND_TIMEOUT_S) { [int]$env:AIFCS_BACKEND_TIMEOUT_S } else { 180 }),
     [int] $FrontendTimeoutSeconds = $(
-        if ($env:AIFCS_FRONTEND_TIMEOUT_S) { [int]$env:AIFCS_FRONTEND_TIMEOUT_S } else { 180 })
+        if ($env:AIFCS_FRONTEND_TIMEOUT_S) { [int]$env:AIFCS_FRONTEND_TIMEOUT_S } else { 180 }),
+    # How the dashboard is served.
+    #
+    #   built  the backend serves frontend\dist. One process, no Node at run
+    #          time, and none of Vite's dependency pre-bundling - which is what
+    #          failed on a laptop that ran out of Windows file handles doing it.
+    #   dev    Vite's dev server on its own port, with hot reload. For working
+    #          on the frontend, which is not what most starts are for.
+    [ValidateSet('built', 'dev')]
+    [string] $Dashboard = $(if ($env:AIFCS_DASHBOARD) { $env:AIFCS_DASHBOARD } else { 'built' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,7 +108,7 @@ function Wait-ForAnyHttp {
         if (-not $noted -and $elapsed -ge 20) {
             foreach ($line in $SlowNote) { Write-Host "    $line" }
             $noted = $true
-        } elseif ($noted -and $elapsed -ge $nextTick) {
+        } elseif ($noted -and $elapsed -ge $nextTick -and $elapsed -lt $TimeoutSeconds) {
             Write-Host "    ...still waiting (${elapsed}s of ${TimeoutSeconds}s)"
             $nextTick = $elapsed + 30
         }
@@ -130,12 +139,24 @@ function Wait-ForHttp {
 }
 
 function Show-Log {
+    <#
+        Always says something. Returning quietly when the log is missing or
+        empty is how a failure reached someone with no evidence attached at
+        all — and "the dashboard wrote nothing in three minutes" is itself the
+        most useful line in that report, not an absence of one.
+    #>
     param([string] $Path, [string] $Label)
-    if (-not (Test-Path $Path)) { return }
-    $tail = Get-Content $Path -Tail 20 -ErrorAction SilentlyContinue
-    if (-not $tail) { return }
     Write-Host ''
     Write-Host "--- $Label ---" -ForegroundColor Yellow
+    if (-not (Test-Path $Path)) {
+        Write-Host "    (no file at $Path - the process never wrote anything)"
+        return
+    }
+    $tail = Get-Content $Path -Tail 20 -ErrorAction SilentlyContinue
+    if (-not $tail) {
+        Write-Host "    (the file is empty - the process started but printed nothing)"
+        return
+    }
     $tail | ForEach-Object { Write-Host $_ }
 }
 
@@ -155,8 +176,14 @@ try {
 
     # --- 1. Prerequisites ---------------------------------------------------
     $missing = @()
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { $missing += 'Node.js' }
-    if (-not (Get-Command npm  -ErrorAction SilentlyContinue)) { $missing += 'npm' }
+    $distIndex = Join-Path $Root 'frontend\dist\index.html'
+    # Node builds the dashboard; it does not serve it. A machine with a built
+    # dashboard and no Node can still run the platform, so the requirement
+    # follows what actually has to happen.
+    if ($Dashboard -eq 'dev' -or -not (Test-Path $distIndex)) {
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) { $missing += 'Node.js' }
+        if (-not (Get-Command npm  -ErrorAction SilentlyContinue)) { $missing += 'npm' }
+    }
 
     $python = Find-Python
     if ($null -eq $python) { $missing += 'Python 3.11+' }
@@ -171,13 +198,17 @@ try {
     $PyPre = @($python.Pre)
 
     Write-Host "    Python  $(& $PyExe @PyPre --version)  ($PyExe)"
-    Write-Host "    Node    $(& node --version)"
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        Write-Host "    Node    $(& node --version)"
+    } else {
+        Write-Host '    Node    not installed - serving the dashboard that is already built'
+    }
 
     # --- 2. Ports -----------------------------------------------------------
     if (Test-PortBusy $BackendPort) {
         Fail "Port $BackendPort is already in use." "連接埠 $BackendPort 已被占用。先執行 scripts\stop.bat。"
     }
-    if (Test-PortBusy $FrontendPort) {
+    if ($Dashboard -eq 'dev' -and (Test-PortBusy $FrontendPort)) {
         Fail "Port $FrontendPort is already in use." "連接埠 $FrontendPort 已被占用。先執行 scripts\stop.bat。"
     }
 
@@ -197,7 +228,8 @@ try {
         } finally { Pop-Location }
     }
 
-    if (-not (Test-Path (Join-Path $Root 'frontend\node_modules'))) {
+    $needsNode = ($Dashboard -eq 'dev') -or -not (Test-Path $distIndex)
+    if ($needsNode -and -not (Test-Path (Join-Path $Root 'frontend\node_modules'))) {
         Write-Host '==> First run: installing dashboard dependencies / 首次執行，安裝前端套件…'
         Push-Location (Join-Path $Root 'frontend')
         try {
@@ -208,11 +240,55 @@ try {
 
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+    # --- 3b. Dashboard bundle -----------------------------------------------
+    # Before the backend, because the backend decides at startup whether there
+    # is a bundle to serve.
+    if ($Dashboard -eq 'built') {
+        $reason = $null
+        if (-not (Test-Path $distIndex)) {
+            $reason = 'no bundle yet'
+        } else {
+            $builtAt = (Get-Item $distIndex).LastWriteTimeUtc
+            $sources = @('frontend\src', 'frontend\index.html',
+                         'frontend\package.json', 'frontend\vite.config.ts')
+            foreach ($relative in $sources) {
+                $source = Join-Path $Root $relative
+                if (-not (Test-Path $source)) { continue }
+                $newest = Get-ChildItem $source -Recurse -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+                if ($null -eq $newest) { $newest = Get-Item $source }
+                if ($newest.LastWriteTimeUtc -gt $builtAt) {
+                    $reason = 'the dashboard changed since it was last built'
+                    break
+                }
+            }
+        }
+
+        if ($reason) {
+            Write-Host ''
+            Write-Host "==> Building the dashboard / 打包前端（$reason）…"
+            Write-Host '    This happens once. Later starts reuse it. 只有這次要等，之後會直接用。'
+            Push-Location (Join-Path $Root 'frontend')
+            try {
+                & npm run build
+                if ($LASTEXITCODE -ne 0) {
+                    Fail 'Dashboard build failed - the lines above say why.' '前端打包失敗，原因在上面。'
+                }
+            } finally { Pop-Location }
+        } else {
+            Write-Host '    Dashboard bundle is up to date / 前端已是最新，不用重新打包'
+        }
+    }
+
     # --- 4. Backend ---------------------------------------------------------
     # -NoNewWindow keeps both servers attached to this console, so Ctrl+C and
     # closing the window reach them instead of orphaning them in the background.
     Write-Host ''
     Write-Host '==> Starting simulation backend / 啟動模擬引擎…'
+    # In dev mode the dev server is the dashboard, so the backend does not also
+    # serve whatever bundle happens to be on disk: two dashboards, one of them
+    # stale, is a confusing thing to debug.
+    if ($Dashboard -eq 'dev') { $env:AIFCS_SERVE_DASHBOARD = '0' }
     $backend = Start-Process -FilePath $venvPy `
         -ArgumentList @('-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', "$BackendPort") `
         -WorkingDirectory (Join-Path $Root 'backend') `
@@ -236,52 +312,62 @@ try {
     Write-Host "    Backend ready - http://127.0.0.1:$BackendPort/docs"
 
     # --- 5. Dashboard -------------------------------------------------------
-    # npm is a .cmd on Windows, so it cannot be launched directly when output is
-    # redirected — it has to go through cmd.exe.
-    Write-Host '==> Starting dashboard / 啟動儀表板…'
-    $npmPath = (Get-Command npm).Source
-    $npmArgs = '/c ""' + $npmPath + '" run dev -- --port ' + $FrontendPort + '"'
-    $frontend = Start-Process -FilePath $env:ComSpec `
-        -ArgumentList $npmArgs `
-        -WorkingDirectory (Join-Path $Root 'frontend') `
-        -RedirectStandardOutput $FrontOut -RedirectStandardError $FrontErr `
-        -NoNewWindow -PassThru
+    if ($Dashboard -eq 'built') {
+        # Already being served by the backend, on the same origin as the API -
+        # which is why the frontend's relative /api and /ws paths need no proxy.
+        $frontendUrl = "http://127.0.0.1:$BackendPort"
+    } else {
+        Write-Host '==> Starting dashboard / 啟動儀表板…'
+        # npm is a .cmd on Windows, so it cannot be launched directly when output is
+        # redirected — it has to go through cmd.exe.
+        $npmPath = (Get-Command npm).Source
+        $npmArgs = '/c ""' + $npmPath + '" run dev -- --port ' + $FrontendPort + '"'
+        $frontend = Start-Process -FilePath $env:ComSpec `
+            -ArgumentList $npmArgs `
+            -WorkingDirectory (Join-Path $Root 'frontend') `
+            -RedirectStandardOutput $FrontOut -RedirectStandardError $FrontErr `
+            -NoNewWindow -PassThru
 
-    # Two names for the same machine, because they are not always the same
-    # address: "localhost" resolves to the IPv6 loopback first on some Windows
-    # setups, and the dev server may be listening only on IPv4, or the reverse.
-    $frontendUrl = Wait-ForAnyHttp `
-        @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort") `
-        $FrontendTimeoutSeconds $frontend `
-        @("Still starting - the first run bundles the dashboard's packages.",
-          '第一次啟動要打包前端套件，比較久，請等一下。')
-    if (-not $frontendUrl) {
-        # A timeout saying only "it did not start", next to a log saying the
-        # server is ready, gives the reader nothing to act on. Say what was
-        # tried and what came back.
-        Write-Host ''
-        Write-Host '    The dashboard did not answer. What was tried:'
-        foreach ($candidate in @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort")) {
-            try {
-                $response = Invoke-WebRequest -Uri $candidate -UseBasicParsing -TimeoutSec 2
-                Write-Host "      $candidate  ->  HTTP $($response.StatusCode)"
-            } catch {
-                Write-Host "      $candidate  ->  $($_.Exception.Message)"
+        # Two names for the same machine, because they are not always the same
+        # address: "localhost" resolves to the IPv6 loopback first on some Windows
+        # setups, and the dev server may be listening only on IPv4, or the reverse.
+        $frontendUrl = Wait-ForAnyHttp `
+            @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort") `
+            $FrontendTimeoutSeconds $frontend `
+            @("Still starting - the first run bundles the dashboard's packages.",
+              '第一次啟動要打包前端套件，比較久，請等一下。')
+        if (-not $frontendUrl) {
+            # A timeout saying only "it did not start", next to a log saying the
+            # server is ready, gives the reader nothing to act on. Say what was
+            # tried and what came back.
+            Write-Host ''
+            Write-Host '    The dashboard did not answer. What was tried:'
+            foreach ($candidate in @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort")) {
+                try {
+                    $response = Invoke-WebRequest -Uri $candidate -UseBasicParsing -TimeoutSec 2
+                    Write-Host "      $candidate  ->  HTTP $($response.StatusCode)"
+                } catch {
+                    Write-Host "      $candidate  ->  $($_.Exception.Message)"
+                }
             }
+            Write-Host "    Listening on ${FrontendPort}:"
+            netstat -an | Select-String ":$FrontendPort\s" | Select-Object -First 5 |
+                ForEach-Object { Write-Host "      $_" }
+            Write-Host ''
+            Show-Log $FrontErr 'dashboard log'
+            Show-Log $FrontOut 'dashboard output'
+            Write-Host ''
+            Write-Host '    The dev server is not the only way to run the dashboard.'
+            Write-Host '    Try without it:  .\scripts\start.ps1 -Dashboard built'
+            Write-Host '    不用開發伺服器也能跑，上面那行試試看。'
+            Fail "Dashboard did not answer in ${FrontendTimeoutSeconds}s." `
+                 "前端 ${FrontendTimeoutSeconds} 秒內沒有回應，訊息在上面。"
         }
-        Write-Host "    Listening on ${FrontendPort}:"
-        netstat -an | Select-String ":$FrontendPort\s" | Select-Object -First 5 |
-            ForEach-Object { Write-Host "      $_" }
-        Write-Host ''
-        Show-Log $FrontErr 'dashboard log'
-        Show-Log $FrontOut 'dashboard output'
-        Fail "Dashboard did not answer in ${FrontendTimeoutSeconds}s." `
-             "前端 ${FrontendTimeoutSeconds} 秒內沒有回應，訊息在上面。"
     }
 
     # --- 6. Ready -----------------------------------------------------------
-    # Whichever of the two names answered above. Which one that is depends on
-    # the machine, so it is measured rather than assumed.
+    # Set above: the backend's own address in built mode, or whichever of the
+    # two names the dev server answered on.
     $url = $frontendUrl
     Write-Host ''
     Write-Host '================================================================' -ForegroundColor Green
@@ -306,7 +392,9 @@ try {
             Write-Host 'Backend stopped. / 後端已停止。' -ForegroundColor Yellow
             break
         }
-        if ($frontend.HasExited) {
+        # $frontend is $null in built mode: there is no second process to
+        # outlive, because the backend is serving the dashboard itself.
+        if ($frontend -and $frontend.HasExited) {
             Show-Log $FrontErr 'dashboard log'
             Write-Host 'Dashboard stopped. / 前端已停止。' -ForegroundColor Yellow
             break

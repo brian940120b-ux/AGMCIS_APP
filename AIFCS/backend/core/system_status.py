@@ -94,4 +94,5 @@ def build_default_registry() -> SystemStatusRegistry:
     registry.register(Subsystem("scoring", "Scoring Engine", ni, "Scheduled for PHASE 9", "PHASE 9"))
     registry.register(Subsystem("storage", "Database", ni, "Scheduled for PHASE 9", "PHASE 9"))
     registry.register(Subsystem("training", "Training Engine", ni, "Scheduled for PHASE 11", "PHASE 11"))
+    registry.register(Subsystem("dashboard", "Dashboard", ni, "Scheduled for COMP PHASE 10", "COMP PHASE 10"))
     return registry

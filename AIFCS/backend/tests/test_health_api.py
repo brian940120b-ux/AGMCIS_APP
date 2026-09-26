@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 
-def test_root_describes_platform(client):
-    body = client.get("/").json()
+def test_the_api_describes_the_platform(client):
+    """At /api, because / belongs to the dashboard once one has been built.
+
+    This description used to live at the root. It moved rather than doubled up,
+    so that what the root returns depends on the machine while what /api
+    returns does not.
+    """
+    body = client.get("/api").json()
     assert body["app"] == "AIFCS"
     assert body["health"] == "/api/health"
     assert "fictional" in body["scope"].lower()

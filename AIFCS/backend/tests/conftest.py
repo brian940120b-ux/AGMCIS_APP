@@ -66,11 +66,25 @@ def _isolated_data(tmp_path_factory):
 
     previous = os.environ.get("AIFCS_CONFIG_DIR")
     os.environ["AIFCS_CONFIG_DIR"] = str(config_dir)
+
+    # COMP PHASE 10. The backend serves frontend/dist when it is there, which
+    # would make what the application returns for an unknown path depend on
+    # whether anyone had run a build — 404 on a clean checkout, the dashboard's
+    # own page on a developer's machine. The suite pins it off and the tests
+    # that are about the dashboard mount it themselves.
+    previous_dashboard = os.environ.get("AIFCS_SERVE_DASHBOARD")
+    os.environ["AIFCS_SERVE_DASHBOARD"] = "0"
+
     yield root
+
     if previous is None:
         os.environ.pop("AIFCS_CONFIG_DIR", None)
     else:
         os.environ["AIFCS_CONFIG_DIR"] = previous
+    if previous_dashboard is None:
+        os.environ.pop("AIFCS_SERVE_DASHBOARD", None)
+    else:
+        os.environ["AIFCS_SERVE_DASHBOARD"] = previous_dashboard
 
 
 @pytest.fixture(autouse=True)

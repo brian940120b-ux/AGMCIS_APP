@@ -380,3 +380,98 @@ Windows 上在 PowerShell 裡設環境變數，或直接用參數：
 ```powershell
 .\scripts\start.ps1 -BackendTimeoutSeconds 60 -FrontendTimeoutSeconds 60
 ```
+
+
+---
+
+# 開不起來（三）：前端根本沒綁上埠
+
+筆記本上後端修好之後，剩下這個：
+
+```
+Backend ready - http://127.0.0.1:8080/docs
+==> Starting dashboard / 啟動儀表板…
+    ...still waiting (149s of 180s)
+    Listening on 5173:          ← 這行後面是空的
+!!  Dashboard did not answer in 180s.
+```
+
+`Listening on 5173:` 後面**什麼都沒有** —— 沒有任何程式在聽那個埠。Vite 連
+「開始服務」都沒走到，180 秒內完全沒動靜。
+
+## 換一個做法：不要 dev server
+
+Vite 的 dev server 是**開發用的工具**，它的工作是熱重載和即時打包。但你不是在
+改前端，你是在**用**這個平台。那台筆電做不到的那一步（預先打包），對「用平台」
+這件事完全沒有必要。
+
+所以現在預設改成：**後端直接把打包好的前端送出去**。
+
+| | 舊的（dev） | 新的（built，預設） |
+|---|---|---|
+| 程式數量 | 2 個（Python + Node） | **1 個**（只有 Python） |
+| 執行時需要 Node | 要 | **不要** |
+| Vite 預先打包 | 每次都跑 | **完全沒有** |
+| 網址 | `:5173` | **`:8080`**（跟 API 同一個） |
+| 熱重載 | 有 | 沒有 |
+
+前端本來就用相對路徑 `/api`、`/ws` 連後端，所以同源之後**連代理都不需要**。
+
+## 你會看到什麼
+
+第一次（要打包，這一步還是需要 Node）：
+
+```
+==> Building the dashboard / 打包前端（no bundle yet）…
+    This happens once. Later starts reuse it. 只有這次要等，之後會直接用。
+    ✓ built in 6.80s
+==> Starting simulation backend / 啟動模擬引擎…
+    Backend ready — http://127.0.0.1:8080/docs
+      http://127.0.0.1:8080
+```
+
+第二次之後：
+
+```
+    Dashboard bundle is up to date / 前端已是最新，不用重新打包
+    Backend ready — http://127.0.0.1:8080/docs
+```
+
+**實測第二次啟動 3 秒。** 改了前端原始碼它會自己發現並重新打包，不用手動清。
+
+## 還是要用 dev server（改前端的時候）
+
+Windows：
+
+```powershell
+.\scripts\start.ps1 -Dashboard dev
+```
+
+Git Bash / Linux / macOS：
+
+```bash
+AIFCS_DASHBOARD=dev ./scripts/start.sh
+```
+
+## 誠實說一句
+
+打包（`vite build`）跟 dev server 的預先打包**一樣要讀很多檔案**，所以打包那一步
+在你的筆電上也可能撞到同一個 Windows 上限。差別在兩點：
+
+1. 打包用的是 Rollup，一次開的檔案數比 esbuild 少很多。
+2. **只要成功一次就夠了** —— 之後每次啟動都只是送出已經在硬碟上的檔案。
+
+如果打包那一步失敗，錯誤訊息會直接印出來，貼給我。
+
+
+## 只要 API，不要網頁
+
+訓練用的機器、或比賽當天的機器，根本用不到網頁：
+
+```bash
+AIFCS_SERVE_DASHBOARD=0 ./scripts/start.sh
+```
+
+後端照常跑，`/` 會回一段 JSON 說明而不是網頁。測試套件用的也是這個設定 ——
+不然「找不到的網址回什麼」就會取決於這台機器有沒有打包過前端，同一份程式在兩台
+機器上跑出不同結果。

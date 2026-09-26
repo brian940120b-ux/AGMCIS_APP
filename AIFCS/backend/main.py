@@ -8,6 +8,7 @@ entity, platform and parameter in it is fictional and abstract.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -25,6 +26,7 @@ from api.simulation import router as simulation_router
 from api.telemetry import router as telemetry_router
 from api.training import router as training_router
 from core.config import APP_TITLE, Settings, get_settings
+from core.dashboard import DashboardStatus, dashboard_directory, mount_dashboard
 from core.errors import install_error_handlers
 from core.logging_config import configure_logging, get_logger
 from core.physics_backend import backend_status
@@ -77,6 +79,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "websocket",
         SubsystemState.ONLINE,
         "Pushing telemetry on /ws/simulation",
+    )
+    # Whether the browser can reach the dashboard from here, which is not the
+    # same question as whether the dashboard exists in the repository.
+    dashboard = getattr(app.state, "dashboard", None)
+    registry.set_state(
+        "dashboard",
+        SubsystemState.ONLINE if dashboard and dashboard.available else SubsystemState.OFFLINE,
+        dashboard.detail if dashboard else "not mounted",
     )
 
     # PHASE 9. Each reports what its configuration actually enables, rather
@@ -220,8 +230,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(training_router, prefix="/api")
     app.include_router(telemetry_router)
 
-    @app.get("/", tags=["meta"])
-    def root() -> dict[str, str]:
+    @app.get("/api", tags=["meta"])
+    def meta() -> dict[str, str]:
         return {
             "app": settings.app_name,
             "title": settings.app_title,
@@ -231,6 +241,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "scope": "Research / education simulation platform. All entities are fictional.",
         }
 
+    # Last, so every route above wins: the dashboard's catch-all exists to hand
+    # unknown paths to a single-page application, not to shadow the API.
+    #
+    # AIFCS_SERVE_DASHBOARD=0 runs the API on its own. That is a real
+    # deployment (a headless training or competition box has no use for the
+    # page) and it is also what the test suite uses, so that the application's
+    # 404s do not depend on whether someone has run a frontend build.
+    if os.environ.get("AIFCS_SERVE_DASHBOARD", "1").lower() in {"0", "false", "no"}:
+        dashboard = DashboardStatus(
+            available=False,
+            directory=dashboard_directory(settings.project_root),
+            detail="not served - AIFCS_SERVE_DASHBOARD is off",
+        )
+    else:
+        dashboard = mount_dashboard(app, settings.project_root)
+    if not dashboard.available:
+        # No build, so the root is still the API's own description rather than
+        # a 404 that looks like the backend is broken.
+        @app.get("/", tags=["meta"])
+        def root() -> dict[str, str]:
+            return meta() | {"dashboard": dashboard.detail}
+
+    app.state.dashboard = dashboard
     return app
 
 

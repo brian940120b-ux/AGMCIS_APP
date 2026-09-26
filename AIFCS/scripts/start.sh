@@ -27,6 +27,22 @@ cd "$ROOT"
 # taken by something else.
 BACKEND_PORT="${AIFCS_BACKEND_PORT:-8080}"
 FRONTEND_PORT="${AIFCS_FRONTEND_PORT:-5173}"
+
+# How the dashboard is served.
+#
+#   built  the backend serves frontend/dist. One process, no Node at run time,
+#          and none of Vite's dependency pre-bundling — which is what failed on
+#          a laptop that ran out of Windows file handles trying to do it.
+#   dev    Vite's dev server on its own port, with hot reload. For working on
+#          the frontend, which is not what most starts are for.
+#
+# The default is "built" because the common case is using the platform, not
+# editing it. The build itself still needs Node; serving the result does not.
+DASHBOARD_MODE="${AIFCS_DASHBOARD:-built}"
+case "$DASHBOARD_MODE" in
+  built|dev) ;;
+  *) echo "AIFCS_DASHBOARD must be 'built' or 'dev', not '$DASHBOARD_MODE'." >&2; exit 2 ;;
+esac
 LOG_DIR="$ROOT/data/telemetry"
 BACKEND_LOG="$LOG_DIR/backend.out"
 FRONTEND_LOG="$LOG_DIR/frontend.out"
@@ -69,6 +85,22 @@ fail() {
   exit 1
 }
 
+# Always prints a section, even when there is nothing in the file. "It wrote
+# nothing at all" is the most useful line in such a report, not the absence of
+# one — a silent return is how a failure reached its reader with no evidence.
+show_log() {
+  local path="$1" label="$2"
+  echo
+  echo "--- $label ---"
+  if [ ! -f "$path" ]; then
+    echo "    (no file at $path — the process never wrote anything)"
+  elif [ ! -s "$path" ]; then
+    echo "    (the file is empty — the process started but printed nothing)"
+  else
+    tail -20 "$path" | sed 's/^/    /'
+  fi
+}
+
 port_busy() {
   # Returns success when something already answers on the port.
   curl -s -o /dev/null -m 2 "http://127.0.0.1:$1" 2>/dev/null
@@ -79,8 +111,13 @@ echo
 
 # --- 1. Prerequisites -------------------------------------------------------
 missing=""
-command -v node >/dev/null 2>&1 || missing="$missing Node.js"
-command -v npm  >/dev/null 2>&1 || missing="$missing npm"
+# Node builds the dashboard; it does not serve it. A machine with a built
+# dashboard and no Node can still run the platform, so the requirement follows
+# what actually has to happen rather than the mode's name.
+if [ "$DASHBOARD_MODE" = "dev" ] || ! [ -f "$ROOT/frontend/dist/index.html" ]; then
+  command -v node >/dev/null 2>&1 || missing="$missing Node.js"
+  command -v npm  >/dev/null 2>&1 || missing="$missing npm"
+fi
 
 # Windows installs the interpreter as `python`, macOS/Linux as `python3`.
 PYTHON="$(find_python)" || missing="$missing Python$MIN_PYTHON+"
@@ -91,7 +128,11 @@ if [ -n "$missing" ]; then
 fi
 
 echo "    Python  $("$PYTHON" --version 2>&1 | cut -d' ' -f2)  ($PYTHON)"
-echo "    Node    $(node --version)"
+if command -v node >/dev/null 2>&1; then
+  echo "    Node    $(node --version)"
+else
+  echo "    Node    not installed — serving the dashboard that is already built"
+fi
 
 # --- 2. Ports ---------------------------------------------------------------
 # This repository holds two systems: the AGMCIS trading platform at the top
@@ -116,7 +157,7 @@ if port_busy "$BACKEND_PORT"; then
   fail "Port $BACKEND_PORT is already in use. / 連接埠 $BACKEND_PORT 已被占用。" \
        "Close the other program, or run: AIFCS_BACKEND_PORT=8081 ./scripts/start.sh"
 fi
-if port_busy "$FRONTEND_PORT"; then
+if [ "$DASHBOARD_MODE" = "dev" ] && port_busy "$FRONTEND_PORT"; then
   fail "Port $FRONTEND_PORT is already in use. / 連接埠 $FRONTEND_PORT 已被占用。" \
        "Close the other program, or run: AIFCS_FRONTEND_PORT=5174 ./scripts/start.sh"
 fi
@@ -142,9 +183,46 @@ fi
 
 mkdir -p "$LOG_DIR"
 
+# --- 3b. Dashboard bundle ---------------------------------------------------
+# Before the backend, because the backend decides at startup whether there is a
+# bundle to serve.
+if [ "$DASHBOARD_MODE" = "built" ]; then
+  DIST_INDEX="$ROOT/frontend/dist/index.html"
+  needs_build=""
+  if [ ! -f "$DIST_INDEX" ]; then
+    needs_build="no bundle yet"
+  else
+    # Anything that can change the output, newer than the output.
+    for source in "$ROOT/frontend/src" "$ROOT/frontend/index.html" \
+                  "$ROOT/frontend/package.json" "$ROOT/frontend/vite.config.ts"; do
+      [ -e "$source" ] || continue
+      if [ -n "$(find "$source" -newer "$DIST_INDEX" -print -quit 2>/dev/null)" ]; then
+        needs_build="the dashboard changed since it was last built"
+        break
+      fi
+    done
+  fi
+
+  if [ -n "$needs_build" ]; then
+    echo
+    echo "==> Building the dashboard / 打包前端（$needs_build）…"
+    echo "    This happens once. Later starts reuse it. 只有這次要等，之後會直接用。"
+    if ! (cd frontend && npm run build); then
+      fail "Dashboard build failed — the lines above say why." \
+           "前端打包失敗，原因在上面。"
+    fi
+  else
+    echo "    Dashboard bundle is up to date / 前端已是最新，不用重新打包"
+  fi
+fi
+
 # --- 4. Backend -------------------------------------------------------------
 echo
 echo "==> Starting simulation backend / 啟動模擬引擎…"
+# In dev mode the dev server is the dashboard, so the backend does not also
+# serve whatever bundle happens to be on disk: two dashboards, one of them
+# stale, is a confusing thing to debug.
+[ "$DASHBOARD_MODE" = "dev" ] && export AIFCS_SERVE_DASHBOARD=0
 (cd backend && exec "$VENV_PY" -m uvicorn main:app \
   --host 127.0.0.1 --port "$BACKEND_PORT") > "$BACKEND_LOG" 2>&1 &
 backend_pid=$!
@@ -162,7 +240,7 @@ waited=0
 until curl -sf -m 2 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1; do
   kill -0 "$backend_pid" 2>/dev/null || { cat "$BACKEND_LOG"; fail "Backend exited during startup." "後端啟動失敗，訊息在上面。"; }
   if [ "$waited" -ge "$BACKEND_TIMEOUT_S" ]; then
-    tail -20 "$BACKEND_LOG"
+    show_log "$BACKEND_LOG" "backend log"
     fail "Backend did not become healthy in ${BACKEND_TIMEOUT_S}s." \
          "後端 ${BACKEND_TIMEOUT_S} 秒內沒有啟動成功。"
   fi
@@ -179,60 +257,68 @@ done
 echo "    Backend ready — http://127.0.0.1:$BACKEND_PORT/docs"
 
 # --- 5. Dashboard -----------------------------------------------------------
-echo "==> Starting dashboard / 啟動儀表板…"
-(cd frontend && exec npm run dev -- --port "$FRONTEND_PORT") > "$FRONTEND_LOG" 2>&1 &
-frontend_pid=$!
+if [ "$DASHBOARD_MODE" = "built" ]; then
+  # Already being served by the backend, on the same origin as the API — which
+  # is why the frontend's relative /api and /ws paths need no proxy here.
+  FRONTEND_URL="http://127.0.0.1:$BACKEND_PORT"
+else
+  echo "==> Starting dashboard / 啟動儀表板…"
+  (cd frontend && exec npm run dev -- --port "$FRONTEND_PORT") > "$FRONTEND_LOG" 2>&1 &
+  frontend_pid=$!
 
-# Two names for the same machine, because they are not always the same address.
-# "localhost" resolves to the IPv6 loopback first on some Windows setups and the
-# dev server may be listening only on IPv4, or the other way round. Whichever
-# answers is the one the browser is told to use.
-#
-# The deadline is generous for the same reason the backend's is: on a first run
-# Vite pre-bundles dependencies after saying it is ready, and that step reads
-# thousands of files. Half a minute is a fine budget for the second start and
-# nowhere near enough for the first.
-FRONTEND_TIMEOUT_S="${AIFCS_FRONTEND_TIMEOUT_S:-180}"
-FRONTEND_URL=""
-waited=0
-while [ "$waited" -lt "$FRONTEND_TIMEOUT_S" ]; do
-  for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
-    if curl -sf -m 2 "$candidate" >/dev/null 2>&1; then FRONTEND_URL="$candidate"; break 2; fi
+  # Two names for the same machine, because they are not always the same
+  # address. "localhost" resolves to the IPv6 loopback first on some Windows
+  # setups and the dev server may be listening only on IPv4, or the other way
+  # round. Whichever answers is the one the browser is told to use.
+  #
+  # The deadline is generous for the same reason the backend's is: on a first
+  # run Vite pre-bundles dependencies after saying it is ready, and that step
+  # reads thousands of files.
+  FRONTEND_TIMEOUT_S="${AIFCS_FRONTEND_TIMEOUT_S:-180}"
+  FRONTEND_URL=""
+  waited=0
+  while [ "$waited" -lt "$FRONTEND_TIMEOUT_S" ]; do
+    for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
+      if curl -sf -m 2 "$candidate" >/dev/null 2>&1; then FRONTEND_URL="$candidate"; break 2; fi
+    done
+    kill -0 "$frontend_pid" 2>/dev/null || { show_log "$FRONTEND_LOG" "dashboard log"; fail "Dashboard exited during startup." "前端啟動失敗，訊息在上面。"; }
+    if [ "$waited" -eq 20 ]; then
+      echo "    Still starting — the first run bundles the dashboard's packages."
+      echo "    第一次啟動要打包前端套件，比較久，請等一下。"
+    elif [ "$waited" -gt 20 ] && [ $((waited % 30)) -eq 0 ]; then
+      echo "    …still waiting (${waited}s of ${FRONTEND_TIMEOUT_S}s)"
+    fi
+    sleep 1
+    waited=$((waited + 1))
   done
-  kill -0 "$frontend_pid" 2>/dev/null || { cat "$FRONTEND_LOG"; fail "Dashboard exited during startup." "前端啟動失敗，訊息在上面。"; }
-  if [ "$waited" -eq 20 ]; then
-    echo "    Still starting — the first run bundles the dashboard's packages."
-    echo "    第一次啟動要打包前端套件，比較久，請等一下。"
-  elif [ "$waited" -gt 20 ] && [ $((waited % 30)) -eq 0 ]; then
-    echo "    …still waiting (${waited}s of ${FRONTEND_TIMEOUT_S}s)"
-  fi
-  sleep 1
-  waited=$((waited + 1))
-done
 
-if [ -z "$FRONTEND_URL" ]; then
-  # A timeout that says only "it did not start" is useless next to a log that
-  # says the server is ready — which is exactly the pair this printed once.
-  # So say what was actually tried and what came back.
-  echo
-  echo "    The dashboard did not answer. What was tried:"
-  for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
-    code="$(curl -s -m 2 -o /dev/null -w '%{http_code}' "$candidate" 2>/dev/null)"
-    status=$?
-    echo "      $candidate  ->  curl exit $status, HTTP ${code:-none}"
-  done
-  if command -v netstat >/dev/null 2>&1; then
-    echo "    Listening on $FRONTEND_PORT:"
-    netstat -an 2>/dev/null | grep -E "[:.]$FRONTEND_PORT\b" | head -5 | sed 's/^/      /'
+  if [ -z "$FRONTEND_URL" ]; then
+    # A timeout that says only "it did not start" is useless next to a log that
+    # says the server is ready — which is exactly the pair this printed once.
+    # So say what was actually tried and what came back.
+    echo
+    echo "    The dashboard did not answer. What was tried:"
+    for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
+      code="$(curl -s -m 2 -o /dev/null -w '%{http_code}' "$candidate" 2>/dev/null)"
+      status=$?
+      echo "      $candidate  ->  curl exit $status, HTTP ${code:-none}"
+    done
+    if command -v netstat >/dev/null 2>&1; then
+      echo "    Listening on $FRONTEND_PORT:"
+      netstat -an 2>/dev/null | grep -E "[:.]$FRONTEND_PORT\b" | head -5 | sed 's/^/      /'
+    fi
+    show_log "$FRONTEND_LOG" "dashboard log"
+    echo
+    echo "    The dev server is not the only way to run the dashboard."
+    echo "    Try without it:  AIFCS_DASHBOARD=built ./scripts/start.sh"
+    echo "    不用開發伺服器也能跑，上面那行試試看。"
+    fail "Dashboard did not answer in ${FRONTEND_TIMEOUT_S}s." "前端 ${FRONTEND_TIMEOUT_S} 秒內沒有回應。"
   fi
-  echo
-  tail -20 "$FRONTEND_LOG"
-  fail "Dashboard did not answer in ${FRONTEND_TIMEOUT_S}s." "前端 ${FRONTEND_TIMEOUT_S} 秒內沒有回應。"
 fi
 
 # --- 6. Ready ---------------------------------------------------------------
-# Whichever name answered above. Not assumed: "localhost" and "127.0.0.1" are
-# the same machine and not always the same address.
+# Set above: the backend's own address in built mode, or whichever of the two
+# names the dev server answered on.
 URL="$FRONTEND_URL"
 echo
 echo "================================================================"
