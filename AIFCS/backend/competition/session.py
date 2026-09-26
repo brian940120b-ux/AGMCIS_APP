@@ -208,6 +208,21 @@ class KeepAwake:
                 self.ES_CONTINUOUS
             )
 
+    def describe(self) -> str:
+        """One line for the console, because the log file is not where anyone
+        setting a run going before bed is looking.
+
+        Whether the machine will still be awake in the morning is exactly the
+        kind of thing to say out loud rather than record. The lid is named
+        because it is the part this cannot do anything about: closing it is a
+        separate Windows policy and no process overrides it.
+        """
+        if platform.system() != "Windows":
+            return ""
+        if self.held:
+            return "sleep:    held off — but closing the lid still sleeps (see docs/TUNING.md)"
+        return "sleep:    NOT held off — Windows may suspend this run; check the power plan"
+
 
 def tensorboard_log_dir(root: Path) -> str | None:
     """A log directory, or None when TensorBoard is not installed.

@@ -174,10 +174,12 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
     pool = {}
     if args.opponent_pool:
-        from competition.league import collect_checkpoints, opponent_from_checkpoint
+        from competition.league import LazyOpponent, collect_checkpoints
 
+        # Paths, not models: the pool crosses a process boundary once per
+        # worker. See LazyOpponent.
         for name, checkpoint in collect_checkpoints(args.opponent_pool).items():
-            pool[name] = opponent_from_checkpoint(checkpoint, args.algorithm, device="cpu")
+            pool[name] = LazyOpponent(checkpoint, args.algorithm, device="cpu")
 
     return EnvConfig(
         setup=setup,
@@ -370,7 +372,9 @@ def train(args: argparse.Namespace) -> int:
     started = time.perf_counter()
     interrupted = False
     try:
-        with KeepAwake():
+        with KeepAwake() as awake:
+            if awake.describe():
+                print(awake.describe(), flush=True)
             model.learn(
                 total_timesteps=remaining,
                 reset_num_timesteps=True,

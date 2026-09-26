@@ -146,6 +146,58 @@ def collect_checkpoints(paths: list[str]) -> dict[str, Path]:
     return found
 
 
+class LazyOpponent:
+    """A pool entry that carries a path, and loads the policy where it is used.
+
+    `SubprocVecEnv` on Windows starts each worker as a fresh interpreter and
+    sends it the environment config through a pipe, so anything in
+    `EnvConfig.opponent_pool` is serialised once per worker. Putting a loaded
+    SAC model there means N copies of a neural network going down that pipe at
+    once, and v5 — the first self-play run — died on it before the first round:
+
+        File "...multiprocessing/spawn.py", line 132, in _main
+          self = reduction.pickle.load(from_parent)
+        MemoryError
+
+    So this pickles as a path and a couple of strings. Each worker loads its
+    own copy from disk on first use, which is one model per process instead of
+    one per process *through a pipe, simultaneously*.
+
+    The weights are dropped on the way out rather than the way in, in
+    `__getstate__`, because a parent that has already loaded one should not
+    have to know not to.
+    """
+
+    def __init__(self, checkpoint: Path | str, algorithm: str = "sac", device: str = "cpu") -> None:
+        self.checkpoint = Path(checkpoint)
+        self.algorithm = algorithm
+        self.device = device
+        self._loaded: PolicyOpponent | None = None
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "checkpoint": self.checkpoint,
+            "algorithm": self.algorithm,
+            "device": self.device,
+            "_loaded": None,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+
+    @property
+    def loaded(self) -> PolicyOpponent:
+        if self._loaded is None:
+            self._loaded = opponent_from_checkpoint(self.checkpoint, self.algorithm, self.device)
+        return self._loaded
+
+    def reset(self) -> None:
+        self.loaded.reset()
+
+    def __call__(self, telemetry: Telemetry) -> np.ndarray:
+        return self.loaded(telemetry)
+
+
 def opponent_from_checkpoint(
     checkpoint: Path,
     algorithm: str = "sac",

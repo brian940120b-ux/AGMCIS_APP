@@ -329,3 +329,56 @@ def test_a_checkpoint_with_no_card_falls_back_to_the_reference_aircraft():
         league.load_predict = original
 
     assert seen == [STATE_SIZE]
+
+
+def test_a_pool_entry_carries_a_path_across_a_process_boundary_not_a_model():
+    """What killed v5, the first self-play run, before its first round.
+
+    SubprocVecEnv on Windows sends the environment config to each worker
+    through a pipe, so a loaded SAC model in the pool is serialised once per
+    worker and unpickled by all of them at once:
+
+        File "...multiprocessing/spawn.py", line 132, in _main
+          self = reduction.pickle.load(from_parent)
+        MemoryError
+
+    Pickling has to carry the path and nothing else, even when the sending
+    process has already loaded the weights.
+    """
+    import pickle
+    from pathlib import Path
+
+    from competition.league import LazyOpponent
+
+    entry = LazyOpponent(Path("models/competition/v4/checkpoint.zip"))
+    entry._loaded = object()  # as it would be in a process that has used it
+
+    revived = pickle.loads(pickle.dumps(entry))
+
+    assert revived.checkpoint == Path("models/competition/v4/checkpoint.zip")
+    assert revived.algorithm == "sac"
+    assert revived._loaded is None, "the weights must not cross the pipe"
+    assert b"checkpoint.zip" in pickle.dumps(entry), "the path does"
+
+
+def test_a_pool_entry_loads_once_and_keeps_it(monkeypatch):
+    """One load per worker, not one per round: the weights are the expensive
+    part and a round is 300 seconds of flying."""
+    from pathlib import Path
+
+    from competition.league import LazyOpponent
+
+    loads: list[Path] = []
+
+    def fake_build(checkpoint, algorithm="sac", device="cpu"):
+        loads.append(checkpoint)
+        return PolicyOpponent(lambda state: np.zeros(4))
+
+    monkeypatch.setattr("competition.league.opponent_from_checkpoint", fake_build)
+    entry = LazyOpponent(Path("somewhere/checkpoint.zip"))
+
+    entry.reset()
+    entry(_telemetry())
+    entry(_telemetry())
+
+    assert len(loads) == 1

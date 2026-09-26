@@ -682,3 +682,24 @@ def test_but_a_changed_opponent_still_is():
     wanted = SessionState(name="v3", algorithm="sac", environment={"opponent": "pursuit"})
     with pytest.raises(IncompatibleSession):
         session.check_compatible(trained, wanted)
+
+
+def test_the_sleep_state_is_said_out_loud_not_only_logged():
+    """Whether the laptop will still be awake in the morning belongs on the
+    console, not in a log file nobody opens before bed. And the lid has to be
+    named: closing it is a separate Windows policy that no process overrides,
+    so "sleep held off" on its own would be a promise this cannot keep."""
+    import platform
+
+    from competition.session import KeepAwake
+
+    awake = KeepAwake()
+    if platform.system() != "Windows":
+        assert awake.describe() == "", "nothing to say off Windows"
+        return
+
+    awake.held = True
+    assert "held off" in awake.describe()
+    assert "lid" in awake.describe()
+    awake.held = False
+    assert "NOT held off" in awake.describe()
