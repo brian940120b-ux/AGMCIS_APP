@@ -268,6 +268,45 @@ def test_a_powershell_script_with_chinese_starts_with_a_utf8_bom(path: Path):
         )
 
 
+# ------------------------------------------- what makes a run a different run
+
+
+def test_a_changed_discount_is_refused_like_a_changed_reward(tmp_path: Path):
+    """Gamma is not a knob you turn mid-session.
+
+    The discount decides how far ahead the value function can see — 1/(1-gamma)
+    frames, which at 60 Hz is 1.7 s at 0.99 and 20 s at 0.999. Steps taken
+    under one and steps taken under the other are answers to different
+    questions, and a card that averages them is honest about neither.
+    """
+    session = Session(tmp_path / "s")
+    trained = SessionState(name="s", algorithm="sac", reward="score", hyperparameters={"gamma": 0.99})
+    wanted = SessionState(name="s", algorithm="sac", reward="score", hyperparameters={"gamma": 0.999})
+
+    with pytest.raises(IncompatibleSession) as refusal:
+        session.check_compatible(trained, wanted)
+    assert "gamma 0.99 -> 0.999" in str(refusal.value)
+
+
+def test_a_session_from_before_the_setting_existed_still_resumes(tmp_path: Path):
+    """run1 was already two million steps in when this was added.
+
+    The check walks the keys the session recorded, not the ones it might have:
+    a run that never wrote down its discount cannot be found to disagree about
+    it, so adding a setting does not strand the runs that predate it.
+    """
+    session = Session(tmp_path / "s")
+    trained = SessionState(name="s", algorithm="sac", timesteps_done=1_921_544)
+    assert trained.hyperparameters == {}
+
+    wanted = SessionState(
+        name="s",
+        algorithm="sac",
+        hyperparameters={"gamma": 0.99, "batch_size": 256, "gradient_steps": 1},
+    )
+    session.check_compatible(trained, wanted)  # must not raise
+
+
 # --------------------------------------------------- what a checkpoint records
 
 

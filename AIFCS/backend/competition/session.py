@@ -55,6 +55,13 @@ class SessionState:
     runs: int = 0
     reward: str = "reference"
     environment: dict[str, Any] = field(default_factory=dict)
+    #: The hyperparameters that make this a different experiment rather than a
+    #: longer one. Recorded because the model card has to be honest about what
+    #: produced the policy, and checked on resume for the same reason the
+    #: environment is: steps spent under two discount factors cannot be
+    #: described by either. `workers` is deliberately not in here — it changes
+    #: how fast the steps arrive, not what a step means.
+    hyperparameters: dict[str, Any] = field(default_factory=dict)
     seed: int = 0
     workers: int = 1
     created_at: str = ""
@@ -129,6 +136,13 @@ class Session:
             differences.append(f"reward {state.reward} -> {wanted.reward}")
         for key, old in state.environment.items():
             new = wanted.environment.get(key)
+            if new != old:
+                differences.append(f"{key} {old!r} -> {new!r}")
+        # Iterating the stored keys rather than the wanted ones, so a session
+        # written before a setting existed still resumes: what it did not
+        # record, it cannot have disagreed about.
+        for key, old in state.hyperparameters.items():
+            new = wanted.hyperparameters.get(key)
             if new != old:
                 differences.append(f"{key} {old!r} -> {new!r}")
         if differences:

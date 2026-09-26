@@ -25,6 +25,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -74,6 +75,33 @@ BANNER = "\n".join(
 )
 
 
+def _horizon_seconds(gamma: float, tick_hz: float = 60.0) -> float:
+    """How far ahead the value function can see, in seconds.
+
+    1/(1-gamma) frames is the standard reading of a discount as a horizon. It
+    is printed because 0.99 sounds like "almost everything" and means 1.7
+    seconds here, against a kill that needs three.
+    """
+    if gamma >= 1.0:
+        return float("inf")
+    return 1.0 / (1.0 - gamma) / tick_hz
+
+
+def describe_hyperparameters(args: argparse.Namespace) -> dict[str, Any]:
+    """The settings that make a run a different experiment, not a longer one."""
+    described: dict[str, Any] = {
+        "gamma": args.gamma,
+        "learning_rate": args.learning_rate,
+        "batch_size": args.batch_size,
+        "sde": bool(args.sde),
+    }
+    if args.algorithm == "sac":
+        described["gradient_steps"] = args.gradient_steps
+    else:
+        described["n_steps"] = args.n_steps
+    return described
+
+
 def train(args: argparse.Namespace) -> int:
     import torch as th
     from stable_baselines3 import PPO, SAC
@@ -91,6 +119,7 @@ def train(args: argparse.Namespace) -> int:
         target_timesteps=args.timesteps,
         reward=str(args.reward),
         environment=config.describe(),
+        hyperparameters=describe_hyperparameters(args),
         seed=args.seed,
         workers=args.workers,
         created_at=datetime.now(UTC).isoformat(),
@@ -113,13 +142,24 @@ def train(args: argparse.Namespace) -> int:
         print(f"starting {args.name}: {args.timesteps:,} steps\n")
 
     env = make_vec_env(args.workers, config, args.reward, seed=args.seed + state.runs)
-    policy_kwargs = {"net_arch": [256, 256], "activation_fn": th.nn.Tanh}
+    policy_kwargs: dict[str, Any] = {"net_arch": [256, 256], "activation_fn": th.nn.Tanh}
+    if args.sde:
+        policy_kwargs["use_sde"] = True
+        policy_kwargs["log_std_init"] = -2
     common = {
         "env": env,
         "verbose": 1,
         "device": args.device,
         "tensorboard_log": tensorboard_log_dir(session.root),
+        # Passed on both paths. `load` takes keyword overrides, so a resumed
+        # model is trained under the settings asked for now rather than the
+        # ones baked into the zip — and `check_compatible` has already refused
+        # the resume if those differ from what the session was trained under.
+        "gamma": args.gamma,
+        "learning_rate": args.learning_rate,
     }
+    if args.algorithm == "sac":
+        common["gradient_steps"] = args.gradient_steps
     algorithm = PPO if args.algorithm == "ppo" else SAC
 
     model: PPO | SAC
@@ -154,6 +194,7 @@ def train(args: argparse.Namespace) -> int:
     # used?" should not require reading the library's source.
     print(f"device:   {model.device}")
     print(f"workers:  {args.workers} parallel simulations")
+    print(f"horizon:  gamma {args.gamma} — {_horizon_seconds(args.gamma):.1f} s of future at 60 Hz")
 
     remaining = args.timesteps - state.timesteps_done
     state.runs += 1
@@ -222,6 +263,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--n-steps", type=int, default=2048)
     parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.99,
+        help=(
+            "discount. The effective horizon is 1/(1-gamma) frames at 60 Hz, so the "
+            "default 0.99 sees 1.7 s — shorter than the 3 s of tracking a kill needs"
+        ),
+    )
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument(
+        "--gradient-steps",
+        type=int,
+        default=1,
+        help=(
+            "SAC updates per rollout. train_freq counts vec-env iterations, not "
+            "transitions, so with N workers the default does one update per N "
+            "samples; -1 does as many as were collected"
+        ),
+    )
+    parser.add_argument(
+        "--sde",
+        action="store_true",
+        help="state-dependent exploration, as the organiser's own trainer uses",
+    )
     parser.add_argument("--output", default="models/competition")
     parser.add_argument(
         "--checkpoint-every",
