@@ -1,0 +1,257 @@
+"""Measure a policy with the judge's ruler, repeatably.
+
+Training reports a reward. The competition reports a verdict, and the two are
+not the same function — that is the whole reason `rewards.py` has two entries.
+So a number from training cannot answer "is this policy better", and until
+there is something that can, every tuning decision is a guess.
+
+This runs whole rounds to their end, scores both sides with `SideScore`, and
+calls them with `decide_round` — the organiser's own table. Rounds are seeded
+from a base, so two policies run against the same twelve engagements and the
+comparison is paired rather than a race between two different dice rolls.
+
+What it deliberately does not do is invent a metric. Everything reported is
+either something the rules define (verdict, kill time, the two scores) or a
+plain observation (how close, for how long), never a blend of them.
+"""
+
+from __future__ import annotations
+
+import statistics
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from competition.action import INITIAL_THROTTLE
+from competition.environment import CompetitionRound, EnvConfig
+from competition.scoring import AttackEnvelope, RoundOutcome, Verdict, decide_round
+
+FT_PER_M = 1.0 / 0.3048
+
+#: The band that is both a firing solution and the best distance factor.
+#: 500 ft is where the attack envelope opens; 500 m is where the 1.2 factor
+#: ends. Arithmetic, not judgement — see `docs/COMPETITION.md`.
+SWEET_SPOT_M = (AttackEnvelope().min_range_ft * 0.3048, 500.0)
+
+Policy = Callable[[np.ndarray], np.ndarray]
+
+
+def _number(value: float | bool | None) -> float:
+    """A score out of `SideScore.as_dict`, which types its values loosely."""
+    if value is None:
+        raise ValueError("a score is missing where one is required")
+    return float(value)
+
+
+@dataclass
+class RoundReport:
+    """One round, as the rules would describe it, plus how it was flown."""
+
+    seed: int
+    outcome: RoundOutcome
+    frames: int
+    min_distance_m: float
+    mean_distance_m: float
+    seconds_in_sweet_spot: float
+
+    @property
+    def won(self) -> bool:
+        return self.outcome.verdict is Verdict.BLUE
+
+    @property
+    def killed(self) -> bool:
+        return bool(self.outcome.blue["killed"])
+
+    @property
+    def was_killed(self) -> bool:
+        return bool(self.outcome.red["killed"])
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "seed": self.seed,
+            "frames": self.frames,
+            "min_distance_m": round(self.min_distance_m, 1),
+            "mean_distance_m": round(self.mean_distance_m, 1),
+            "seconds_in_sweet_spot": round(self.seconds_in_sweet_spot, 2),
+            **self.outcome.as_dict(),
+        }
+
+
+@dataclass
+class Report:
+    """Every round, and the handful of rates worth comparing between runs."""
+
+    label: str
+    rounds: list[RoundReport] = field(default_factory=list)
+
+    def _rate(self, predicate: Callable[[RoundReport], bool]) -> float:
+        return sum(1 for r in self.rounds if predicate(r)) / len(self.rounds) if self.rounds else 0.0
+
+    @property
+    def win_rate(self) -> float:
+        return self._rate(lambda r: r.won)
+
+    @property
+    def kill_rate(self) -> float:
+        return self._rate(lambda r: r.killed)
+
+    @property
+    def death_rate(self) -> float:
+        return self._rate(lambda r: r.was_killed)
+
+    @property
+    def crash_rate(self) -> float:
+        return self._rate(lambda r: r.outcome.reason.value == "CRASH")
+
+    @property
+    def mean_margin(self) -> float:
+        """Our advantage score minus theirs, averaged. The tie-breaker on the day."""
+        if not self.rounds:
+            return 0.0
+        return statistics.fmean(
+            _number(r.outcome.blue["advantage_score"]) - _number(r.outcome.red["advantage_score"])
+            for r in self.rounds
+        )
+
+    @property
+    def mean_seconds_in_sweet_spot(self) -> float:
+        if not self.rounds:
+            return 0.0
+        return statistics.fmean(r.seconds_in_sweet_spot for r in self.rounds)
+
+    def summary(self) -> str:
+        n = len(self.rounds)
+        return "\n".join(
+            (
+                f"{self.label}: {n} rounds",
+                f"  won            {self.win_rate:6.1%}  ({sum(r.won for r in self.rounds)}/{n})",
+                f"  killed them    {self.kill_rate:6.1%}",
+                f"  were killed    {self.death_rate:6.1%}",
+                f"  crashed        {self.crash_rate:6.1%}",
+                f"  score margin   {self.mean_margin:+,.0f}  (ours minus theirs, mean)",
+                f"  in 152-500 m   {self.mean_seconds_in_sweet_spot:6.1f} s per round",
+            )
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "rounds": len(self.rounds),
+            "win_rate": round(self.win_rate, 4),
+            "kill_rate": round(self.kill_rate, 4),
+            "death_rate": round(self.death_rate, 4),
+            "crash_rate": round(self.crash_rate, 4),
+            "mean_margin": round(self.mean_margin, 1),
+            "mean_seconds_in_sweet_spot": round(self.mean_seconds_in_sweet_spot, 2),
+            "detail": [r.as_dict() for r in self.rounds],
+        }
+
+
+def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
+    """One round to its end, scored the way the day scores it."""
+    game = CompetitionRound(config=config, seed=seed)
+    observation = game.reset(seed=seed)
+
+    distances: list[float] = []
+    sweet_frames = 0
+    reason = ""
+    lo, hi = SWEET_SPOT_M
+
+    while True:
+        observation, geometry, finished, reason = game.step(policy(observation))
+        distances.append(geometry.distance_m)
+        if lo <= geometry.distance_m <= hi:
+            sweet_frames += 1
+        if finished:
+            break
+
+    outcome = decide_round(
+        game.score,
+        game.opponent_score,
+        blue_crashed=reason == "CRASH",
+        red_crashed=reason == "FOE_CRASH",
+        collided=reason == "COLLISION",
+    )
+    return RoundReport(
+        seed=seed,
+        outcome=outcome,
+        frames=game.frame,
+        min_distance_m=min(distances),
+        mean_distance_m=statistics.fmean(distances),
+        seconds_in_sweet_spot=sweet_frames / 60.0,
+    )
+
+
+def evaluate(
+    policy: Policy,
+    config: EnvConfig | None = None,
+    *,
+    rounds: int = 12,
+    seed: int = 0,
+    label: str = "policy",
+    on_round: Callable[[RoundReport], None] | None = None,
+) -> Report:
+    """`rounds` engagements from consecutive seeds, so two runs are comparable."""
+    config = config or EnvConfig()
+    report = Report(label=label)
+    for index in range(rounds):
+        result = play_round(policy, config, seed + index)
+        report.rounds.append(result)
+        if on_round is not None:
+            on_round(result)
+    return report
+
+
+def load_policy(session_dir: Path, algorithm: str = "sac", device: str = "cpu") -> Policy:
+    """A saved session's policy, as a plain function of the observation."""
+    from stable_baselines3 import PPO, SAC
+
+    cls = PPO if algorithm == "ppo" else SAC
+    model = cls.load(str(Path(session_dir) / "checkpoint.zip"), device=device)
+
+    def policy(observation: np.ndarray) -> np.ndarray:
+        action, _ = model.predict(observation, deterministic=True)
+        return np.asarray(action, dtype=np.float64)
+
+    return policy
+
+
+def neutral_policy(throttle: float = INITIAL_THROTTLE) -> Policy:
+    """Stick centred, throttle held: the floor any policy has to clear.
+
+    The throttle matters and is easy to get wrong. A four-channel action of all
+    zeros is not "do nothing" — the fourth channel is a target, so zero is an
+    order to close the throttle, and the first version of this baseline chopped
+    the engine and called the resulting crash a floor. Doing nothing means
+    changing nothing, so the throttle is held where a round starts it.
+
+    The action is four channels whether or not the rudder is unlocked; that
+    flag changes the bounds, not the width.
+    """
+    command = np.array([0.0, 0.0, 0.0, throttle], dtype=np.float64)
+
+    def policy(observation: np.ndarray) -> np.ndarray:
+        return command
+
+    return policy
+
+
+def compare(reports: Sequence[Report]) -> str:
+    """Side by side on the same seeds, which is the only fair way to read them."""
+    lines = [
+        f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}{'margin':>12}{'152-500m':>10}",
+    ]
+    for report in reports:
+        lines.append(
+            f"{report.label[:21]:22}"
+            f"{report.win_rate:>7.0%} "
+            f"{report.kill_rate:>8.0%} "
+            f"{report.death_rate:>7.0%} "
+            f"{report.crash_rate:>8.0%} "
+            f"{report.mean_margin:>+11,.0f} "
+            f"{report.mean_seconds_in_sweet_spot:>9.1f}"
+        )
+    return "\n".join(lines)
