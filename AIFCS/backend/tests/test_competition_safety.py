@@ -125,3 +125,68 @@ def test_the_floor_turns_every_crash_into_a_full_round():
     assert with_floor.crash_rate == 0.0
     assert all(r.frames == 18_000 for r in with_floor.rounds), "every round reaches five minutes"
     assert with_floor.mean_margin > without.mean_margin
+
+
+# ------------------------------------------- what actually reaches the surface
+
+
+def test_the_pull_survives_the_stick_shaping():
+    """The bug that made the floor useless in a real dive.
+
+    `shape_command` cubes the elevator axis, so the 0.6 the floor used to ask
+    for arrived at the surface as 0.216 — a third of the intent, for eight and
+    a half seconds, at a peak of 3.4G against a 9G budget. A floor whose
+    request is silently divided by three is not a floor.
+
+    The number this locks is the one that matters: not what the floor writes
+    into the action, but what comes out of the shaping.
+    """
+    from competition.action import JoystickState, shape_command
+
+    floor = GroundAvoidance()
+    telemetry = flying(altitude_ft=3_000, descent_fps=900.0)
+    assert floor.danger(telemetry), "the probe attitude has to actually fire"
+
+    stick = JoystickState()
+    surface = 0.0
+    for _ in range(120):  # two seconds, past the rate limiter
+        action = floor(np.zeros(4, dtype=np.float64), telemetry)
+        surface = float(shape_command(action, stick, 0.5)[1])
+
+    assert surface <= -0.9, f"the floor asked for everything and got {surface:.3f}"
+
+
+def test_a_subsonic_and_a_supersonic_recovery_ask_for_the_same_thing():
+    """Above Mach 0.8 the shaping caps the elevator at 0.4, and a dive is above
+    Mach 0.8 within seconds. The floor cannot do anything about that cap, and
+    should not try — it asks for everything and takes what it is given."""
+    from competition.action import JoystickState, shape_command
+
+    floor = GroundAvoidance()
+    telemetry = flying(altitude_ft=3_000, descent_fps=900.0)
+
+    surfaces = []
+    for mach in (0.5, 0.95):
+        stick = JoystickState()
+        for _ in range(120):
+            action = floor(np.zeros(4, dtype=np.float64), telemetry)
+            value = float(shape_command(action, stick, mach)[1])
+        surfaces.append(value)
+
+    subsonic, supersonic = surfaces
+    assert subsonic <= -0.9
+    assert supersonic == pytest.approx(-0.4, abs=1e-6), "the Mach limit, not the floor"
+
+
+def test_it_fires_early_enough_to_finish_the_recovery():
+    """Eight seconds was not enough and the aircraft hit the ground proving it.
+
+    In a 60-degree dive from 10,000 ft the old floor fired at 6,173 ft with 8.4
+    seconds of altitude left, and needed about fifteen: at Mach 0.9 with 0.216
+    of elevator the pitch rate is roughly 4.3 degrees a second, against 65
+    degrees of dive to undo.
+    """
+    floor = GroundAvoidance()
+    # 8,078 ft descending at 728 ft/s: exactly where the old 8,000 ft ceiling
+    # and 8-second threshold both declined to fire, in the trace.
+    assert floor.danger(flying(altitude_ft=8_078, descent_fps=728.0))

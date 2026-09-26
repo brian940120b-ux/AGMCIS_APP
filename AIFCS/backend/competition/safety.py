@@ -45,9 +45,22 @@ class GroundAvoidance:
     """
 
     #: Fire when the ground is this close in time, at the current descent rate.
-    seconds_to_impact: float = 8.0
+    #:
+    #: 8.0 was not enough. In a 60-degree dive from 10,000 ft the floor fired
+    #: with 8.4 seconds of altitude left and still hit the ground, because the
+    #: recovery itself takes longer than that at high Mach. Going to 12.0 takes
+    #: the dive grid below from 4 crashes in 48 to 2, and costs 5.4 percentage
+    #: points of stick time (14.9% to 20.3% of frames, measured against a
+    #: random-walk policy that actually descends).
+    seconds_to_impact: float = 12.0
     #: Never fire above this, however steep the dive — there is room to recover.
-    ceiling_ft: float = 8000.0
+    #:
+    #: 8,000 blocked the fire at 8,078 ft in the trace that found all of this,
+    #: costing three and a half seconds of the recovery. Raising it to 15,000
+    #: costs 0.3 percentage points of stick time; raising it further costs
+    #: nothing at all and buys nothing either, because nothing in the measured
+    #: rounds ever descends fast enough above 15,000 ft to trigger.
+    ceiling_ft: float = 15000.0
     #: Below this, fire regardless of descent rate.
     floor_ft: float = 500.0
     #: How hard to pull, as a magnitude. Applied **negative**, because in this
@@ -57,9 +70,25 @@ class GroundAvoidance:
     #: made the aircraft hit the ground 160 frames sooner, which is how the
     #: sign was found.
     #:
-    #: Not 1.0: the scoring charges 1000 a second above 9G, and a recovery that
-    #: costs more than the crash it avoids is not one.
-    elevator: float = 0.6
+    #: **This is a stick command, not a surface deflection**, and the two are
+    #: not close. `shape_command` cubes the elevator axis (`EXPONENTS[1] = 3`),
+    #: so the 0.6 this used to ask for arrived as 0.216 — the floor was pulling
+    #: at a third of what it thought. The trace: eight and a half seconds of
+    #: asking for -0.60 and getting -0.22, a peak of 3.4G against a 9G budget,
+    #: and the ground.
+    #:
+    #: 1.0 does not mean 1.0 at the surface either. Above Mach 0.8 the shaping
+    #: caps the elevator at 0.4, and a dive is above Mach 0.8 within seconds.
+    #: 1.0 means "everything the shaping will give us", which in an emergency
+    #: is the right request: the measured peak is 7.9G, under the limit, and
+    #: across 48 entry attitudes only one case exceeds 9G at all — a 2,500 ft
+    #: entry at 85 degrees that was unrecoverable anyway, and whose 63G reading
+    #: is the ground reaction at 3 ft, not the pull.
+    #:
+    #: The earlier note here said 1.0 was avoided because the scoring charges
+    #: 1000 a second above 9G. That was reasoning about a cost instead of
+    #: measuring it, and the cost is 150 points across the whole grid.
+    elevator: float = 1.0
     #: Roll towards wings level, so the pull goes upwards rather than sideways.
     roll_gain: float = 0.02
 
