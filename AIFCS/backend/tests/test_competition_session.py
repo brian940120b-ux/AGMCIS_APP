@@ -555,3 +555,123 @@ def test_the_tryout_runs_every_upgrade_and_says_which_one_broke():
         assert upgrade in source, f"the tryout should exercise {upgrade}"
     # And it has to fail loudly rather than print numbers and exit zero.
     assert "return 1" in source
+
+
+# ------------------------------------------- resuming without retyping the run
+
+
+def test_a_resume_inherits_what_the_run_was_started_with():
+    """Seven flags is too many to retype correctly at two in the morning.
+
+    Getting one wrong is a refusal rather than a silent mistake, which is the
+    safe failure — and still costs the attempt and the confusion. The session
+    already records every one of them, so a resume that says nothing gets what
+    the run was.
+    """
+    import argparse
+
+    from competition.train import inherit
+
+    trained = SessionState(
+        name="v2",
+        algorithm="sac",
+        reward="margin",
+        environment={
+            "observation": "extended",
+            "action_repeat": 6,
+            "opponent": "pursuit",
+            "ground_avoidance": {"elevator": 0.6},
+        },
+        hyperparameters={"gamma": 0.995, "gradient_steps": -1},
+    )
+    args = argparse.Namespace(
+        reward=None,
+        gamma=None,
+        gradient_steps=None,
+        observation=None,
+        action_repeat=None,
+        opponent=None,
+        ground_avoidance=None,
+    )
+    inherit(args, trained)
+
+    assert args.reward == "margin"
+    assert args.gamma == 0.995
+    assert args.gradient_steps == -1
+    assert args.observation == "extended"
+    assert args.action_repeat == 6
+    assert args.opponent == "pursuit"
+
+
+def test_the_floor_carries_over_as_a_yes_or_no():
+    """The card records the floor's own settings; the flag is a boolean.
+
+    Missed on the first attempt precisely because the two shapes differ, and
+    the resume was then refused for a floor the caller never asked to remove.
+    """
+    import argparse
+
+    from competition.train import inherit
+
+    with_floor = SessionState(name="v2", algorithm="sac", environment={"ground_avoidance": {"elevator": 0.6}})
+    args = argparse.Namespace(ground_avoidance=None)
+    inherit(args, with_floor)
+    assert args.ground_avoidance is True
+
+    without = SessionState(name="v1", algorithm="sac", environment={"ground_avoidance": None})
+    args = argparse.Namespace(ground_avoidance=None)
+    inherit(args, without)
+    assert args.ground_avoidance is False
+
+
+def test_saying_a_setting_explicitly_still_wins_and_is_still_refused():
+    """Inheriting must not become a way to change a run by accident. What the
+    command line says is used, and `check_compatible` then refuses it — which
+    is the behaviour that makes two experiments stay two experiments."""
+    import argparse
+
+    from competition.train import inherit
+
+    trained = SessionState(name="v2", algorithm="sac", hyperparameters={"gamma": 0.995})
+    args = argparse.Namespace(gamma=0.99)
+    inherit(args, trained)
+    assert args.gamma == 0.99, "the command line is not overridden"
+
+
+def test_a_fresh_run_inherits_nothing_and_gets_the_documented_defaults():
+    import argparse
+
+    from competition.train import DEFAULTS, apply_defaults, inherit
+
+    args = argparse.Namespace(**dict.fromkeys(DEFAULTS, None))
+    inherit(args, None)
+    apply_defaults(args)
+
+    assert args.gamma == 0.99
+    assert args.action_repeat == 1
+    assert args.observation == "reference"
+    assert args.ground_avoidance is False
+
+
+def test_a_growing_opponent_pool_is_not_a_different_experiment(tmp_path: Path):
+    """Self-play is dropping this session's own snapshots into the pool, so a
+    pool that grows is the curriculum working. Refusing that resume would
+    refuse the technique."""
+    session = Session(tmp_path / "v3")
+    trained = SessionState(
+        name="v3", algorithm="sac", environment={"opponent_pool": ["a"], "opponent": "reference"}
+    )
+    wanted = SessionState(
+        name="v3",
+        algorithm="sac",
+        environment={"opponent_pool": ["a", "b", "v3-2m"], "opponent": "reference"},
+    )
+    session.check_compatible(trained, wanted)  # must not raise
+
+
+def test_but_a_changed_opponent_still_is():
+    session = Session(Path("unused"))
+    trained = SessionState(name="v3", algorithm="sac", environment={"opponent": "reference"})
+    wanted = SessionState(name="v3", algorithm="sac", environment={"opponent": "pursuit"})
+    with pytest.raises(IncompatibleSession):
+        session.check_compatible(trained, wanted)

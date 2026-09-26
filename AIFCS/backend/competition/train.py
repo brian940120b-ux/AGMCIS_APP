@@ -50,6 +50,102 @@ from competition.session import (
 ALGORITHMS = ("ppo", "sac")
 
 
+#: Settings that make a run what it is, and where the session writes each one
+#: down. Passing one on a resume overrides what was recorded — and is then
+#: refused by `check_compatible`, which is the point: changing one of these is
+#: a new experiment, not a longer one.
+INHERITED: dict[str, tuple[str, str]] = {
+    "reward": ("state", "reward"),
+    "gamma": ("hyperparameters", "gamma"),
+    "learning_rate": ("hyperparameters", "learning_rate"),
+    "batch_size": ("hyperparameters", "batch_size"),
+    "gradient_steps": ("hyperparameters", "gradient_steps"),
+    "n_steps": ("hyperparameters", "n_steps"),
+    "sde": ("hyperparameters", "sde"),
+    "hidden": ("hyperparameters", "hidden"),
+    "observation": ("environment", "observation"),
+    "action_repeat": ("environment", "action_repeat"),
+    "rudder": ("environment", "rudder_enabled"),
+    "rudder_limit": ("environment", "rudder_limit"),
+    "opponent": ("environment", "opponent"),
+    "opponent_aggression": ("environment", "opponent_aggression"),
+    "reference_speed_order": ("environment", "speed_before_altitude"),
+    # Recorded as the floor's own settings, or null. The flag is a boolean, so
+    # what carries over is whether there was one — missed on the first attempt
+    # precisely because the two shapes differ.
+    "ground_avoidance": ("environment", "ground_avoidance"),
+}
+
+#: Settings whose recorded shape is not the flag's shape.
+CONVERTERS: dict[str, Any] = {"ground_avoidance": lambda recorded: recorded is not None}
+
+
+#: What a setting means when nobody has said otherwise and there is no session
+#: to inherit from. Held here rather than on the argument parser because the
+#: parser has to be able to tell "not said" from "said the default", and a
+#: default in both places is two places to change it.
+DEFAULTS: dict[str, Any] = {
+    "reward": RewardMode.REFERENCE.value,
+    "gamma": 0.99,
+    "learning_rate": 3e-4,
+    "batch_size": 256,
+    "gradient_steps": 1,
+    "n_steps": 2048,
+    "sde": False,
+    "hidden": [256, 256],
+    "observation": "reference",
+    "action_repeat": 1,
+    "rudder": False,
+    "rudder_limit": RUDDER_LIMIT,
+    "opponent": "reference",
+    "opponent_aggression": 1.0,
+    "reference_speed_order": False,
+    "ground_avoidance": False,
+}
+
+
+def apply_defaults(args: argparse.Namespace) -> None:
+    """Whatever is still unsaid after the command line and the session."""
+    for flag, value in DEFAULTS.items():
+        if getattr(args, flag, None) is None:
+            setattr(args, flag, value)
+
+
+def _recorded(state: SessionState, section: str, key: str) -> Any:
+    if section == "state":
+        return getattr(state, key, None)
+    source = state.environment if section == "environment" else state.hyperparameters
+    return source.get(key)
+
+
+def inherit(args: argparse.Namespace, state: SessionState | None) -> None:
+    """Fill in from the session whatever the command line did not say.
+
+    `--timesteps`, `--workers`, `--device` and the rest are deliberately not
+    inherited: they change how a run proceeds, not what it is, and someone
+    resuming overnight should be able to ask for more steps on fewer workers
+    without repeating the experiment's definition back to the machine.
+    """
+    if state is None:
+        return
+
+    inherited = []
+    for flag, (section, key) in INHERITED.items():
+        if getattr(args, flag, None) is not None:
+            continue  # said explicitly, so it wins — and may then be refused
+        recorded = _recorded(state, section, key)
+        convert = CONVERTERS.get(flag)
+        if convert is not None:
+            recorded = convert(recorded)
+        elif recorded is None:
+            continue
+        setattr(args, flag, recorded)
+        inherited.append(f"{flag}={recorded}")
+
+    if inherited:
+        print(f"inherited:  {', '.join(inherited)}")
+
+
 def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
     pool = {}
@@ -141,8 +237,16 @@ def train(args: argparse.Namespace) -> int:
     # writes to the Windows console through an API that ignores the codepage.
     print(BANNER)
 
-    config = build_config(args)
+    # The session is read before the configuration is built, so a resume can
+    # inherit what the run was started with. Seven flags is too many to retype
+    # correctly at two in the morning, and getting one wrong is a refusal
+    # rather than a mistake — which is safe, and still costs the attempt.
     session = Session(Path(args.output) / args.name)
+    existing = session.read_state()
+    inherit(args, existing)
+    apply_defaults(args)
+
+    config = build_config(args)
     wanted = SessionState(
         name=args.name,
         algorithm=args.algorithm,
@@ -155,7 +259,6 @@ def train(args: argparse.Namespace) -> int:
         created_at=datetime.now(UTC).isoformat(),
     )
 
-    existing = session.read_state()
     if existing is not None:
         session.check_compatible(existing, wanted)
         state = existing
@@ -304,22 +407,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--n-steps", type=int, default=2048)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--n-steps", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument(
         "--gamma",
         type=float,
-        default=0.99,
+        default=None,
         help=(
             "discount. The effective horizon is 1/(1-gamma) frames at 60 Hz, so the "
             "default 0.99 sees 1.7 s — shorter than the 3 s of tracking a kill needs"
         ),
     )
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument(
         "--gradient-steps",
         type=int,
-        default=1,
+        default=None,
         help=(
             "SAC updates per rollout. train_freq counts vec-env iterations, not "
             "transitions, so with N workers the default does one update per N "
@@ -329,6 +432,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sde",
         action="store_true",
+        default=None,
         help="state-dependent exploration, as the organiser's own trainer uses",
     )
     parser.add_argument("--output", default="models/competition")
@@ -347,13 +451,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reward",
         choices=[mode.value for mode in RewardMode],
-        default=RewardMode.REFERENCE.value,
+        default=None,
     )
-    parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
+    parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default=None)
     parser.add_argument(
         "--observation",
         choices=["reference", "extended"],
-        default="reference",
+        default=None,
         help=(
             '"extended" adds ten inputs from the same packet, among them our '
             "own G — which the scoring penalises and the reference state omits. "
@@ -374,14 +478,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--opponent-aggression",
         type=float,
-        default=1.0,
+        default=None,
         help='how hard "pursuit" pulls; a ladder of these is a curriculum',
     )
-    parser.add_argument("--rudder", action="store_true", help="unlock the rudder channel")
+    parser.add_argument("--rudder", action="store_true", default=None, help="unlock the rudder channel")
     parser.add_argument(
         "--rudder-limit",
         type=float,
-        default=RUDDER_LIMIT,
+        default=None,
         help=(
             "how far the rudder may deflect. 表 2 of the specification allows "
             "-1~+1; the sample client clips itself to 0.2, which is the default here"
@@ -390,7 +494,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--action-repeat",
         type=int,
-        default=1,
+        default=None,
         help=(
             "frames one decision is held for. 1 is the reference's 60 Hz and "
             "18,000 decisions a round; 6 is 10 Hz, the rate PHANG-MAN's "
@@ -400,13 +504,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--ground-avoidance",
         action="store_true",
+        default=None,
         help="a rule-based pull-up under the policy; allowed by 公告說明 一.1.(2)",
     )
     parser.add_argument(
         "--hidden",
         type=int,
         nargs="+",
-        default=[256, 256],
+        default=None,
         help=(
             "hidden layer widths. The sample uses 256 256; PHANG-MAN used a "
             "single layer of 12288, citing that wide and shallow beats narrow "
@@ -419,6 +524,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reference-speed-order",
         action="store_true",
+        default=None,
         help="reproduce the package's 106-knot-slow start; the real host does NOT do this",
     )
     return parser.parse_args(argv)

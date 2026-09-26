@@ -707,3 +707,52 @@ CUDA 函式庫會一次要求大量的虛擬位址空間,Windows 要用分頁檔
 | **1455** | 分頁檔太小 | 上面那段 |
 | **1114** | DLL 初始化失敗 | 裝 Visual C++ 可轉散發套件 |
 | **1450** | 系統資源不足(handle 用完) | 重開機 + Defender 排除 |
+
+
+---
+
+# 續練不用重打一長串旗標
+
+v2 是這樣開的:
+
+```bash
+scripts/train.bat --name v2 --reward margin --ground-avoidance --action-repeat 6 \
+  --gamma 0.995 --gradient-steps -1 --observation extended --timesteps 2000000
+```
+
+**七個旗標。** 少打一個,續練會被擋下來(這是對的 —— 那確實是不同的實驗),
+但你要的只是接著跑。
+
+## 現在續練只要這樣
+
+```bash
+scripts/train.bat --name v2 --timesteps 2000000
+```
+
+它會從 session 自己讀回來,並印出來:
+
+```
+inherited:  reward=margin, gamma=0.995, gradient_steps=-1, observation=extended,
+            action_repeat=6, ground_avoidance=True, ...
+```
+
+## 哪些會繼承、哪些不會
+
+| 會繼承(定義這個實驗是什麼) | 不繼承(只是怎麼跑) |
+|---|---|
+| `--reward` | `--timesteps` |
+| `--gamma`、`--learning-rate`、`--batch-size` | `--workers` |
+| `--gradient-steps`、`--sde`、`--hidden` | `--device` |
+| `--observation`、`--action-repeat` | `--checkpoint-every` |
+| `--ground-avoidance`、`--rudder`、`--rudder-limit` | `--no-save-buffer` |
+| `--opponent`、`--opponent-aggression` | |
+
+**明確打出來的旗標永遠優先** —— 然後如果和 session 不一致,照樣會被擋下來。
+繼承不是讓你不小心改掉一個實驗的方法。
+
+## 對手池會長大,那不算改變實驗
+
+self-play 就是**把自己的快照丟進池子裡**,所以池子變大是課程在運作,不是換了題目。
+`opponent_pool` 因此不列入相容性檢查。
+
+換**對手種類**(`reference` → `pursuit`)還是會被擋,那確實是不同的題目。

@@ -127,6 +127,13 @@ class Session:
         temporary.write_text(json.dumps(state.as_dict(), indent=2), encoding="utf-8")
         temporary.replace(self.state_path)
 
+    #: Environment keys that may change during a run without making it a
+    #: different experiment. The opponent pool is the only one so far, and it
+    #: is here because a pool that grows is the curriculum working as intended:
+    #: self-play means dropping this session's own snapshots into it, so
+    #: refusing the resume would refuse the technique.
+    GROWABLE = frozenset({"opponent_pool"})
+
     def check_compatible(self, state: SessionState, wanted: SessionState) -> None:
         """Refuse to continue a run against a different problem."""
         differences = []
@@ -135,6 +142,8 @@ class Session:
         if state.reward != wanted.reward:
             differences.append(f"reward {state.reward} -> {wanted.reward}")
         for key, old in state.environment.items():
+            if key in self.GROWABLE:
+                continue
             new = wanted.environment.get(key)
             if new != old:
                 differences.append(f"{key} {old!r} -> {new!r}")
