@@ -1265,3 +1265,36 @@ nothing to do. Both launchers now try `127.0.0.1` and `localhost` alternately
 rather than exhausting one before the other, and on failure print each URL's
 curl exit and HTTP code plus `netstat` for the port. The wording changed from
 "did not start" to "did not answer", which is the thing actually observed.
+
+### The other reason it would not start (COMP PHASE 9)
+
+Running the launcher here, cold, produced a failure I had not seen before:
+
+```
+!!  Backend did not become healthy in 30s.      (first start)
+    Backend ready — http://127.0.0.1:8080/docs  (next start, 2s)
+```
+
+Same code, same machine, back to back. The startup path imports torch so the
+training subsystem can report whether it is available, and a CUDA build's
+first import reads hundreds of megabytes of libraries. Cold page cache — or,
+on Windows, antivirus reading each one — and thirty seconds is not close.
+
+The backend was never broken. The deadline was, and the message it produced
+blamed the wrong thing. Both launchers now wait 180 s, and neither goes quiet
+while waiting: past 20 s they say which slow thing they are waiting for, then
+account for the time every 30 s. Silence for three minutes is indistinguishable
+from a hang, so raising the deadline alone would have traded one bad experience
+for another.
+
+Two things worth recording about the tests. The first draft of the deadline
+test matched any number in the file and so read the port numbers as deadlines
+— it would have passed on 8080 while the real deadline was 30. It is now
+anchored on the variable name. And both tests were checked by breaking what
+they guard and confirming they fail, which is the only way to know a test is
+load-bearing.
+
+Verified in the same session: the platform starts and every subsystem reports
+ONLINE, the dashboard serves, training runs (3,000 steps), and resuming works
+— a second run took the same session from 3,000 to 5,000 steps with the replay
+buffer restored from disk.

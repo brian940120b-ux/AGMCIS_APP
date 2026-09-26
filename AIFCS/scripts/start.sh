@@ -149,16 +149,33 @@ echo "==> Starting simulation backend / 啟動模擬引擎…"
   --host 127.0.0.1 --port "$BACKEND_PORT") > "$BACKEND_LOG" 2>&1 &
 backend_pid=$!
 
-for _ in $(seq 1 60); do
-  curl -sf -m 2 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1 && break
+# 30 seconds was too short and the failure looked like a broken backend. The
+# startup path imports torch to report whether training is available, and a
+# CUDA build's first import — cold page cache, antivirus reading every DLL —
+# takes far longer than that on a laptop. Measured here: 30s timeout on the
+# first start after a restart, 2s on the next one, same code.
+#
+# So: wait long enough for the slow case, and say what is being waited for
+# instead of going silent. Waiting costs nothing when the start is quick.
+BACKEND_TIMEOUT_S="${AIFCS_BACKEND_TIMEOUT_S:-180}"
+waited=0
+until curl -sf -m 2 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1; do
   kill -0 "$backend_pid" 2>/dev/null || { cat "$BACKEND_LOG"; fail "Backend exited during startup." "後端啟動失敗，訊息在上面。"; }
-  sleep 0.5
+  if [ "$waited" -ge "$BACKEND_TIMEOUT_S" ]; then
+    tail -20 "$BACKEND_LOG"
+    fail "Backend did not become healthy in ${BACKEND_TIMEOUT_S}s." \
+         "後端 ${BACKEND_TIMEOUT_S} 秒內沒有啟動成功。"
+  fi
+  # Silence for three minutes reads as a hang, so account for the time.
+  if [ "$waited" -eq 20 ]; then
+    echo "    Still starting — the first run loads PyTorch, which is slow."
+    echo "    第一次啟動要載入 PyTorch，比較久，請等一下。"
+  elif [ "$waited" -gt 20 ] && [ $((waited % 30)) -eq 0 ]; then
+    echo "    …still waiting (${waited}s of ${BACKEND_TIMEOUT_S}s)"
+  fi
+  sleep 1
+  waited=$((waited + 1))
 done
-
-if ! curl -sf -m 2 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1; then
-  tail -20 "$BACKEND_LOG"
-  fail "Backend did not become healthy in 30s." "後端 30 秒內沒有啟動成功。"
-fi
 echo "    Backend ready — http://127.0.0.1:$BACKEND_PORT/docs"
 
 # --- 5. Dashboard -----------------------------------------------------------
@@ -170,13 +187,27 @@ frontend_pid=$!
 # "localhost" resolves to the IPv6 loopback first on some Windows setups and the
 # dev server may be listening only on IPv4, or the other way round. Whichever
 # answers is the one the browser is told to use.
+#
+# The deadline is generous for the same reason the backend's is: on a first run
+# Vite pre-bundles dependencies after saying it is ready, and that step reads
+# thousands of files. Half a minute is a fine budget for the second start and
+# nowhere near enough for the first.
+FRONTEND_TIMEOUT_S="${AIFCS_FRONTEND_TIMEOUT_S:-180}"
 FRONTEND_URL=""
-for _ in $(seq 1 60); do
+waited=0
+while [ "$waited" -lt "$FRONTEND_TIMEOUT_S" ]; do
   for candidate in "http://127.0.0.1:$FRONTEND_PORT" "http://localhost:$FRONTEND_PORT"; do
     if curl -sf -m 2 "$candidate" >/dev/null 2>&1; then FRONTEND_URL="$candidate"; break 2; fi
   done
   kill -0 "$frontend_pid" 2>/dev/null || { cat "$FRONTEND_LOG"; fail "Dashboard exited during startup." "前端啟動失敗，訊息在上面。"; }
-  sleep 0.5
+  if [ "$waited" -eq 20 ]; then
+    echo "    Still starting — the first run bundles the dashboard's packages."
+    echo "    第一次啟動要打包前端套件，比較久，請等一下。"
+  elif [ "$waited" -gt 20 ] && [ $((waited % 30)) -eq 0 ]; then
+    echo "    …still waiting (${waited}s of ${FRONTEND_TIMEOUT_S}s)"
+  fi
+  sleep 1
+  waited=$((waited + 1))
 done
 
 if [ -z "$FRONTEND_URL" ]; then
@@ -196,7 +227,7 @@ if [ -z "$FRONTEND_URL" ]; then
   fi
   echo
   tail -20 "$FRONTEND_LOG"
-  fail "Dashboard did not answer in 30s." "前端 30 秒內沒有回應。"
+  fail "Dashboard did not answer in ${FRONTEND_TIMEOUT_S}s." "前端 ${FRONTEND_TIMEOUT_S} 秒內沒有回應。"
 fi
 
 # --- 6. Ready ---------------------------------------------------------------

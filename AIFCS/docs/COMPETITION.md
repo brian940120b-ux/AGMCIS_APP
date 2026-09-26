@@ -332,3 +332,51 @@ cd AIFCS/frontend && rm -rf node_modules/.vite && npm run dev
 **成功**：停在 `ready`，而且**不會**再往下吐錯誤。然後 Ctrl+C，改用 `start.bat` 正常開。
 
 **失敗**：錯誤訊息會不一樣（不同檔名、或不同錯誤）。把那幾行貼出來 —— 檔名會指出還有誰在拉整包。
+
+
+---
+
+# 開不起來（二）：`後端 30 秒內沒有啟動成功`
+
+這是另一個原因，跟上面那個不一樣。**同一份程式、同一台機器，連續兩次**：
+
+```
+!!  Backend did not become healthy in 30s.      ← 第一次
+    Backend ready — http://127.0.0.1:8080/docs  ← 第二次，2 秒
+```
+
+後端啟動時會去問「這台機器能不能訓練」，那一步要 import PyTorch。CUDA 版的
+PyTorch 第一次載入要讀好幾百 MB 的函式庫；檔案還沒進到系統快取，或防毒軟體
+逐一掃描，就會遠超過 30 秒。
+
+**後端沒有壞，是啟動腳本等不夠久就放棄了。** 這是腳本的問題，不是後端的問題。
+
+## 改了什麼
+
+等待上限從 30 秒（PowerShell 版是 60 秒）改成 **180 秒**，前端也一樣。而且
+不再靜靜地等：
+
+```
+==> Starting simulation backend / 啟動模擬引擎…
+    Still starting — the first run loads PyTorch, which is slow.
+    第一次啟動要載入 PyTorch，比較久，請等一下。
+    …still waiting (30s of 180s)
+    Backend ready — http://127.0.0.1:8080/docs
+```
+
+等三分鐘卻什麼都不印，跟當掉沒兩樣。所以超過 20 秒它就會說自己在等什麼，之後
+每 30 秒報一次時間。
+
+**第一次啟動慢是正常的，第二次就會變快**（東西進了系統快取）。
+
+## 覺得太久想改短
+
+```bash
+AIFCS_BACKEND_TIMEOUT_S=60 AIFCS_FRONTEND_TIMEOUT_S=60 ./scripts/start.sh
+```
+
+Windows 上在 PowerShell 裡設環境變數，或直接用參數：
+
+```powershell
+.\scripts\start.ps1 -BackendTimeoutSeconds 60 -FrontendTimeoutSeconds 60
+```

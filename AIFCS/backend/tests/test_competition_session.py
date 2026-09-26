@@ -8,6 +8,7 @@ than days, without needing to train anything.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -303,6 +304,43 @@ def test_a_failed_dashboard_says_what_it_tried(name: str):
     assert "did not answer" in text, "the message should describe what happened"
     assert "What was tried" in text
     assert "netstat" in text
+
+
+@pytest.mark.parametrize("name", sorted(LAUNCHERS))
+def test_the_startup_deadlines_allow_for_a_cold_first_start(name: str):
+    """Measured here, same code, same machine, two runs in a row:
+
+        !!  Backend did not become healthy in 30s.     (first start)
+            Backend ready — http://127.0.0.1:8080/docs (next start, 2s)
+
+    Startup imports torch so the training subsystem can report whether it is
+    available, and a CUDA build's first import reads hundreds of megabytes of
+    libraries. Cold page cache, or antivirus reading each one, and half a
+    minute is not close to enough. The old deadline did not find a broken
+    backend; it made a slow one look broken.
+    """
+    raw = (SCRIPTS / name).read_bytes()
+    text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+    # Anchored on the variable name rather than on "some number in the file":
+    # a first draft of this matched the port numbers too, and would have passed
+    # on 8080 while the real deadline was 30.
+    waits = [int(value) for value in re.findall(r"TIMEOUT_S[^\n]*?(\d{2,})", text)]
+    assert len(waits) == 2, f"{name} needs a deadline for the backend and one for the dashboard"
+    assert min(waits) >= 120, f"{name} gives up after {min(waits)}s; a first start on a laptop takes longer"
+
+
+@pytest.mark.parametrize("name", sorted(LAUNCHERS))
+def test_a_slow_start_says_it_is_still_working(name: str):
+    """Three minutes of silence is indistinguishable from a hang.
+
+    Raising the deadline without saying anything would trade one bad experience
+    for another, so the wait accounts for itself once it stops being quick.
+    """
+    raw = (SCRIPTS / name).read_bytes()
+    text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+    assert "Still starting" in text
+    assert "still waiting" in text
+    assert "PyTorch" in text, "say which slow thing is being waited for"
 
 
 def test_the_shell_launcher_is_still_valid_shell():

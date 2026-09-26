@@ -11,7 +11,15 @@
 [CmdletBinding()]
 param(
     [int] $BackendPort  = $(if ($env:AIFCS_BACKEND_PORT)  { [int]$env:AIFCS_BACKEND_PORT }  else { 8080 }),
-    [int] $FrontendPort = $(if ($env:AIFCS_FRONTEND_PORT) { [int]$env:AIFCS_FRONTEND_PORT } else { 5173 })
+    [int] $FrontendPort = $(if ($env:AIFCS_FRONTEND_PORT) { [int]$env:AIFCS_FRONTEND_PORT } else { 5173 }),
+    # Long enough for a first start on a laptop, where loading PyTorch and
+    # bundling the dashboard's packages each take minutes rather than seconds.
+    # Overridable, because a machine that is simply broken should not make
+    # someone sit through three minutes twice.
+    [int] $BackendTimeoutSeconds = $(
+        if ($env:AIFCS_BACKEND_TIMEOUT_S) { [int]$env:AIFCS_BACKEND_TIMEOUT_S } else { 180 }),
+    [int] $FrontendTimeoutSeconds = $(
+        if ($env:AIFCS_FRONTEND_TIMEOUT_S) { [int]$env:AIFCS_FRONTEND_TIMEOUT_S } else { 180 })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,12 +80,28 @@ function Wait-ForAnyHttp {
         same address, and waiting a full minute on the wrong one before trying
         the right one turns a working dashboard into a two-minute failure.
     #>
-    param([string[]] $Urls, [int] $TimeoutSeconds, [System.Diagnostics.Process] $Process)
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    param(
+        [string[]] $Urls,
+        [int] $TimeoutSeconds,
+        [System.Diagnostics.Process] $Process,
+        [string[]] $SlowNote = @()
+    )
+    $started = Get-Date
+    $deadline = $started.AddSeconds($TimeoutSeconds)
+    $noted = $false
+    $nextTick = 50
     while ((Get-Date) -lt $deadline) {
         if ($Process -and $Process.HasExited) { return $null }
         foreach ($url in $Urls) {
             if (Wait-ForHttp $url 0 $Process) { return $url }
+        }
+        $elapsed = [int]((Get-Date) - $started).TotalSeconds
+        if (-not $noted -and $elapsed -ge 20) {
+            foreach ($line in $SlowNote) { Write-Host "    $line" }
+            $noted = $true
+        } elseif ($noted -and $elapsed -ge $nextTick) {
+            Write-Host "    ...still waiting (${elapsed}s of ${TimeoutSeconds}s)"
+            $nextTick = $elapsed + 30
         }
         Start-Sleep -Milliseconds 500
     }
@@ -195,10 +219,19 @@ try {
         -RedirectStandardOutput $BackendOut -RedirectStandardError $BackendErr `
         -NoNewWindow -PassThru
 
-    if (-not (Wait-ForHttp "http://127.0.0.1:$BackendPort/api/health" 60 $backend)) {
+    # 60 seconds was too short, and what it produced looked like a broken
+    # backend rather than a slow one. Startup imports torch to report whether
+    # training is available, and a CUDA build's first import — cold page cache,
+    # antivirus reading every DLL — runs well past a minute on a laptop.
+    $backendReady = Wait-ForAnyHttp @("http://127.0.0.1:$BackendPort/api/health") `
+        $BackendTimeoutSeconds $backend `
+        @('Still starting - the first run loads PyTorch, which is slow.',
+          '第一次啟動要載入 PyTorch，比較久，請等一下。')
+    if (-not $backendReady) {
         Show-Log $BackendErr 'backend log'
         Show-Log $BackendOut 'backend output'
-        Fail 'Backend did not become healthy in 60s.' '後端 60 秒內沒有啟動成功，訊息在上面。'
+        Fail "Backend did not become healthy in ${BackendTimeoutSeconds}s." `
+             "後端 ${BackendTimeoutSeconds} 秒內沒有啟動成功，訊息在上面。"
     }
     Write-Host "    Backend ready - http://127.0.0.1:$BackendPort/docs"
 
@@ -218,7 +251,10 @@ try {
     # address: "localhost" resolves to the IPv6 loopback first on some Windows
     # setups, and the dev server may be listening only on IPv4, or the reverse.
     $frontendUrl = Wait-ForAnyHttp `
-        @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort") 60 $frontend
+        @("http://127.0.0.1:$FrontendPort", "http://localhost:$FrontendPort") `
+        $FrontendTimeoutSeconds $frontend `
+        @("Still starting - the first run bundles the dashboard's packages.",
+          '第一次啟動要打包前端套件，比較久，請等一下。')
     if (-not $frontendUrl) {
         # A timeout saying only "it did not start", next to a log saying the
         # server is ready, gives the reader nothing to act on. Say what was
@@ -239,7 +275,8 @@ try {
         Write-Host ''
         Show-Log $FrontErr 'dashboard log'
         Show-Log $FrontOut 'dashboard output'
-        Fail 'Dashboard did not answer in 60s.' '前端 60 秒內沒有回應，訊息在上面。'
+        Fail "Dashboard did not answer in ${FrontendTimeoutSeconds}s." `
+             "前端 ${FrontendTimeoutSeconds} 秒內沒有回應，訊息在上面。"
     }
 
     # --- 6. Ready -----------------------------------------------------------
