@@ -212,3 +212,28 @@ def test_a_borrowed_floor_is_marked_in_the_label():
     assert _floor_suffix(with_one, False) == " -floor"
     assert _floor_suffix(without, None) == "", "nothing borrowed, nothing to declare"
     assert _floor_suffix(with_one, True) == "", "it already had one"
+
+
+def test_the_setup_line_declares_a_borrowed_floor_too():
+    """The table row is not the only place a reader looks. The line naming the
+    session's setup has to describe the aircraft actually flown, or the report
+    declares the borrowed floor in one place and hides it in the other."""
+    from competition.evaluate import _describe
+
+    without = {"environment": {}}
+    with_one = {"environment": {"ground_avoidance": {"elevator": 0.6}}}
+
+    assert "floor (borrowed)" in _describe(without, True)
+    assert "no floor (removed)" in _describe(with_one, False)
+    assert "floor" not in _describe(without, None)
+    assert "floor" in _describe(with_one, None)
+    assert "borrowed" not in _describe(with_one, True), "it already had one"
+
+
+def test_a_recorded_floor_left_on_defaults_still_shows_up():
+    """`ground_avoidance: {}` means a floor whose settings are all defaults.
+    An empty dict is falsy, so describing it by truthiness printed a session
+    that has a floor as one that does not."""
+    from competition.evaluate import _describe
+
+    assert "floor" in _describe({"environment": {"ground_avoidance": {}}})

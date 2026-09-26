@@ -328,7 +328,14 @@ def _floor_suffix(card: dict[str, Any], override: bool | None) -> str:
     return ""
 
 
-def _describe(card: dict[str, Any]) -> str:
+def _describe(card: dict[str, Any], override: bool | None = None) -> str:
+    """Describe the aircraft actually flown, not the one on the card.
+
+    The card says what the policy trained under; --ground-avoidance can
+    change what it flies under here. Both lines the report prints have to
+    say so, not just the table row: this one is where a reader looks to
+    see what the engagement was set up as.
+    """
     described = card.get("environment", {})
     parts = [
         f"{card.get('timesteps_done', 0):,} steps",
@@ -336,7 +343,12 @@ def _describe(card: dict[str, Any]) -> str:
         str(described.get("observation", "reference")),
         f"{described.get('action_repeat', 1)}x",
     ]
-    if described.get("ground_avoidance"):
+    trained_with = described.get("ground_avoidance") is not None
+    if override is True and not trained_with:
+        parts.append("floor (borrowed)")
+    elif override is False and trained_with:
+        parts.append("no floor (removed)")
+    elif trained_with and override is not False:
         parts.append("floor")
     return ", ".join(parts)
 
@@ -385,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         if not card:
             print(f"  {session.name}: no card.json — assuming the reference setup")
 
-        label = f"{session.name} ({_describe(card)})" if card else session.name
+        label = f"{session.name} ({_describe(card, args.ground_avoidance)})" if card else session.name
         print(f"  {label}")
         try:
             policy = load_policy(session, args.algorithm, args.device)
