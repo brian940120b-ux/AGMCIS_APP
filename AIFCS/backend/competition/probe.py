@@ -105,6 +105,31 @@ class LevelPolicy:
 
 
 @dataclass
+class NeutralPolicy:
+    """Stick centred, throttle held. The one question LevelPolicy cannot answer.
+
+    Everything measured so far rests on a single claim: a centred stick flies
+    this aircraft into the ground in 49 seconds, because the round starts
+    untrimmed. That is true of *our* environment, and the whole case for the
+    ground-avoidance floor rests on it being true of the host as well.
+
+    LevelPolicy cannot test it. It is an altitude-holding autopilot, so it
+    corrects exactly the drift the question is about, and a host that trims and
+    a host that does not would both come back flying level.
+
+    The throttle is 0.8 because that is the reference reset value and the OBS
+    packet carries no throttle to read the real one from. If the host starts it
+    elsewhere this is a small step at frame one, not a hold, and the altitude
+    trace still answers the question.
+    """
+
+    throttle: float = 0.8
+
+    def __call__(self, state: np.ndarray) -> np.ndarray:
+        return np.array([0.0, 0.0, 0.0, self.throttle], dtype=np.float64)
+
+
+@dataclass
 class Recorder:
     """Every accepted frame, kept in memory and written once at the end."""
 
@@ -135,6 +160,37 @@ class Recorder:
                 "enemy_alt_ft": telemetry.enemy_alt_ft,
             }
         )
+
+
+def trim_verdict(frames: list[dict[str, Any]]) -> str:
+    """Does the host hand us a trimmed aircraft, or one that flies itself down?
+
+    Only meaningful on a recording flown with a centred stick (`--neutral`).
+    Our environment loses roughly 390 ft a second on average over the first 49
+    seconds from 19,000 ft, so the two answers are not close together and no
+    fine threshold is needed: 100 ft a second sits an order of magnitude below
+    an untrimmed dive and well above the drift of a trimmed aircraft.
+    """
+    flying = [f for f in frames if f["round"] >= 1]
+    if len(flying) < 2 * 60:
+        return "not enough flying frames to say — was START pressed?"
+
+    seconds = (len(flying) - 1) / 60.0
+    lost_ft = flying[0]["alt_ft"] - flying[-1]["alt_ft"]
+    rate = lost_ft / seconds if seconds else 0.0
+    measured = f"{lost_ft:+,.0f} ft over {seconds:.0f} s ({rate:+.0f} ft/s)"
+
+    if rate > 100.0:
+        return (
+            f"host does NOT trim: {measured}. Same as ours, so the floor and "
+            "every baseline measured against it stand"
+        )
+    if rate < -100.0:
+        return f"host starts nose-up: {measured}. Unexpected — send this recording back"
+    return (
+        f"host DOES trim: {measured}. Ours dives instead, so the environment is "
+        "wrong and every baseline has to be measured again"
+    )
 
 
 def analyse(frames: list[dict[str, Any]]) -> dict[str, Any]:
@@ -188,6 +244,7 @@ def analyse(frames: list[dict[str, Any]]) -> dict[str, Any]:
         "altitude_ft": {"min": round(min(altitudes), 1), "max": round(max(altitudes), 1)},
         "vc_kts": {"min": round(min(speeds), 1), "max": round(max(speeds), 1)},
         "speed_verdict": speed_verdict,
+        "trim_verdict": trim_verdict(frames),
         "boundary_verdict": (
             f"{held} frames repeated the previous position exactly; "
             f"{rounds} round(s) were detected from that pattern"
@@ -296,9 +353,20 @@ def selftest(args: argparse.Namespace) -> int:
     return 0
 
 
+def policy_for(args: argparse.Namespace) -> LevelPolicy | NeutralPolicy:
+    """What the probe flies. A function so the wiring itself can be tested.
+
+    Selecting inline meant no test failed when the flag was ignored, which is
+    the only failure mode that matters here: a --neutral run that quietly flew
+    the autopilot would answer the trim question with the autopilot's own
+    behaviour and look like a clean result.
+    """
+    return NeutralPolicy() if args.neutral else LevelPolicy()
+
+
 def run(args: argparse.Namespace) -> int:
     recorder = Recorder()
-    client = CompetitionClient(LevelPolicy(), observer=recorder)
+    client = CompetitionClient(policy_for(args), observer=recorder)
     endpoint = Endpoint(
         listen_ip=args.listen_ip,
         listen_port=args.listen_port,
@@ -382,6 +450,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host-port", type=int, default=8099)
     parser.add_argument("--seconds", type=float, default=420.0)
     parser.add_argument("--output", default="data/probe")
+    parser.add_argument(
+        "--neutral",
+        action="store_true",
+        help=(
+            "send a centred stick instead of flying level, to see whether the "
+            "host trims the aircraft at the start of a round. Ours does not: "
+            "it loses about 19,000 ft in 49 seconds"
+        ),
+    )
     parser.add_argument(
         "--selftest",
         action="store_true",

@@ -277,3 +277,60 @@ def test_the_host_starts_both_aircraft_at_the_same_altitude():
 
     _, vertical_ft, _ = _separation(_frame(alt_ft=19116.00001178682, enemy_alt_ft=19116.00002093613))
     assert abs(vertical_ft) < 0.001
+
+
+# --------------------------------------------------------- does the host trim?
+
+
+def _flying(altitudes: list[float]) -> list[dict[str, object]]:
+    return [{"round": 1, "alt_ft": ft} for ft in altitudes]
+
+
+def test_a_diving_recording_says_the_host_does_not_trim():
+    """Ours loses about 390 ft a second from a centred stick. A host that does
+    the same means every baseline measured against our environment stands."""
+    from competition.probe import trim_verdict
+
+    seconds = 10
+    verdict = trim_verdict(_flying([19_000.0 - 390.0 * (i / 60.0) for i in range(seconds * 60)]))
+    assert "does NOT trim" in verdict
+
+
+def test_a_level_recording_says_the_host_trims_and_calls_for_a_remeasure():
+    """The answer that invalidates work, so it has to say so rather than read
+    as a clean pass."""
+    from competition.probe import trim_verdict
+
+    verdict = trim_verdict(_flying([19_000.0 + (i % 7) * 0.5 for i in range(10 * 60)]))
+    assert "DOES trim" in verdict
+    assert "measured again" in verdict
+
+
+def test_a_recording_with_no_flying_frames_says_so_rather_than_guessing():
+    """Forgetting to press START produces frames, all of them held. Reporting
+    "does not trim" from those would be the worst possible answer."""
+    from competition.probe import trim_verdict
+
+    assert "not enough flying frames" in trim_verdict([{"round": 0, "alt_ft": 19_000.0}] * 600)
+
+
+def test_the_neutral_flag_actually_changes_what_is_flown():
+    """The wiring, not the policy. A --neutral run that flew the altitude-holding
+    autopilot would answer the trim question with the autopilot's own behaviour,
+    and look like a clean result while doing it."""
+    from competition.probe import LevelPolicy, NeutralPolicy, parse_args, policy_for
+
+    assert isinstance(policy_for(parse_args(["--neutral"])), NeutralPolicy)
+    assert isinstance(policy_for(parse_args([])), LevelPolicy)
+
+
+def test_a_centred_stick_is_centred_on_all_three_axes():
+    """Zero on the throttle would be an order to close it, not "do nothing" —
+    the mistake the evaluator's neutral baseline made once already."""
+    import numpy as np
+
+    from competition.probe import NeutralPolicy
+
+    command = NeutralPolicy()(np.zeros(20))
+    assert list(command[:3]) == [0.0, 0.0, 0.0]
+    assert command[3] == pytest.approx(0.8), "the throttle a round starts at"
