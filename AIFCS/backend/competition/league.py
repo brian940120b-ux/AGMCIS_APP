@@ -31,11 +31,13 @@ at all.
 
 from __future__ import annotations
 
+import json
 import random
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -75,6 +77,7 @@ class PolicyOpponent:
         action_repeat: int = 1,
         rudder_limit: float = RUDDER_LIMIT,
         high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
+        encoder: Any = None,
     ) -> None:
         if action_repeat < 1:
             raise ValueError(f"action_repeat is a number of frames, not {action_repeat}")
@@ -82,7 +85,12 @@ class PolicyOpponent:
         self.action_repeat = action_repeat
         self.rudder_limit = rudder_limit
         self.high_speed_elevator_limit = high_speed_elevator_limit
-        self.encoder = StateEncoder()
+        # The encoder the saved policy was trained with, not the reference one.
+        # Hardcoding StateEncoder() here meant a 30-dimensional policy was fed
+        # 20 numbers: v4 trains on `extended`, so the first attempt to put it
+        # in a pool would have failed on a shape mismatch before the first
+        # round finished.
+        self.encoder = encoder if encoder is not None else StateEncoder()
         self.joystick = JoystickState()
         self._held: np.ndarray | None = None
         self._frames = 0
@@ -136,6 +144,41 @@ def collect_checkpoints(paths: list[str]) -> dict[str, Path]:
                 name = f"{name}-{len(found)}"
             found[name] = candidate
     return found
+
+
+def opponent_from_checkpoint(
+    checkpoint: Path,
+    algorithm: str = "sac",
+    device: str = "cpu",
+) -> PolicyOpponent:
+    """A pool opponent flying the aircraft its own session trained on.
+
+    Every setting comes from the checkpoint's sibling `card.json`, the way the
+    evaluator rebuilds a session's plant: observation, decision rate, rudder
+    cap, high-speed elevator limit. Taking them from the *new* run's flags
+    instead — which is what this used to do — makes the opponent a policy
+    flying somebody else's aeroplane, and a 30-dimensional policy handed 20
+    numbers does not fly at all.
+
+    A card that is missing, or missing a field, falls back to the reference
+    value, which is what a session recorded before those fields existed had.
+    """
+    from competition.environment import EnvConfig, build_encoder
+
+    card_path = checkpoint.parent / "card.json"
+    described: dict[str, Any] = {}
+    if card_path.is_file():
+        described = json.loads(card_path.read_text(encoding="utf-8")).get("environment", {})
+
+    return PolicyOpponent(
+        load_predict(checkpoint, algorithm, device=device),
+        action_repeat=int(described.get("action_repeat", 1)),
+        rudder_limit=float(described.get("rudder_limit", RUDDER_LIMIT)),
+        high_speed_elevator_limit=float(
+            described.get("high_speed_elevator_limit", ELEVATOR_LIMIT_HIGH_SPEED)
+        ),
+        encoder=build_encoder(EnvConfig(observation=described.get("observation", "reference"))),
+    )
 
 
 def load_predict(checkpoint: Path, algorithm: str = "sac", device: str = "cpu"):

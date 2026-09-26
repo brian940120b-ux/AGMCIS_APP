@@ -230,3 +230,102 @@ def test_an_empty_or_missing_pool_says_so(tmp_path):
         collect_checkpoints([str(tmp_path)])
     with pytest.raises(FileNotFoundError):
         collect_checkpoints([str(tmp_path / "nothing.zip")])
+
+
+def _telemetry():
+    """Only the fields an encoder reads; the rest are placeholders."""
+    from competition.state import Telemetry
+
+    values = dict.fromkeys(Telemetry.__dataclass_fields__, 0.0)
+    values["own_alt_ft"] = 18_000.0
+    values["own_vc_fps"] = 574.0
+    values["own_vt_fps"] = 740.0
+    values["enemy_alt_ft"] = 18_000.0
+    values["enemy_lat_deg"] = 0.01
+    return Telemetry(**values)
+
+
+# ------------------------------------- a pool opponent flies its own aircraft
+
+
+def test_a_pool_opponent_is_built_from_its_own_card(tmp_path, monkeypatch):
+    """The bug that would have stopped self-play on its first round.
+
+    PolicyOpponent hardcoded StateEncoder(), the 20-dimensional reference
+    encoding, and train.py handed it the *new* run's action repeat and rudder
+    cap. v4 trains on `extended`, 30 numbers, at 6 frames a decision — so the
+    first pool built from it would have fed a 30-dimensional policy 20 inputs.
+
+    An opponent flies the aeroplane it learned on, the same rule the evaluator
+    already follows for the policy under test.
+    """
+    import json
+
+    from competition.features import EXTENDED_STATE_SIZE
+    from competition.league import opponent_from_checkpoint
+
+    session = tmp_path / "v4"
+    session.mkdir()
+    (session / "card.json").write_text(
+        json.dumps(
+            {
+                "environment": {
+                    "observation": "extended",
+                    "action_repeat": 6,
+                    "rudder_limit": 0.5,
+                    "high_speed_elevator_limit": 0.9,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    checkpoint = session / "checkpoint.zip"
+    checkpoint.write_bytes(b"")
+
+    seen: list[int] = []
+
+    def fake_load_predict(path, algorithm="sac", device="cpu"):
+        def predict(state):
+            seen.append(len(state))
+            return np.zeros(4)
+
+        return predict
+
+    monkeypatch.setattr("competition.league.load_predict", fake_load_predict)
+    opponent = opponent_from_checkpoint(checkpoint)
+
+    assert opponent.action_repeat == 6, "its decision rate, not the new run's"
+    assert opponent.rudder_limit == 0.5
+    assert opponent.high_speed_elevator_limit == 0.9
+
+    opponent(_telemetry())
+    assert seen == [EXTENDED_STATE_SIZE], "and its observation width"
+
+
+def test_a_checkpoint_with_no_card_falls_back_to_the_reference_aircraft():
+    """What a session recorded before any of those fields existed looks like."""
+    from pathlib import Path
+
+    from competition.league import opponent_from_checkpoint
+    from competition.state import STATE_SIZE
+
+    seen: list[int] = []
+
+    def fake_load_predict(path, algorithm="sac", device="cpu"):
+        def predict(state):
+            seen.append(len(state))
+            return np.zeros(4)
+
+        return predict
+
+    import competition.league as league
+
+    original, league.load_predict = league.load_predict, fake_load_predict
+    try:
+        opponent = opponent_from_checkpoint(Path("nowhere/checkpoint.zip"))
+        assert opponent.action_repeat == 1
+        opponent(_telemetry())
+    finally:
+        league.load_predict = original
+
+    assert seen == [STATE_SIZE]

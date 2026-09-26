@@ -174,14 +174,10 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
     pool = {}
     if args.opponent_pool:
-        from competition.league import PolicyOpponent, collect_checkpoints, load_predict
+        from competition.league import collect_checkpoints, opponent_from_checkpoint
 
         for name, checkpoint in collect_checkpoints(args.opponent_pool).items():
-            pool[name] = PolicyOpponent(
-                load_predict(checkpoint, args.algorithm, device="cpu"),
-                action_repeat=args.action_repeat,
-                rudder_limit=args.rudder_limit,
-            )
+            pool[name] = opponent_from_checkpoint(checkpoint, args.algorithm, device="cpu")
 
     return EnvConfig(
         setup=setup,
