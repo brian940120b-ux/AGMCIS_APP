@@ -74,6 +74,7 @@ INHERITED: dict[str, tuple[str, str]] = {
     # what carries over is whether there was one — missed on the first attempt
     # precisely because the two shapes differ.
     "ground_avoidance": ("environment", "ground_avoidance"),
+    "g_limit": ("environment", "g_limit"),
 }
 
 #: Settings whose recorded shape is not the flag's shape.
@@ -111,6 +112,7 @@ DEFAULTS: dict[str, Any] = {
     "opponent_aggression": 1.0,
     "reference_speed_order": False,
     "ground_avoidance": False,
+    "g_limit": 0.0,
 }
 
 
@@ -193,6 +195,7 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
         speed_before_altitude=args.reference_speed_order,
         action_repeat=args.action_repeat,
         ground_avoidance=build_floor(args.ground_avoidance),
+        g_limit=args.g_limit or None,
     )
 
 
@@ -504,6 +507,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help='how hard "pursuit" pulls; a ladder of these is a curriculum',
     )
     parser.add_argument("--rudder", action="store_true", default=None, help="unlock the rudder channel")
+    parser.add_argument(
+        "--g-limit",
+        type=float,
+        default=None,
+        metavar="G",
+        help=(
+            "limit the elevator on measured load factor instead of on speed. "
+            "9 is the load the scoring charges 1000 a second for exceeding. "
+            "Measured against the sample's Mach-based limit: +95%% turn rate at "
+            "19,000 ft and 500 KCAS, +78%% at 3,000 ft, no cost at 350 KCAS, and "
+            "no frames above 9G anywhere. 0 or unset keeps the sample's limit"
+        ),
+    )
     parser.add_argument(
         "--rudder-limit",
         type=float,

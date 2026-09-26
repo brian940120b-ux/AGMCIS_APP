@@ -364,6 +364,10 @@ class EnvConfig:
     #: A rule-based pull-up under the policy. None is the reference's
     #: behaviour: nothing catches the aircraft. See `safety.py`.
     ground_avoidance: GroundAvoidance | None = None
+    #: Limit the elevator on measured load factor instead of on speed. None
+    #: keeps the sample client's Mach-based limit, which is what every session
+    #: trained before 2026-09-26 learned to fly. See action.g_limited.
+    g_limit: float | None = None
     #: How many 60 Hz frames one decision is held for.
     #:
     #: 1 reproduces the reference, which decides sixty times a second — 18,000
@@ -403,6 +407,7 @@ class EnvConfig:
             "action_repeat": self.action_repeat,
             "observation": self.observation,
             "ground_avoidance": None if self.ground_avoidance is None else asdict(self.ground_avoidance),
+            "g_limit": self.g_limit,
             "round_seconds": self.round_seconds,
             "attack_half_angle_deg": self.envelope.half_angle_deg,
             "attack_range_ft": [self.envelope.min_range_ft, self.envelope.max_range_ft],
@@ -528,6 +533,8 @@ class CompetitionRound:
             telemetry.reference_mach,
             high_speed_elevator_limit=self.config.high_speed_elevator_limit,
             rudder_limit=self.config.rudder_limit,
+            g_load=None if self.config.g_limit is None else telemetry.own_g_acc,
+            g_limit=self.config.g_limit,
         )
         self.own.apply(command)
 

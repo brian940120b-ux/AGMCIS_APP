@@ -307,6 +307,7 @@ def config_from_card(
         rudder_enabled=bool(described.get("rudder_enabled", False)),
         rudder_limit=float(described.get("rudder_limit", 0.2)),
         high_speed_elevator_limit=float(described.get("high_speed_elevator_limit", 0.4)),
+        g_limit=described.get("g_limit"),
         speed_before_altitude=bool(described.get("speed_before_altitude", False)),
         # `is not None`, not truthiness: an empty dict means "a floor, with its
         # own defaults", which is exactly what --ground-avoidance asks for on a

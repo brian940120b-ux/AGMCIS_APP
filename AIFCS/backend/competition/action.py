@@ -65,6 +65,24 @@ ELEVATOR_LIMIT = 1.0
 ELEVATOR_LIMIT_HIGH_SPEED = 0.4
 ELEVATOR_LIMIT_ABOVE_MACH = 0.8
 
+#: The load factor the scoring charges 1000 a second for exceeding.
+G_PENALTY_LIMIT = 9.0
+#: How many G before the limit the cutback starts, swept at 3,000 and 19,000 ft
+#: entering a maximum-rate turn at 350 and 500 KCAS:
+#:
+#:                        19k/500kt      3k/500kt       3k/350kt   worst peak
+#:     mach 0.4 (sample)   6.2 deg/s     8.8 deg/s     16.4 deg/s     6.6 G
+#:     G, margin 1.5      12.1          16.9           16.4           8.2 G
+#:     G, margin 2.0      12.1          15.7           16.4           7.9 G
+#:     G, margin 3.0      11.8          13.7           15.4           7.5 G
+#:     no limit at all    12.1          17.1           16.4           9.3 G  <- 2,917 pts
+#:
+#: 2.0 is where the fast cases are at full rate, the slow case costs nothing at
+#: all against the sample, and the peak still leaves 1.1G of buffer. 1.5 buys
+#: 1.2 deg/s in one cell for 0.3G of that buffer, which is not a trade worth
+#: making against a penalty of 1000 a second.
+G_LIMIT_MARGIN = 2.0
+
 #: Throttle the aircraft starts a round holding, per the reference reset.
 INITIAL_THROTTLE = 0.8
 
@@ -102,6 +120,39 @@ def elevator_limit_for(reference_mach: float, high_speed_limit: float = ELEVATOR
     return ELEVATOR_LIMIT
 
 
+def g_limited(elevator: float, g_load: float, limit: float, margin: float) -> float:
+    """Cut the elevator back as the measured load factor approaches the limit.
+
+    What the high-speed elevator limit is actually trying to do. That one uses
+    speed as a stand-in for G and pays for the guess: measured at 19,000 ft and
+    500 KCAS it halves the turn rate (6.2 against 12.1 degrees a second) and
+    nearly triples the turn radius (2,569 m against 1,076 m), to prevent an
+    exceedance that does not happen at that altitude at all — zero frames above
+    9G with the limit fully open. It only earns its keep low and fast, where
+    full elevator does spend 2.9 seconds above 9G.
+
+    G is not something we have to guess at. It arrives in the OBS packet the
+    host sends, 26 doubles, `own_g_acc` among them. So limit on the thing the
+    rule is written about.
+
+    Only the direction that is loading the aircraft further is cut back: a
+    policy pulling out of a high-G push keeps full authority, which is the
+    case where taking the stick away would be worst.
+
+    **Pulling produces negative G here**, the same sign trap the ground
+    avoidance layer fell into, in mirror image: a nose-up elevator of -1.0 sits
+    alongside `n-pilot-z-norm` of -9.34. The first version tested for opposite
+    signs and so concluded that a full pull at -9.3G was not loading the
+    aircraft — the headroom read 0.00 and the limiter passed -1.000 straight
+    through for 2.9 seconds. Same sign is what "loading" means.
+    """
+    headroom = float(np.clip((limit - abs(g_load)) / margin, 0.0, 1.0))
+    if headroom >= 1.0:
+        return elevator
+    loading = elevator * g_load > 0.0
+    return elevator * headroom if loading else elevator
+
+
 def shape_command(
     raw_action: np.ndarray,
     joystick: JoystickState,
@@ -109,16 +160,24 @@ def shape_command(
     *,
     high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
     rudder_limit: float = RUDDER_LIMIT,
+    g_load: float | None = None,
+    g_limit: float | None = None,
 ) -> np.ndarray:
     """One frame of stick shaping. Mutates `joystick`, returns the new command.
 
     `raw_action` is the policy's four channels: aileron, elevator, rudder,
     throttle.
+
+    Passing both `g_load` and `g_limit` replaces the speed-based elevator limit
+    with a load-factor one; see `g_limited`. Leaving either unset keeps the
+    sample client's behaviour exactly, which is what every session trained
+    before 2026-09-26 learned to fly.
     """
+    on_g = g_load is not None and g_limit is not None
     limits = np.array(
         [
             AILERON_LIMIT,
-            elevator_limit_for(reference_mach, high_speed_elevator_limit),
+            ELEVATOR_LIMIT if on_g else elevator_limit_for(reference_mach, high_speed_elevator_limit),
             rudder_limit,
         ],
         dtype=np.float64,
@@ -132,6 +191,11 @@ def shape_command(
             value = 0.0
         value = float(np.sign(value) * (abs(value) ** EXPONENTS[axis]))
         value = float(np.clip(value, -limits[axis], limits[axis]))
+        # Repeating the None checks rather than reusing `on_g`: a bool does not
+        # narrow the types for the checker, and asserting would be a runtime
+        # cost on the hot path to satisfy a static one.
+        if axis == 1 and g_load is not None and g_limit is not None:
+            value = g_limited(value, g_load, g_limit, G_LIMIT_MARGIN)
         change = float(
             np.clip(
                 value - previous[axis],
