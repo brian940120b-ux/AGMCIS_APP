@@ -390,8 +390,15 @@ def _host_shaped_dive() -> list[dict[str, object]]:
                 return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
         return table[-1][1]
 
+    # Pitch as the host actually recorded it: level at the start, easing down
+    # only as the dive develops. Measured opening frame: pitch 0.0, alpha 0.02
+    # — the same as ours, which is the whole point.
+    pitches = [(0, 0.0), (10, -2.0), (20, -8.0), (30, -14.0), (40, -16.0), (50, -17.0), (67.5, -18.0)]
     total = int(67.5 * 60)
-    return [_host_frame(i, at(altitudes, i / 60), at(speeds, i / 60), 18084.0, 6.5) for i in range(total)]
+    return [
+        _host_frame(i, at(altitudes, i / 60), at(speeds, i / 60), 18084.0, at(pitches, i / 60))
+        for i in range(total)
+    ]
 
 
 def test_it_refuses_to_compare_a_recording_too_short_to_mean_anything():
@@ -436,29 +443,54 @@ def test_a_mangled_windows_path_is_explained_not_traced(tmp_path, capsys, monkey
     assert "data/probe/probe-20260926-121044.jsonl" in printed, "and name what is there"
 
 
-def test_a_gap_that_opens_and_then_stops_growing_is_an_attitude_not_an_aeroplane():
+def test_a_gap_that_opens_and_then_stops_growing_is_not_a_different_aeroplane():
     """The finding the real recording forced.
 
     Reporting "+14%, a different aeroplane" was the wrong conclusion from the
     right number: the host loses 129 ft in its first ten seconds and ours
-    1,007, and thereafter the two descend within 10% of each other. A
-    difference created at the start and not sustained is a starting attitude.
-    Ours sets ic/theta-deg = 0, and level flight at 18,084 ft and 340 KCAS
-    needs a positive angle of attack.
+    1,007, and thereafter the two descend within 10% of each other, with the
+    speed gap narrowing from 61 kt to 28. Two aeroplanes disagree throughout.
+
+    What the gap *is* takes the test below; this one only holds the line that
+    it is not the aerodynamics.
     """
     from competition.probe import replay_locally
 
     result = replay_locally(_host_shaped_dive())
-    assert "different opening attitude" in result["verdict"]
+    assert "same aeroplane" in result["verdict"]
     assert "different aeroplane" not in result["verdict"]
-    assert result["host_opening"]["ours_pitch_deg"] == 0.0
 
 
 def test_the_recording_own_opening_attitude_is_reported_not_inferred():
     """A pitch fitted to the altitude trace is a guess; the recording carries
-    the host's own reading, so report that and let the fit be checked."""
+    the host's own reading, so report that and let the fit be checked.
+
+    It was checked, and the fit was wrong. Sweeping the opening pitch against
+    the altitude trace said 6.5 degrees; the recording's first frame says 0.0,
+    the same as ours. The fit matched the curve by describing a mechanism that
+    is not there, which is worse than not matching — and is why the number
+    reported here is read out of the file rather than solved for.
+    """
     from competition.probe import replay_locally
 
     result = replay_locally(_host_shaped_dive())
-    assert result["host_opening"]["pitch_deg"] == 6.5
-    assert result["host_opening"]["alpha_deg"] == 6.5
+    assert result["host_opening"]["pitch_deg"] == 0.0
+    assert result["host_opening"]["ours_pitch_deg"] == 0.0
+
+
+def test_two_aircraft_starting_level_and_only_one_dropping_its_nose_is_named():
+    """What the recording turned out to show.
+
+    Both start at pitch 0. Ten seconds later ours is at -13.7 and the host is
+    barely down. An attitude the two share cannot explain a divergence, so the
+    verdict has to point at what is left — trim, CG, pitching moment — instead
+    of repeating "different opening attitude" at an attitude that is the same.
+    """
+    from competition.probe import replay_locally
+
+    result = replay_locally(_host_shaped_dive())
+    verdict = result["verdict"]
+    assert "same opening attitude" in verdict
+    assert "drops its nose" in verdict
+    assert "elevator trim, CG, or pitching moment" in verdict
+    assert result["host_opening"]["nose_gap_at_10s_deg"] < -5.0, "ours is nose-down by then"

@@ -222,6 +222,14 @@ def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[
                     "difference_ft": round(ours_ft - host_frame["alt_ft"], 0),
                     "host_kts": round(host_frame["vc_fps"] * KNOTS_PER_FPS, 0),
                     "ours_kts": round(float(own.fdm["velocities/vc-kts"]), 0),
+                    # The discriminator. Both start at pitch 0 — measured, not
+                    # assumed — so whatever holds the host's nose up is not its
+                    # initial attitude. Watching the two noses is how to find
+                    # out what it is.
+                    "host_pitch": round(host_frame["pitch"], 1),
+                    "ours_pitch": round(float(own.fdm["attitude/theta-deg"]), 1),
+                    "host_alpha": round(host_frame["alpha"], 1),
+                    "ours_alpha": round(float(own.fdm["aero/alpha-deg"]), 1),
                 }
             )
         if ours_ft <= 0.0:
@@ -248,14 +256,26 @@ def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[
     late_gap = (late_ours - late_host) / late_host if late_host else 0.0
     opening = samples[1]["difference_ft"] if len(samples) > 1 else 0.0
 
+    same_start = abs(first["pitch"] - 0.0) < 1.0
+    nose = samples[1] if len(samples) > 1 else samples[0]
+    nose_gap = nose["ours_pitch"] - nose["host_pitch"]
+
     if abs(gap) < 0.05:
         verdict = f"our plant matches the host's to {abs(gap):.0%} on descent rate"
+    elif abs(late_gap) < 0.15 and same_start:
+        verdict = (
+            f"same aeroplane, same opening attitude (both pitch "
+            f"{first['pitch']:.1f}), but ours drops its nose: {nose['ours_pitch']:+.1f} "
+            f"against {nose['host_pitch']:+.1f} degrees at ten seconds, "
+            f"{opening:+,.0f} ft apart. Something is holding the host's nose up "
+            f"that is not holding ours — elevator trim, CG, or pitching moment. "
+            f"They descend within {abs(late_gap):.0%} of each other once both are down"
+        )
     elif abs(late_gap) < 0.15:
         verdict = (
-            f"same aeroplane, different opening attitude: {opening:+,.0f} ft apart "
-            f"after ten seconds, but descending within {abs(late_gap):.0%} of each "
-            f"other by the end. Ours starts at pitch 0; compare that against the "
-            f"recording's own_pitch_deg"
+            f"same aeroplane, different opening attitude: host starts at pitch "
+            f"{first['pitch']:.1f} and ours at 0, {opening:+,.0f} ft apart after "
+            f"ten seconds, descending within {abs(late_gap):.0%} by the end"
         )
     else:
         verdict = (
@@ -269,6 +289,7 @@ def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[
             "pitch_deg": round(first["pitch"], 2),
             "alpha_deg": round(first["alpha"], 2),
             "ours_pitch_deg": 0.0,
+            "nose_gap_at_10s_deg": round(nose_gap, 1),
         },
         "samples": samples,
         "verdict": verdict,
