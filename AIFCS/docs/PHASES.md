@@ -1371,3 +1371,32 @@ matters: Linux forks its workers and Windows spawns a fresh interpreter for
 each, so there each worker carries its own copy of torch and JSBSim. On a
 machine that has already exhausted its file handles once, that is the number to
 watch, and it is not the one measured here.
+
+### Where is the progress? (COMP PHASE 12)
+
+Asked, plainly, after starting a five-million-step run: where do I find it. The
+answer was nowhere. Between the banner and the final summary the trainer
+printed nothing of its own, and Stable-Baselines3's own table appears only
+every few episodes — which, when an episode is a five-minute engagement, can be
+many minutes apart. Hours of silence on a run someone is trusting overnight,
+which is the same shape as the launcher's two failures: silence read as a hang,
+because nothing distinguishes the two.
+
+Each checkpoint now prints what it has just written, with the rate and the time
+remaining, and says nothing at 100% because the summary immediately below says
+it.
+
+Looking at that code found a real defect beside it. `save_checkpoint` took
+`elapsed_s` — the whole of the run so far — and *added* it to the session's
+total at every checkpoint, so the same seconds were counted again each time.
+Three checkpoints in a five-minute run recorded ten minutes. A five-million-step
+run checkpoints roughly two hundred times, which makes the recorded figure
+about a hundred times the truth, on the model card, where it is read as what
+training cost. It is set now rather than accumulated, from a baseline captured
+before the run starts so that earlier runs' time is still carried. Both
+directions have a test: the double count, and the opposite mistake of
+forgetting what a session had already spent.
+
+Steps were never affected. Only the clock was, and only for sessions trained
+before this — the wrong number on disk does not correct itself, and the
+documentation says so rather than pretending the fix is retroactive.

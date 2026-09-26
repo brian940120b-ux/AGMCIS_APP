@@ -181,6 +181,7 @@ def train(args: argparse.Namespace) -> int:
             state,
             steps_this_run=int(getattr(callback, "num_timesteps", 0)),
             started_steps=callback.started_steps,
+            wall_clock_before=callback.started_wall_clock,
             elapsed_s=elapsed,
             save_buffer=args.save_buffer,
         )

@@ -268,6 +268,72 @@ def test_a_powershell_script_with_chinese_starts_with_a_utf8_bom(path: Path):
         )
 
 
+# --------------------------------------------------- what a checkpoint records
+
+
+class _FakeModel:
+    """Enough of a model to be saved, and nothing else."""
+
+    def save(self, path) -> None:
+        Path(path).write_text("model", encoding="utf-8")
+
+
+def test_a_run_records_the_time_it_took_not_a_multiple_of_it(tmp_path: Path):
+    """Found while answering "where is the progress?" rather than by a failure.
+
+    `elapsed_s` is the whole of the run so far, and every checkpoint added it
+    to a running total — so the same seconds were counted again at each one.
+    Three checkpoints in a five-minute run recorded ten minutes. The overnight
+    runs take a checkpoint every 25,000 steps, so five million steps would
+    record a number roughly a hundred times the truth, on the model card, where
+    it is read as the cost of training.
+    """
+    from competition.session import save_checkpoint
+
+    session = Session(tmp_path / "s")
+    state = SessionState(name="s", algorithm="sac", target_timesteps=100_000)
+    before = state.wall_clock_s
+
+    for steps, elapsed in ((25_000, 100.0), (50_000, 200.0), (75_000, 300.0)):
+        save_checkpoint(
+            _FakeModel(),
+            session,
+            state,
+            steps_this_run=steps,
+            started_steps=0,
+            wall_clock_before=before,
+            elapsed_s=elapsed,
+            save_buffer=False,
+        )
+
+    assert state.wall_clock_s == 300.0, "three checkpoints, one run, three hundred seconds"
+    assert state.timesteps_done == 75_000
+
+
+def test_time_already_spent_on_a_session_is_carried_not_lost(tmp_path: Path):
+    """The opposite mistake: setting the total instead of adding to it would
+    make every resume forget what the session had already cost."""
+    from competition.session import save_checkpoint
+
+    session = Session(tmp_path / "s")
+    state = SessionState(name="s", algorithm="sac", target_timesteps=100_000)
+    state.wall_clock_s = 900.0
+
+    save_checkpoint(
+        _FakeModel(),
+        session,
+        state,
+        steps_this_run=1_000,
+        started_steps=50_000,
+        wall_clock_before=900.0,
+        elapsed_s=300.0,
+        save_buffer=False,
+    )
+
+    assert state.wall_clock_s == 1200.0
+    assert state.timesteps_done == 51_000
+
+
 # ------------------------------------------------ the platform launchers
 
 LAUNCHERS = {"start.sh": "sh", "start.ps1": "ps1"}

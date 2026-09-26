@@ -21,7 +21,7 @@ pytest.importorskip("stable_baselines3")
 TRAIN = Path(__file__).resolve().parents[1] / "competition" / "train.py"
 
 
-def run_trainer(output: Path, timesteps: int) -> str:
+def run_trainer(output: Path, timesteps: int, checkpoint_every: int = 1_000_000) -> str:
     """One training run, small enough to be a test and real enough to mean something."""
     result = subprocess.run(
         [
@@ -38,6 +38,8 @@ def run_trainer(output: Path, timesteps: int) -> str:
             "--device",
             "cpu",
             "--no-save-buffer",
+            "--checkpoint-every",
+            str(checkpoint_every),
             "--output",
             str(output),
         ],
@@ -75,3 +77,19 @@ def test_both_paths_say_which_device_they_are_using(tmp_path: Path):
     """
     assert "device:   cpu" in run_trainer(tmp_path, 400), "the fresh path"
     assert "device:   cpu" in run_trainer(tmp_path, 800), "the resume path"
+
+
+def test_a_long_run_says_how_it_is_going_while_it_goes(tmp_path: Path):
+    """Asked as "where do I find the progress?", and the answer was nowhere.
+
+    Between the banner and the final summary the trainer printed nothing of its
+    own — on a run of several hours, that is a window full of silence, which is
+    what a hang looks like too. Each checkpoint now reports the figure it has
+    just written to disk.
+    """
+    output = run_trainer(tmp_path, 400, checkpoint_every=100)
+
+    progress = [line for line in output.splitlines() if "steps (" in line and "%" in line]
+    assert len(progress) >= 2, f"expected progress during the run, got:\n{output}"
+    # And it says how much longer, which is the question behind the question.
+    assert any("left" in line for line in progress), progress

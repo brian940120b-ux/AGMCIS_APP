@@ -495,3 +495,40 @@ workers:  8 parallel simulations
 `cuda:0` = 有用到顯示卡。`cpu` = 沒有。
 
 想從外面確認，另開一個視窗執行 `nvidia-smi`，清單裡會有 `python.exe`。
+
+## 訓練中看不到進度？
+
+**舊版確實沒有印。** 從 `Logging to ...` 到跑完為止，訓練器自己一行都不印 ——
+中間那幾個小時只有 Stable-Baselines3 偶爾自己吐一張表。你找不到進度是對的。
+
+現在每次 checkpoint（預設每 25,000 步）會印一行：
+
+```
+device:   cuda:0
+workers:  8 parallel simulations
+1,946,544 / 5,000,000 steps (38.9%) — about 2.1 hr left
+1,971,544 / 5,000,000 steps (39.4%) — about 2.1 hr left
+```
+
+印的是**剛剛寫進硬碟的那個數字**，不是估的。
+
+### 正在跑的訓練不想中斷，又想看進度
+
+進度本來就會寫進檔案。另開一個 Git Bash：
+
+```bash
+cd ~/AGMCIS_APP/AIFCS && cat models/competition/run1/state.json
+```
+
+`timesteps_done` 就是目前進度，每 25,000 步更新一次。
+
+## `wall_clock_s` 這個數字以前是錯的
+
+同一個 run 裡，每次 checkpoint 都把「從開始到現在」的秒數**再加一次**到總計上。
+三次 checkpoint 的五分鐘會記成十分鐘；77 次 checkpoint 會記成大約 39 倍。
+
+已經修好：現在是「設定總時間」而不是「累加」，而且會正確帶上之前幾輪的時間。
+
+**但是已經寫壞的舊數值不會自己變對。** 如果你的 session 是在這個修正之前開始
+練的，`state.json` 和模型卡上的 `wall_clock_s` 都偏大。步數（`timesteps_done`）
+**沒有受影響**，那個一直是對的。

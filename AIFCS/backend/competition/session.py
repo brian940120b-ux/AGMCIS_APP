@@ -224,6 +224,9 @@ def checkpoint_callback(
         def __init__(self) -> None:
             super().__init__(verbose=0)
             self.started_steps = state.timesteps_done
+            # What the session had already spent before this run began. Kept so
+            # each checkpoint can set the total rather than add to it.
+            self.started_wall_clock = state.wall_clock_s
             self.started_at = time.perf_counter()
             self.next_at = every
 
@@ -231,6 +234,16 @@ def checkpoint_callback(
             if self.num_timesteps >= self.next_at:
                 self.next_at = self.num_timesteps + every
                 self.save()
+                # Training prints nothing of its own between here and the end
+                # of the run, which over a night is indistinguishable from a
+                # hang. A checkpoint is the honest moment to speak: the number
+                # is one that was just written to disk.
+                if state.timesteps_done < state.target_timesteps:
+                    # Not at the end: the summary below says that, and saying
+                    # it twice reads as a stutter.
+                    elapsed = time.perf_counter() - self.started_at
+                    rate = self.num_timesteps / elapsed if elapsed else None
+                    print(describe_progress(state, rate), flush=True)
             return True
 
         def save(self) -> None:
@@ -240,6 +253,7 @@ def checkpoint_callback(
                 state,
                 steps_this_run=int(self.num_timesteps),
                 started_steps=self.started_steps,
+                wall_clock_before=self.started_wall_clock,
                 elapsed_s=time.perf_counter() - self.started_at,
                 save_buffer=save_buffer,
             )
@@ -254,6 +268,7 @@ def save_checkpoint(
     *,
     steps_this_run: int,
     started_steps: int,
+    wall_clock_before: float,
     elapsed_s: float,
     save_buffer: bool,
 ) -> None:
@@ -264,7 +279,11 @@ def save_checkpoint(
         model.save_replay_buffer(session.buffer_path)
 
     state.timesteps_done = started_steps + steps_this_run
-    state.wall_clock_s = round(state.wall_clock_s + elapsed_s, 1)
+    # Set, not accumulated. `elapsed_s` is the whole of this run so far, so
+    # adding it at every checkpoint counted the same seconds again and again:
+    # three checkpoints in a five-minute run recorded ten minutes, and a run
+    # with two hundred of them recorded a number with no meaning at all.
+    state.wall_clock_s = round(wall_clock_before + elapsed_s, 1)
     session.write_state(state)
 
     log.info(
