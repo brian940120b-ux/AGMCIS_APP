@@ -475,3 +475,23 @@ AIFCS_SERVE_DASHBOARD=0 ./scripts/start.sh
 後端照常跑，`/` 會回一段 JSON 說明而不是網頁。測試套件用的也是這個設定 ——
 不然「找不到的網址回什麼」就會取決於這台機器有沒有打包過前端，同一份程式在兩台
 機器上跑出不同結果。
+
+## 「我的顯示卡到底有沒有在用？」
+
+續練的時候看不到 `Using cuda device` —— **這是正常的**。Stable-Baselines3 只在
+「建立」模型時印那行，「載入」時什麼都不印。而續練走的就是載入那條路，所以大部分
+的執行都看不到它。少了那一行，不代表沒用到 GPU。
+
+現在訓練器自己會說，兩條路都會印：
+
+```
+resuming run1: 1,921,544 / 5,000,000 steps (38.4%)
+training 3,078,456 more steps
+replay buffer restored (348 MB)
+device:   cuda:0          ← 就是這行
+workers:  8 parallel simulations
+```
+
+`cuda:0` = 有用到顯示卡。`cpu` = 沒有。
+
+想從外面確認，另開一個視窗執行 `nvidia-smi`，清單裡會有 `python.exe`。

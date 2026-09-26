@@ -147,6 +147,14 @@ def train(args: argparse.Namespace) -> int:
             **extra,
         )
 
+    # Said plainly, on both paths. Stable-Baselines3 prints "Using cuda device"
+    # when it constructs a model and says nothing at all when it loads one, so
+    # on a resume — which is most runs — the one line telling you whether the
+    # graphics card is being used simply is not there. Asking "is my GPU being
+    # used?" should not require reading the library's source.
+    print(f"device:   {model.device}")
+    print(f"workers:  {args.workers} parallel simulations")
+
     remaining = args.timesteps - state.timesteps_done
     state.runs += 1
     callback = checkpoint_callback(session, state, args.checkpoint_every, args.save_buffer)

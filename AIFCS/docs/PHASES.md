@@ -1344,3 +1344,30 @@ passed with the containment check deleted. It now includes the percent-encoded
 forms that reach the handler with `..` intact, and a symlink whose name is
 inside the bundle and whose target is not. With the check removed, two cases
 fail.
+
+### Saying which device it is using (COMP PHASE 11)
+
+Asked directly: "is my graphics card being used?" The honest answer was that
+the output did not say. Stable-Baselines3 prints `Using cuda device` when it
+constructs a model and nothing when it loads one, and a resume loads — so on
+most runs the single line that answers the question was absent, and its absence
+looked like bad news while meaning nothing at all. Checked rather than assumed,
+by constructing and loading a model and watching what each printed.
+
+The trainer now states its device and worker count on both paths.
+
+That gap existed because the trainer had no test that ran it. There is one now:
+two runs of a few hundred steps into a temporary directory, asserting that the
+second finds the first's session, that `--timesteps` is read as a total rather
+than an increment, and that both paths report the device. Roughly 27 s, which
+is a fair price for covering the promise the overnight runs rest on. With the
+device line deleted, it fails.
+
+Measured while the user's run was going, on four cores: 96 steps/s with one
+worker, 167 with two, 320 with four — close to linear, because the bottleneck
+is JSBSim on the CPU rather than the network on the GPU. Memory barely moved
+(694 MB to 711 MB), but that number does not transfer to the machine that
+matters: Linux forks its workers and Windows spawns a fresh interpreter for
+each, so there each worker carries its own copy of torch and JSBSim. On a
+machine that has already exhausted its file handles once, that is the number to
+watch, and it is not the one measured here.
