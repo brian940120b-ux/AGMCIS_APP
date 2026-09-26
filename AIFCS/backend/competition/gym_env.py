@@ -24,7 +24,9 @@ from competition.environment import (
     action_space,
     observation_space,
 )
+from competition.league import League
 from competition.rewards import ReferenceReward, RewardMode, ScoreReward, ShapedReward
+from competition.scoring import Verdict, decide_round
 from competition.state import Geometry
 from core.logging_config import get_logger
 
@@ -54,8 +56,24 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         self.action_space = action_space(self.config.rudder_enabled)
         self.round = CompetitionRound(self.config, seed=seed)
         self._reward = self._build_reward()
+        self._league = self._build_league(seed)
+        self._facing: str | None = None
         self._previous_kill: float | None = None
         self._previous_foe_kill: float | None = None
+
+    def _build_league(self, seed: int | None) -> League | None:
+        """Each worker keeps its own league over its own copies of the pool.
+
+        Not shared across processes, deliberately. A central league would need
+        the choice sent out to every worker and the result sent back on every
+        episode, and SubprocVecEnv gives no clean place for either. Sampling
+        independently per worker costs some statistical power — eight workers
+        reach the paper's hundred-matchup gate eight times over rather than
+        once — and buys an implementation with no coordination in it at all.
+        """
+        if not self.config.opponent_pool:
+            return None
+        return League(names=list(self.config.opponent_pool), seed=seed or 0)
 
     def _build_reward(self) -> ReferenceReward | ScoreReward | ShapedReward:
         if self.reward_mode is RewardMode.REFERENCE:
@@ -81,6 +99,9 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed)
+        if self._league is not None:
+            self._facing = self._league.next_opponent()
+            self.config.opponent_policy = self.config.opponent_pool[self._facing]
         state = self.round.reset(seed=seed)
         self._reward.reset()
         self._previous_kill = None
@@ -109,6 +130,18 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         if finished:
             info["score"] = self.round.score.as_dict()
             info["opponent_score"] = self.round.opponent_score.as_dict()
+            if self._league is not None and self._facing is not None:
+                outcome = decide_round(
+                    self.round.score,
+                    self.round.opponent_score,
+                    blue_crashed=reason == "CRASH",
+                    red_crashed=reason == "FOE_CRASH",
+                    collided=reason == "COLLISION",
+                )
+                # Scored with the organiser's own table, so "won" in the league
+                # means what it means on the day.
+                self._league.record(self._facing, outcome.verdict is Verdict.BLUE)
+                info["opponent_name"] = self._facing
         return state, float(reward), terminated, truncated, info
 
     def _frame(self, raw: np.ndarray) -> tuple[np.ndarray, Geometry, bool, str, float]:

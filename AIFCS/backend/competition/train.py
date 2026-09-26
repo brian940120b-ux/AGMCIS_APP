@@ -52,12 +52,25 @@ ALGORITHMS = ("ppo", "sac")
 
 def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
+    pool = {}
+    if args.opponent_pool:
+        from competition.league import PolicyOpponent, collect_checkpoints, load_predict
+
+        for name, checkpoint in collect_checkpoints(args.opponent_pool).items():
+            pool[name] = PolicyOpponent(
+                load_predict(checkpoint, args.algorithm, device="cpu"),
+                action_repeat=args.action_repeat,
+                rudder_limit=args.rudder_limit,
+            )
+
     return EnvConfig(
         setup=setup,
+        opponent_pool=pool,
         jsbsim_root=args.jsbsim_root,
         rudder_enabled=args.rudder,
         rudder_limit=args.rudder_limit,
         opponent=args.opponent,
+        opponent_aggression=args.opponent_aggression,
         speed_before_altitude=args.reference_speed_order,
         action_repeat=args.action_repeat,
         ground_avoidance=GroundAvoidance() if args.ground_avoidance else None,
@@ -331,7 +344,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=[mode.value for mode in RewardMode],
         default=RewardMode.REFERENCE.value,
     )
-    parser.add_argument("--opponent", choices=["reference", "level"], default="reference")
+    parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
+    parser.add_argument(
+        "--opponent-pool",
+        nargs="+",
+        default=[],
+        metavar="PATH",
+        help=(
+            "saved policies to fight, as files or directories of .zip. One is "
+            "drawn per round; once every one has been met 100 times and the "
+            "agent is winning overall, the hard ones come up more (PFSP)"
+        ),
+    )
+    parser.add_argument(
+        "--opponent-aggression",
+        type=float,
+        default=1.0,
+        help='how hard "pursuit" pulls; a ladder of these is a curriculum',
+    )
     parser.add_argument("--rudder", action="store_true", help="unlock the rudder channel")
     parser.add_argument(
         "--rudder-limit",

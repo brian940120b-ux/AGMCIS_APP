@@ -1455,3 +1455,52 @@ architecture rather than a setting. Both are in docs/STRATEGY.md with the
 paper's own thresholds.
 
 Tests: 910 passed.
+
+### From a target drone to an opponent pool (COMP PHASE 15)
+
+The measurement that set this phase's direction was already on the page and I
+had not read it as a problem: a policy doing *nothing at all*, with only a
+ground-avoidance floor under it, wins two rounds in three against the reference
+opponent. That opponent is a target drone — its turn branches are commented out
+in the source — and traced over five minutes it is 45 km away and still going.
+A win rate against it saturates long before a policy has learned to fight, and
+the opponent on the day is another team's agent.
+
+So: a `pursuit` opponent that turns towards us, and a pool of saved policies
+with PFSP sampling on the paper's own thresholds.
+
+Two things measurement corrected on the way.
+
+`aggression` was a knob that did nothing. It scaled only the extra pull in a
+turn, so with the wings level — most of the time — there was nothing to scale.
+It now scales the whole vertical command. The test that found it was itself
+wrong twice first: it read the controller's first frame, where the derivative
+term sees the entire error arrive at once and saturates the elevator at -1.0
+regardless, and it used a co-altitude target, where the vertical command is
+zero whatever the aggression. Both are the same mistake in different clothes —
+reading a number without asking what it was a number of.
+
+The pursuit opponent is *not* demonstrated to be harder. Against the degenerate
+baseline it is easier, and the reason is that both aircraft spend the round
+beyond 14 km where the distance factor is 0.1 for each and the scores are
+noise. What can be demonstrated here is that it does what it claims: the
+bearing to us converges from -43 degrees to +8, against the drone's -115 that
+barely moves. Whether it trains a better policy is a question for a GPU, and
+the documentation says so rather than implying an improvement nobody measured.
+
+The league is the paper's: uniform until every opponent has been met a hundred
+times and the agent is winning overall, then proportional to how often each one
+beats it, clipped between 0.2% and 11.7%. Each worker keeps its own league over
+its own copies of the pool — a central one would need the choice sent out and
+the result sent back on every episode, and SubprocVecEnv has no clean place for
+either. The cost is statistical power, the saving is having no coordination in
+the implementation at all, and that trade is written down where someone can
+disagree with it.
+
+The verdict a league records is `decide_round`'s, the same table that decides
+the day, not "did the reward go up". The test for that originally asserted a
+steeply diving opponent would hit the ground inside five minutes; it did not,
+so the test now recomputes the verdict from the finished round and checks the
+two agree whatever happened.
+
+Tests: 933 passed.

@@ -340,9 +340,22 @@ class EnvConfig:
     #: True reproduces the reference's initial-condition ordering, which
     #: leaves the aircraft 106 knots slower than asked for.
     speed_before_altitude: bool = False
-    #: "reference" ports the package's own auto_run; "level" is a simpler
-    #: hold that flies straight on a fixed throttle and outruns the pursuer.
+    #: Who we fly against.
+    #:
+    #: "reference" ports the package's own auto_run, which is a target drone:
+    #: its turn branches are commented out. "level" is a simpler straight hold.
+    #: "pursuit" turns towards us, which neither of the others does and the
+    #: opponent on the day certainly will.
     opponent: str = "reference"
+    #: How hard "pursuit" pulls. A ladder of these is a curriculum.
+    opponent_aggression: float = 1.0
+    #: A saved policy to fly the other aircraft, in place of a script. Built by
+    #: the caller and passed in, because loading a checkpoint is not something
+    #: a config should do — and because a pool hands a different one per round.
+    opponent_policy: Any | None = None
+    #: A named pool for the environment to draw from, one per round. When this
+    #: is set the environment picks; `opponent_policy` is what it picked.
+    opponent_pool: dict[str, Any] = field(default_factory=dict)
     #: A rule-based pull-up under the policy. None is the reference's
     #: behaviour: nothing catches the aircraft. See `safety.py`.
     ground_avoidance: GroundAvoidance | None = None
@@ -377,6 +390,11 @@ class EnvConfig:
             "high_speed_elevator_limit": self.high_speed_elevator_limit,
             "speed_before_altitude": self.speed_before_altitude,
             "opponent": self.opponent,
+            "opponent_aggression": self.opponent_aggression,
+            "opponent_policy": type(self.opponent_policy).__name__
+            if self.opponent_policy is not None
+            else None,
+            "opponent_pool": sorted(self.opponent_pool),
             "action_repeat": self.action_repeat,
             "ground_avoidance": None if self.ground_avoidance is None else asdict(self.ground_avoidance),
             "round_seconds": self.round_seconds,
@@ -461,11 +479,7 @@ class CompetitionRound:
             speed_kcas=setup.speed_kcas,
             speed_before_altitude=self.config.speed_before_altitude,
         )
-        self.opponent = (
-            reference_opponent(foe_altitude_ft, setup.speed_kcas)
-            if self.config.opponent == "reference"
-            else level_opponent(foe_altitude_ft)
-        )
+        self.opponent = _build_opponent(self.config, foe_altitude_ft, setup.speed_kcas)
 
         self.encoder.reset()
         self.joystick.reset()
@@ -581,3 +595,104 @@ def action_space(rudder_enabled: bool) -> Any:
         high=np.array([1.0, 1.0, rudder_high, 1.0], dtype=np.float32),
         dtype=np.float32,
     )
+
+
+def pursuit_opponent(
+    target_speed_kcas: float,
+    *,
+    aggression: float = 1.0,
+    floor_ft: float = 3000.0,
+) -> Opponent:
+    """An opponent that turns towards us, which the reference one never does.
+
+    The reference opponent is a target drone: its heading logic chooses from
+    `["Straight"]` because the turn branches are commented out in the source.
+    Training against it teaches a policy to beat something that flies straight,
+    and the measurement says as much — a policy that does *nothing at all*,
+    with only a ground-avoidance floor under it, wins 67% of rounds against it.
+
+    A win rate against a drone stops being informative long before it stops
+    going up, and the opponent on the day is another team's agent. So this one
+    flies lag pursuit: roll to put us on its nose, pull, and hold energy.
+
+    Deliberately scripted rather than learned. It is the bottom rung of the
+    ladder PHANG-MAN used — train against scripted opponents first, add
+    learned ones once the win rate passes half — and a rung has to be fixed
+    for the rungs above it to mean anything.
+
+    `aggression` scales the pull, which is the whole difference between an
+    opponent that tracks and one that overshoots, so a range of them makes a
+    curriculum out of one function.
+    """
+    state = {"previous_roll_error": 0.0, "previous_pitch_error": 0.0, "previous_speed_error": 0.0}
+    dt = 1.0 / SIM_HZ
+    encoder = StateEncoder()
+
+    def fly(telemetry: Telemetry) -> np.ndarray:
+        geometry = encoder.geometry(telemetry)
+
+        # Bank towards the bearing. A 90-degree bank is the most a turn asks
+        # for; beyond that the lift vector goes back down the other side.
+        wanted_roll_deg = max(min(geometry.azimuth_deg * 1.5, 80.0), -80.0)
+        # Except near the ground, where rolling into a turn is how an aircraft
+        # arrives at it. Wings level takes priority over the fight.
+        if telemetry.own_alt_ft < floor_ft:
+            wanted_roll_deg = 0.0
+
+        roll_error = wanted_roll_deg - telemetry.own_roll_deg
+        roll_rate = (roll_error - state["previous_roll_error"]) / dt
+        aileron = 0.02 * roll_error + 0.01 * roll_rate
+        state["previous_roll_error"] = roll_error
+
+        # Pull towards the target once banked, and pull harder the closer the
+        # nose already is — that is what turns a bank into a tracking turn
+        # rather than a drift. Positive elevator is nose down here, so the
+        # commanded pitch is subtracted in the same shape the reference uses.
+        bank = abs(math.sin(math.radians(telemetry.own_roll_deg)))
+        # `aggression` scales the whole vertical command, not just the extra
+        # pull in the turn. Gating it on bank alone made it a knob that did
+        # nothing whenever the wings were level, which is most of the time.
+        wanted_pitch_deg = max(min((geometry.elevation_deg + 10.0 * bank) * aggression, 20.0), -10.0)
+        if telemetry.own_alt_ft < floor_ft:
+            wanted_pitch_deg = max(wanted_pitch_deg, 5.0)
+
+        pitch_error = wanted_pitch_deg - telemetry.own_pitch_deg
+        pitch_rate = (pitch_error - state["previous_pitch_error"]) / dt
+        elevator = -(0.05 * pitch_error + 0.02 * pitch_rate)
+        elevator -= 0.05 + bank * 0.2  # the untrimmed aircraft's back pressure
+        state["previous_pitch_error"] = pitch_error
+
+        # Energy: full power when it is chasing, the reference's PID otherwise.
+        if abs(geometry.azimuth_deg) < 60.0 and geometry.distance_m > 500.0:
+            throttle = 1.0
+            state["previous_speed_error"] = 0.0
+        else:
+            speed_error = target_speed_kcas - telemetry.own_vc_fps / 1.68781
+            speed_rate = (speed_error - state["previous_speed_error"]) / dt
+            throttle = 0.5 + 0.1 * speed_error + 0.01 * speed_rate
+            state["previous_speed_error"] = speed_error
+
+        return np.array(
+            [
+                max(min(aileron, 1.0), -1.0),
+                max(min(elevator, 1.0), -1.0),
+                0.0,
+                max(min(throttle, 1.0), 0.0),
+            ]
+        )
+
+    return fly
+
+
+def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float) -> Opponent:
+    """One place that knows the names, so adding one cannot miss a call site."""
+    if config.opponent_policy is not None:
+        # A policy outlives a round, so its per-round state is cleared here
+        # rather than rebuilt — the weights are the expensive part.
+        config.opponent_policy.reset()
+        return config.opponent_policy
+    if config.opponent == "level":
+        return level_opponent(altitude_ft)
+    if config.opponent == "pursuit":
+        return pursuit_opponent(speed_kcas, aggression=config.opponent_aggression)
+    return reference_opponent(altitude_ft, speed_kcas)
