@@ -140,9 +140,9 @@ def collect_checkpoints(paths: list[str]) -> dict[str, Path]:
 
 def load_predict(checkpoint: Path, algorithm: str = "sac", device: str = "cpu"):
     """A saved policy as a plain function, with no Gymnasium in the way."""
-    from stable_baselines3 import PPO, SAC
+    from competition.runtime import load_algorithm
 
-    model = (PPO if algorithm == "ppo" else SAC).load(str(checkpoint), device=device)
+    model = load_algorithm(algorithm).load(str(checkpoint), device=device)
 
     def predict(state: np.ndarray) -> np.ndarray:
         action, _ = model.predict(state, deterministic=True)

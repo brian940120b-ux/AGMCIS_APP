@@ -133,7 +133,8 @@ def describe_hyperparameters(args: argparse.Namespace) -> dict[str, Any]:
 
 def train(args: argparse.Namespace) -> int:
     import torch as th
-    from stable_baselines3 import PPO, SAC
+
+    from competition.runtime import load_algorithm
 
     # Printed here rather than by train.bat: CMD's batch parser and UTF-8 do
     # not mix, and these lines in a .bat were taken as commands to run. Python
@@ -192,14 +193,17 @@ def train(args: argparse.Namespace) -> int:
     }
     if args.algorithm == "sac":
         common["gradient_steps"] = args.gradient_steps
-    algorithm = PPO if args.algorithm == "ppo" else SAC
+    algorithm = load_algorithm(args.algorithm)
 
-    model: PPO | SAC
+    model: Any
     if session.exists:
         # The policy, its optimiser and — for SAC — everything it has seen.
         model = algorithm.load(session.model_path, **common)
         model.set_env(env)
-        if isinstance(model, SAC):
+        # Asked of the model rather than of its class: the class now comes from
+        # `load_algorithm`, and "has a replay buffer" is the actual question —
+        # `save_checkpoint` already decides the same way.
+        if hasattr(model, "load_replay_buffer"):
             if session.buffer_path.is_file():
                 model.load_replay_buffer(session.buffer_path)
                 size_mb = session.buffer_path.stat().st_size / 1e6

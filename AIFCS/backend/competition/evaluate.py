@@ -34,6 +34,7 @@ if str(_BACKEND) not in sys.path:
 
 from competition.action import INITIAL_THROTTLE  # noqa: E402
 from competition.environment import CompetitionRound, EnvConfig  # noqa: E402
+from competition.runtime import StackUnavailable  # noqa: E402
 from competition.scoring import (  # noqa: E402
     AttackEnvelope,
     RoundOutcome,
@@ -219,10 +220,9 @@ def evaluate(
 
 def load_policy(session_dir: Path, algorithm: str = "sac", device: str = "cpu") -> Policy:
     """A saved session's policy, as a plain function of the observation."""
-    from stable_baselines3 import PPO, SAC
+    from competition.runtime import load_algorithm
 
-    cls = PPO if algorithm == "ppo" else SAC
-    model = cls.load(str(Path(session_dir) / "checkpoint.zip"), device=device)
+    model = load_algorithm(algorithm).load(str(Path(session_dir) / "checkpoint.zip"), device=device)
 
     def policy(observation: np.ndarray) -> np.ndarray:
         action, _ = model.predict(observation, deterministic=True)
@@ -346,9 +346,16 @@ def main(argv: list[str] | None = None) -> int:
 
         label = f"{session.name} ({_describe(card)})" if card else session.name
         print(f"  {label}")
+        try:
+            policy = load_policy(session, args.algorithm, args.device)
+        except StackUnavailable as unavailable:
+            print()
+            print(f"!!  {unavailable}")
+            print()
+            return 1
         reports.append(
             evaluate(
-                load_policy(session, args.algorithm, args.device),
+                policy,
                 config_from_card(card, args.opponent, args.opponent_aggression),
                 rounds=args.rounds,
                 seed=args.seed,
