@@ -447,6 +447,7 @@ class CompetitionRound:
         self.foe: Aircraft
         self.opponent: Opponent
         self.frame = 0
+        self.floor_frames = 0
         self.reset()
 
     # ------------------------------------------------------------ lifecycle
@@ -498,6 +499,7 @@ class CompetitionRound:
         self.score = SideScore(weights=self.config.weights, envelope=self.config.envelope)
         self.opponent_score = SideScore(weights=self.config.weights, envelope=self.config.envelope)
         self.frame = 0
+        self.floor_frames = 0
         return self.observe()
 
     # ---------------------------------------------------------------- state
@@ -526,6 +528,11 @@ class CompetitionRound:
         """Advance one frame. Returns the new state, the geometry, and why it ended."""
         telemetry = self.telemetry()
         if self.config.ground_avoidance is not None:
+            # Counted, not just applied. A floor that keeps the aircraft alive
+            # by flying it is a different thing from one that catches it, and
+            # the outcome columns cannot tell them apart.
+            if self.config.ground_avoidance.danger(telemetry):
+                self.floor_frames += 1
             raw_action = self.config.ground_avoidance(raw_action, telemetry)
         command = shape_command(
             raw_action,

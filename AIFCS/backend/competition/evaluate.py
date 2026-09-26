@@ -69,6 +69,10 @@ class RoundReport:
     min_distance_m: float
     mean_distance_m: float
     seconds_in_sweet_spot: float
+    #: Share of frames the ground-avoidance layer had the stick. 0.0 with
+    #: no floor. A high number next to a good outcome means the floor flew
+    #: the round, not the policy.
+    floor_share: float = 0.0
 
     @property
     def won(self) -> bool:
@@ -89,6 +93,7 @@ class RoundReport:
             "min_distance_m": round(self.min_distance_m, 1),
             "mean_distance_m": round(self.mean_distance_m, 1),
             "seconds_in_sweet_spot": round(self.seconds_in_sweet_spot, 2),
+            "floor_share": round(self.floor_share, 4),
             **self.outcome.as_dict(),
         }
 
@@ -135,6 +140,20 @@ class Report:
             return 0.0
         return statistics.fmean(r.seconds_in_sweet_spot for r in self.rounds)
 
+    @property
+    def mean_floor_share(self) -> float:
+        """How much of the round the floor flew, averaged.
+
+        Worth a column of its own because the outcome columns hide it. A
+        policy at 0% crashed and 55% won may have earned that, or may have
+        been carried: run1 on the corrected floor came back with a margin of
+        +1 against +78 on the weaker one, which is what being carried looks
+        like.
+        """
+        if not self.rounds:
+            return 0.0
+        return statistics.fmean(r.floor_share for r in self.rounds)
+
     def summary(self) -> str:
         n = len(self.rounds)
         return "\n".join(
@@ -146,6 +165,7 @@ class Report:
                 f"  crashed        {self.crash_rate:6.1%}",
                 f"  score margin   {self.mean_margin:+,.0f}  (ours minus theirs, mean)",
                 f"  in 152-500 m   {self.mean_seconds_in_sweet_spot:6.1f} s per round",
+                f"  floor had it   {self.mean_floor_share:6.1%} of frames",
             )
         )
 
@@ -195,6 +215,7 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
         min_distance_m=min(distances),
         mean_distance_m=statistics.fmean(distances),
         seconds_in_sweet_spot=sweet_frames / 60.0,
+        floor_share=game.floor_frames / game.frame if game.frame else 0.0,
     )
 
 
@@ -254,7 +275,7 @@ def neutral_policy(throttle: float = INITIAL_THROTTLE) -> Policy:
 def compare(reports: Sequence[Report]) -> str:
     """Side by side on the same seeds, which is the only fair way to read them."""
     lines = [
-        f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}{'margin':>12}{'152-500m':>10}",
+        f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}{'margin':>12}{'152-500m':>10}{'floor':>8}",
     ]
     for report in reports:
         lines.append(
@@ -264,7 +285,8 @@ def compare(reports: Sequence[Report]) -> str:
             f"{report.death_rate:>7.0%} "
             f"{report.crash_rate:>8.0%} "
             f"{report.mean_margin:>+11,.0f} "
-            f"{report.mean_seconds_in_sweet_spot:>9.1f}"
+            f"{report.mean_seconds_in_sweet_spot:>9.1f} "
+            f"{report.mean_floor_share:>7.0%}"
         )
     return "\n".join(lines)
 
@@ -361,7 +383,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score saved sessions with the organiser's own rules, on the same engagements."
     )
-    parser.add_argument("sessions", nargs="+", help="session directories, e.g. models/competition/run1")
+    parser.add_argument(
+        "sessions",
+        nargs="*",
+        help="session directories, e.g. models/competition/run1. May be empty with --baseline",
+    )
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1000, help="the same for every session")
     parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
@@ -380,10 +406,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_false",
         help="fly every session without it, even those trained with one",
     )
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help=(
+            "also fly a centred stick on the same seeds. The bar every trained "
+            "policy has to clear, and easy to forget it moved: it is flown in "
+            "the reference plant with whatever floor this run uses, so changing "
+            "the floor changes the bar too"
+        ),
+    )
     parser.add_argument("--algorithm", choices=["sac", "ppo"], default="sac")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--json", type=Path, default=None, help="also write the full detail here")
     args = parser.parse_args(argv)
+
+    if not args.sessions and not args.baseline:
+        parser.error("name at least one session, or pass --baseline on its own")
 
     print()
     print(f"Scoring {len(args.sessions)} session(s) over {args.rounds} rounds")
@@ -418,6 +457,34 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     print()
+    if args.baseline:
+        # The reference plant, not any session's: a centred stick does not read
+        # an observation or use a decision rate, so the only part of a card that
+        # would change its flying is the floor, and that comes from the flag.
+        from competition.safety import GroundAvoidance
+
+        # Not `floor`: that name is the mutually exclusive argument group a
+        # few lines up, and shadowing it type-checked as a group being
+        # splatted into GroundAvoidance.
+        baseline_floor: dict[str, Any] | None = {} if args.ground_avoidance else None
+        described_floor = "floor" if baseline_floor is not None else "no floor"
+        print(f"  do nothing (centred stick, reference plant, {described_floor})")
+        reports.append(
+            evaluate(
+                neutral_policy(),
+                EnvConfig(
+                    opponent=args.opponent,
+                    opponent_aggression=args.opponent_aggression,
+                    ground_avoidance=GroundAvoidance(**baseline_floor)
+                    if baseline_floor is not None
+                    else None,
+                ),
+                rounds=args.rounds,
+                seed=args.seed,
+                label="do nothing",
+            )
+        )
+
     print(compare(reports))
     print()
     best = max(reports, key=lambda report: (report.win_rate, report.mean_margin))

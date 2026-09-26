@@ -237,3 +237,72 @@ def test_a_recorded_floor_left_on_defaults_still_shows_up():
     from competition.evaluate import _describe
 
     assert "floor" in _describe({"environment": {"ground_avoidance": {}}})
+
+
+def test_the_report_says_how_much_of_the_round_the_floor_flew():
+    """Outcome columns cannot tell a policy that survived from one that was
+    carried. run1 came back 0% crashed and 55% won on the corrected floor with
+    a margin of +1, against +78 on the weaker one — a number that only means
+    something next to how often the floor had the stick."""
+    from competition.evaluate import Report, RoundReport, compare
+    from competition.scoring import EndReason, RoundOutcome, Verdict
+
+    def round_at(share: float) -> RoundReport:
+        outcome = RoundOutcome(
+            verdict=Verdict.BLUE,
+            reason=EndReason.TIME,
+            blue={"killed": False, "advantage_score": 0.0},
+            red={"killed": False, "advantage_score": 0.0},
+        )
+        return RoundReport(
+            seed=0,
+            outcome=outcome,
+            frames=18_000,
+            min_distance_m=300.0,
+            mean_distance_m=900.0,
+            seconds_in_sweet_spot=0.3,
+            floor_share=share,
+        )
+
+    report = Report(label="x", rounds=[round_at(0.10), round_at(0.30)])
+    assert report.mean_floor_share == pytest.approx(0.20)
+    assert "floor" in compare([report]).splitlines()[0]
+    assert "20%" in compare([report])
+
+
+def test_a_round_with_no_floor_reports_no_floor_time():
+    """The default has to be zero, not absent, or the column reads as missing
+    data on every session that never had one."""
+    from competition.evaluate import play_round
+
+    report = play_round(neutral_policy(), EnvConfig(), seed=7)
+    assert report.floor_share == 0.0
+
+
+def test_the_baseline_can_be_asked_for_on_its_own():
+    """`--baseline` with no session is the question "what does a centred stick
+    do on this floor", and it is the bar every trained policy has to clear."""
+    from competition.evaluate import main
+
+    with pytest.raises(SystemExit):
+        main([])  # neither a session nor --baseline is an error, not a crash
+
+
+def test_a_round_flown_with_a_floor_reports_the_frames_it_took():
+    """The counting itself, not just the column.
+
+    A first attempt here only checked the no-floor case, which reports 0.0
+    whether or not anything is counted — deleting the counter left every test
+    green. A centred stick on a floor spends about 6% of its frames under it,
+    measured over 20 rounds, so a round that fires at all is the test.
+    """
+    from competition.evaluate import play_round
+    from competition.safety import GroundAvoidance
+
+    report = play_round(
+        neutral_policy(),
+        EnvConfig(ground_avoidance=GroundAvoidance()),
+        seed=1000,
+    )
+    assert report.floor_share > 0.0, "a centred stick reaches the floor inside a round"
+    assert report.floor_share < 1.0, "and is not flown by it the whole way"
