@@ -264,6 +264,24 @@ Mach 0.9 配 0.216 舵量的俯仰率約 4.3°/秒,要改 65° 的俯衝角**需
 全部寫進去,所以 run1 重載出來的還是舊的 0.6/8 秒/8k。要拿新地板量舊模型,用
 `evaluate.bat --ground-avoidance`,報表會標 `+floor`。
 
+#### 續訓拿到的是卡片上那一塊,不是今天的預設值
+
+改預設值馬上暴露一個洞:續訓時 `train.py` 原本是 `GroundAvoidance() if
+args.ground_avoidance else None` —— 卡片記的五個欄位被壓成一個 `True`,再用
+**現在的**預設值重造。也就是 9/26 之前開的每一個 session,下次續訓都會在中途
+無聲地換掉飛機。
+
+現在帶過去的是那個 dict 本身。**續訓 = 同一架飛機,不管預設值後來怎麼變。**
+
+要把新地板裝到舊 session 上,得**明確地講**:
+
+```bash
+train.bat --name v2 --ground-avoidance    # 明講 = 今天的預設值
+```
+
+明確給的旗標永遠蓋過繼承來的值,然後 `check_compatible` 會攔下來告訴你這是
+另一個實驗 —— 那正是它該做的事。
+
 ### Action repeat
 
 ```bash

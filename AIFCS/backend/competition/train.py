@@ -77,7 +77,17 @@ INHERITED: dict[str, tuple[str, str]] = {
 }
 
 #: Settings whose recorded shape is not the flag's shape.
-CONVERTERS: dict[str, Any] = {"ground_avoidance": lambda recorded: recorded is not None}
+#:
+#: The floor carries its own settings across, not just the fact that there was
+#: one. Rebuilding it from the current defaults instead would change the plant
+#: in the middle of a run: the defaults moved on 2026-09-26 (0.6/8s/8k to
+#: 1.0/12s/15k, see safety.py) and every session started before that would have
+#: silently switched aircraft on its next resume. A resume should not require
+#: retyping the experiment, and it should not quietly rewrite it either.
+#:
+#: Passing --ground-avoidance explicitly still means "the current defaults",
+#: because an inherited value only fills a flag nobody gave.
+CONVERTERS: dict[str, Any] = {"ground_avoidance": lambda recorded: recorded or None}
 
 
 #: What a setting means when nobody has said otherwise and there is no session
@@ -102,6 +112,18 @@ DEFAULTS: dict[str, Any] = {
     "reference_speed_order": False,
     "ground_avoidance": False,
 }
+
+
+def build_floor(setting: Any) -> GroundAvoidance | None:
+    """The floor a session asked for: inherited settings, or today's defaults.
+
+    Three shapes reach here. `False`/`None` is no floor. `True` is the flag on
+    a fresh run, which means the current defaults. A dict is what a resumed
+    session recorded, and is rebuilt exactly — see CONVERTERS for why.
+    """
+    if isinstance(setting, dict):
+        return GroundAvoidance(**setting)
+    return GroundAvoidance() if setting else None
 
 
 def apply_defaults(args: argparse.Namespace) -> None:
@@ -170,7 +192,7 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
         opponent_aggression=args.opponent_aggression,
         speed_before_altitude=args.reference_speed_order,
         action_repeat=args.action_repeat,
-        ground_avoidance=GroundAvoidance() if args.ground_avoidance else None,
+        ground_avoidance=build_floor(args.ground_avoidance),
     )
 
 

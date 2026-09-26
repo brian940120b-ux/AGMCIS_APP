@@ -93,3 +93,85 @@ def test_a_long_run_says_how_it_is_going_while_it_goes(tmp_path: Path):
     assert len(progress) >= 2, f"expected progress during the run, got:\n{output}"
     # And it says how much longer, which is the question behind the question.
     assert any("left" in line for line in progress), progress
+
+
+def test_a_resumed_session_flies_the_floor_it_recorded_end_to_end():
+    """The whole path, not just the helper.
+
+    A first version of this tested `build_floor` on its own. That test passed
+    with the call site reverted to `GroundAvoidance()`, which is the mutation
+    that matters — a correct helper nothing routes through fixes nothing.
+    Go through `parse_args` and `inherit` the way a resume does, and assert on
+    the EnvConfig the run is actually given.
+    """
+    from competition.session import SessionState
+    from competition.train import apply_defaults, build_config, inherit, parse_args
+
+    args = parse_args(["--name", "v2"])
+    state = SessionState(
+        name="v2",
+        algorithm="sac",
+        target_timesteps=2_000_000,
+        environment={
+            "ground_avoidance": {
+                "seconds_to_impact": 8.0,
+                "ceiling_ft": 8000.0,
+                "floor_ft": 500.0,
+                "elevator": 0.6,
+                "roll_gain": 0.02,
+            }
+        },
+    )
+    inherit(args, state)  # the order train() uses
+    apply_defaults(args)
+    floor = build_config(args).ground_avoidance
+
+    assert floor is not None, "the session had one; the resume must keep it"
+    assert floor.elevator == 0.6, "today's default is 1.0 — that would be a new aircraft"
+    assert floor.seconds_to_impact == 8.0
+    assert floor.ceiling_ft == 8000.0
+
+
+def test_a_resume_rebuilds_the_floor_it_recorded_not_todays_default():
+    """The defaults moved. A session that started before that must not change
+    aircraft on its next resume.
+
+    The old converter turned the recorded settings into a bare `True`, and the
+    environment was then built with `GroundAvoidance()` — whatever the defaults
+    happen to be today. Every pre-2026-09-26 session would have silently
+    switched from 0.6/8s/8k to 1.0/12s/15k halfway through training.
+    """
+    from competition.train import build_floor
+
+    recorded = {
+        "seconds_to_impact": 8.0,
+        "ceiling_ft": 8000.0,
+        "floor_ft": 500.0,
+        "elevator": 0.6,
+        "roll_gain": 0.02,
+    }
+    rebuilt = build_floor(recorded)
+    assert rebuilt is not None
+    assert rebuilt.elevator == 0.6
+    assert rebuilt.seconds_to_impact == 8.0
+    assert rebuilt.ceiling_ft == 8000.0
+
+
+def test_the_flag_on_a_fresh_run_still_means_todays_defaults():
+    from competition.safety import GroundAvoidance
+    from competition.train import build_floor
+
+    assert build_floor(True) == GroundAvoidance()
+    assert build_floor(False) is None
+    assert build_floor(None) is None
+
+
+def test_the_recorded_floor_survives_inheritance_as_settings_not_a_flag():
+    """The converter is the half of this that runs first: it decides what the
+    resumed run is handed. A bool there loses the settings before the
+    environment is ever built."""
+    from competition.train import CONVERTERS
+
+    recorded = {"elevator": 0.6, "ceiling_ft": 8000.0}
+    assert CONVERTERS["ground_avoidance"](recorded) == recorded
+    assert CONVERTERS["ground_avoidance"](None) is None

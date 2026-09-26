@@ -603,25 +603,32 @@ def test_a_resume_inherits_what_the_run_was_started_with():
     assert args.opponent == "pursuit"
 
 
-def test_the_floor_carries_over_as_a_yes_or_no():
+def test_the_floor_carries_over_with_its_settings_not_as_a_yes_or_no():
     """The card records the floor's own settings; the flag is a boolean.
 
     Missed on the first attempt precisely because the two shapes differ, and
     the resume was then refused for a floor the caller never asked to remove.
+
+    The second attempt collapsed the settings to `True`, which was wrong in the
+    other direction and only showed once the defaults moved: `True` means "the
+    current defaults", so a session recorded under 0.6/8s/8k would have resumed
+    onto 1.0/12s/15k — a different aircraft, mid-run, silently. What carries
+    over is the dict.
     """
     import argparse
 
     from competition.train import inherit
 
-    with_floor = SessionState(name="v2", algorithm="sac", environment={"ground_avoidance": {"elevator": 0.6}})
+    recorded = {"elevator": 0.6, "ceiling_ft": 8000.0}
+    with_floor = SessionState(name="v2", algorithm="sac", environment={"ground_avoidance": recorded})
     args = argparse.Namespace(ground_avoidance=None)
     inherit(args, with_floor)
-    assert args.ground_avoidance is True
+    assert args.ground_avoidance == recorded
 
     without = SessionState(name="v1", algorithm="sac", environment={"ground_avoidance": None})
     args = argparse.Namespace(ground_avoidance=None)
     inherit(args, without)
-    assert args.ground_avoidance is False
+    assert not args.ground_avoidance, "no floor stays no floor"
 
 
 def test_saying_a_setting_explicitly_still_wins_and_is_still_refused():
