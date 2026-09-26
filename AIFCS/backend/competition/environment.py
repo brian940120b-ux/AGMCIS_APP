@@ -356,6 +356,11 @@ class EnvConfig:
     #: A named pool for the environment to draw from, one per round. When this
     #: is set the environment picks; `opponent_policy` is what it picked.
     opponent_pool: dict[str, Any] = field(default_factory=dict)
+    #: "reference" is the package's twenty inputs, which its own policies
+    #: expect. "extended" adds ten more derived from the same packet — among
+    #: them our own G, which the scoring penalises and the reference state does
+    #: not contain. Choosing it ends compatibility with their models.
+    observation: str = "reference"
     #: A rule-based pull-up under the policy. None is the reference's
     #: behaviour: nothing catches the aircraft. See `safety.py`.
     ground_avoidance: GroundAvoidance | None = None
@@ -396,6 +401,7 @@ class EnvConfig:
             else None,
             "opponent_pool": sorted(self.opponent_pool),
             "action_repeat": self.action_repeat,
+            "observation": self.observation,
             "ground_avoidance": None if self.ground_avoidance is None else asdict(self.ground_avoidance),
             "round_seconds": self.round_seconds,
             "attack_half_angle_deg": self.envelope.half_angle_deg,
@@ -427,7 +433,7 @@ class CompetitionRound:
     def __init__(self, config: EnvConfig | None = None, seed: int | None = None) -> None:
         self.config = config or EnvConfig()
         self.random = random.Random(seed)
-        self.encoder = StateEncoder()
+        self.encoder = build_encoder(self.config)
         self.joystick = JoystickState()
         self.opponent_joystick = JoystickState()
         self.score = SideScore(weights=self.config.weights, envelope=self.config.envelope)
@@ -569,14 +575,26 @@ def _offset(lat_deg: float, lon_deg: float, bearing_deg: float, distance_m: floa
     return new_lat, new_lon
 
 
-def observation_space() -> Any:
+def build_encoder(config: EnvConfig) -> Any:
+    """The encoder both paths use, chosen once so they cannot disagree."""
+    if config.observation == "extended":
+        from competition.features import ExtendedEncoder
+
+        return ExtendedEncoder(round_seconds=config.round_seconds)
+    return StateEncoder()
+
+
+def observation_space(observation: str = "reference") -> Any:
     """The reference's bounds, so its policies load into this env unchanged."""
     from gymnasium.spaces import Box
 
+    from competition.features import EXTENDED_STATE_SIZE
+
+    size = EXTENDED_STATE_SIZE if observation == "extended" else STATE_SIZE
     return Box(
         low=-OBSERVATION_BOUND,
         high=OBSERVATION_BOUND,
-        shape=(STATE_SIZE,),
+        shape=(size,),
         dtype=np.float64,
     )
 

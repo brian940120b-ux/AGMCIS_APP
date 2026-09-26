@@ -66,6 +66,7 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
     return EnvConfig(
         setup=setup,
         opponent_pool=pool,
+        observation=args.observation,
         jsbsim_root=args.jsbsim_root,
         rudder_enabled=args.rudder,
         rudder_limit=args.rudder_limit,
@@ -345,6 +346,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=RewardMode.REFERENCE.value,
     )
     parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
+    parser.add_argument(
+        "--observation",
+        choices=["reference", "extended"],
+        default="reference",
+        help=(
+            '"extended" adds ten inputs from the same packet, among them our '
+            "own G — which the scoring penalises and the reference state omits. "
+            "Ends compatibility with the organiser's own policies"
+        ),
+    )
     parser.add_argument(
         "--opponent-pool",
         nargs="+",

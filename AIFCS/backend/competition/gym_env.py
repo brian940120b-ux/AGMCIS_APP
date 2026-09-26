@@ -52,7 +52,7 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         super().__init__()
         self.config = config or EnvConfig()
         self.reward_mode = RewardMode(reward_mode)
-        self.observation_space = observation_space()
+        self.observation_space = observation_space(self.config.observation)
         self.action_space = action_space(self.config.rudder_enabled)
         self.round = CompetitionRound(self.config, seed=seed)
         self._reward = self._build_reward()

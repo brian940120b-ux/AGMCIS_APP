@@ -32,6 +32,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -127,6 +128,7 @@ class CompetitionClient:
         rudder_limit: float = RUDDER_LIMIT,
         high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
         ground_avoidance: GroundAvoidance | None = None,
+        encoder: Any | None = None,
     ) -> None:
         if action_repeat < 1:
             raise ValueError(f"action_repeat is a number of frames, not {action_repeat}")
@@ -145,7 +147,9 @@ class CompetitionClient:
         #: A tap, not a filter: it cannot change the command, so recording a
         #: session cannot change what that session does.
         self.observer = observer
-        self.encoder = StateEncoder()
+        #: Must match what the policy trained against. Passed in rather than
+        #: chosen here, because the training config is the authority on it.
+        self.encoder = encoder if encoder is not None else StateEncoder()
         self.joystick = JoystickState()
         self.stats = ClientStats()
         self.player_state = PlayerState.NOT_READY

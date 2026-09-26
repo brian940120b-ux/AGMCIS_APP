@@ -1504,3 +1504,41 @@ so the test now recomputes the verdict from the finished round and checks the
 two agree whatever happened.
 
 Tests: 933 passed.
+
+### The policy could not see the thing it was being punished for (COMP PHASE 16)
+
+The last of the adjustable surface: the observation. Reading 表 1 against the
+reference encoding field by field turned up something worse than a missed
+opportunity.
+
+表 1 field 15 is `accelerations/n-pilot-z-norm`. The scoring subtracts 1000 a
+second above 9G — half what a second of tracking is worth. The reference
+twenty-dimensional state does not contain it, and contains nothing it could be
+derived from. A policy trained on that state is penalised for a quantity it
+cannot observe, which is not a hard credit-assignment problem but an
+impossible one.
+
+Also absent, all of it in the same packet: the opponent's speed (their velocity
+arrives in fields 24-26 and is used only for an angle, the magnitude discarded),
+our calibrated airspeed (the initial condition is specified in it), specific
+energy for either side, any rate of change of the geometry — azimuth, elevation
+and aspect are all present as positions and none as a rate, so a policy cannot
+tell a closing turn from an opening one and has no memory to work it out — and
+any notion of how much of the round is left, when a kill at ten seconds is
+worth 290 more than one at three hundred.
+
+Ten added, in `features.py` rather than in `state.py`, so the reference
+encoding stays provably untouched: the differential test against the
+organiser's own function still passes unchanged, and `--observation reference`
+remains the default. The cost is compatibility — a thirty-input policy is not
+theirs and theirs is not ours — so it is a choice recorded on the session
+rather than a change made for everyone.
+
+One sign worth having measured rather than assumed, since the elevator's cost a
+working safety floor an hour earlier: `n-pilot-z-norm` is *negative* under
+positive G. Level flight reads -0.40 here, a hard pull -4.24, a pushover +3.75.
+Body Z points down. Kept as published, and the measurement incidentally
+confirms the scoring's `abs()` is right — it catches a 9G pull and a -9G
+pushover alike.
+
+Tests: 946 passed.
