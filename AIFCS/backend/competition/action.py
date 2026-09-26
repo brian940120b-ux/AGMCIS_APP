@@ -1,10 +1,20 @@
-"""Stick shaping: what the policy asks for, turned into what the aircraft gets.
+"""Stick shaping: what the policy asks for, turned into what we send.
 
-The organiser puts a simulated joystick between the policy and the control
-surfaces — deadbands, an exponential curve, a rate limit per axis — so a policy
-cannot snap an aileron from hard left to hard right in one frame of 1/60 s. That
-shaping is part of the plant as far as the policy is concerned: train without it
-and the policy learns to fly an aircraft that does not exist.
+**This is ours, not the host's.** An earlier version of this file said the
+organiser puts a joystick between the policy and the control surfaces, which is
+wrong and was worth correcting: the shaping lives in `player1_Loadmodel.py`,
+the *player's* program, and 公告說明 五.3.(2).C says in as many words that a
+team may modify it or rewrite it in another language ("並無強制限制需要按照本
+範例進行開發"). 表 2 gives the interface the host actually enforces, and it is
+only a range per channel: aileron, elevator and rudder each -1~+1, throttle
+0~+1. Everything below — deadbands, the exponential curve, the per-axis rate
+limits, the rudder cap, the high-speed elevator limit — is a choice the sample
+client made for itself, and every one of them is ours to change.
+
+The defaults here reproduce the sample exactly, because a policy trains against
+whatever shaping it is given and the reference numbers are the only ones with a
+trained policy behind them. Changing any of them changes the plant, so it makes
+a different environment and a different training session, not a tweak.
 
 Two things differ between the organiser's two copies, and both are resolved here
 in the direction that competition day forces:
@@ -35,10 +45,19 @@ EXPONENTS = np.array([1.0, 3.0, 3.0], dtype=np.float64)
 MAX_CHANGE_PER_STEP = np.array([0.050, 0.026, 0.013], dtype=np.float64)
 THROTTLE_RATE_LIMIT = 0.004
 
-#: Rudder authority. The organiser's action space pins the rudder to
-#: [0, 1e-17] — so the reference policy has never used it — while the stick
-#: shaping is written for +/-0.2. The shaping value is the honest one, and the
-#: pinned action space is what an opponent trained against that space cannot do.
+#: Rudder authority, as the sample client caps it.
+#:
+#: Three different numbers are in play and only one of them is a rule. 表 2 of
+#: the 公告說明 gives the rudder channel as -1~+1, which is what the host
+#: accepts. The sample client clips it to 0.2. The sample *training* action
+#: space pins it to [0, 1e-17], so the reference policy has never moved the
+#: rudder at all.
+#:
+#: The rule is +/-1. The other two are the sample's own choices, which means a
+#: rudder is a control surface our opponents' policies have probably never
+#: learned to use — and using it is inside the published interface, not a
+#: loophole. Kept at 0.2 as the default because that is what has a trained
+#: policy behind it; see docs/TUNING.md.
 RUDDER_LIMIT = 0.2
 AILERON_LIMIT = 1.0
 ELEVATOR_LIMIT = 1.0
