@@ -13,6 +13,7 @@ answer it.
 
 from __future__ import annotations
 
+import itertools
 import socket
 import struct
 import threading
@@ -339,24 +340,58 @@ def test_a_centred_stick_is_centred_on_all_three_axes():
 # ------------------------------------------- is it even the same aeroplane?
 
 
+def _host_frame(i: int, alt_ft: float, kts: float, from_ft: float, pitch: float) -> dict[str, object]:
+    return {
+        "round": 1,
+        "frame_in_round": i,
+        "lat": 0.0,
+        "lon": 0.0,
+        "alt_ft": alt_ft,
+        "vc_fps": kts / 0.5924838,
+        "vt_fps": kts / 0.5924838,
+        "yaw": 1.0,
+        "pitch": pitch,
+        "alpha": pitch,
+        "enemy_lat": 0.012,
+        "enemy_lon": 0.0,
+        "enemy_alt_ft": from_ft,
+    }
+
+
 def _dive(seconds: float, from_ft: float, to_ft: float) -> list[dict[str, object]]:
+    """A straight-line fall. Not what any aeroplane does, but it diverges from
+    ours throughout, which is the "different aeroplane" case."""
     total = int(seconds * 60)
     return [
-        {
-            "round": 1,
-            "frame_in_round": i,
-            "lat": 0.0,
-            "lon": 0.0,
-            "alt_ft": from_ft - (from_ft - to_ft) * (i / total),
-            "vc_fps": 339.9 / 0.5924838,
-            "vt_fps": 339.9 / 0.5924838,
-            "yaw": 1.0,
-            "enemy_lat": 0.012,
-            "enemy_lon": 0.0,
-            "enemy_alt_ft": from_ft,
-        }
-        for i in range(total)
+        _host_frame(i, from_ft - (from_ft - to_ft) * (i / total), 339.9, from_ft, 0.0) for i in range(total)
     ]
+
+
+def _host_shaped_dive() -> list[dict[str, object]]:
+    """The real 2026-09-26 trace, interpolated between its decade marks.
+
+    The shape is the finding: 129 ft lost in the first ten seconds against our
+    1,007, and then both descending alike.
+    """
+    altitudes = [
+        (0, 18084.0),
+        (10, 17955.0),
+        (20, 16160.0),
+        (30, 12891.0),
+        (40, 9182.0),
+        (50, 5616.0),
+        (67.5, 94.3),
+    ]
+    speeds = [(0, 339.9), (10, 371.0), (20, 473.0), (30, 568.0), (40, 626.0), (50, 655.0), (67.5, 673.8)]
+
+    def at(table, t):
+        for (t0, v0), (t1, v1) in itertools.pairwise(table):
+            if t0 <= t <= t1:
+                return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+        return table[-1][1]
+
+    total = int(67.5 * 60)
+    return [_host_frame(i, at(altitudes, i / 60), at(speeds, i / 60), 18084.0, 6.5) for i in range(total)]
 
 
 def test_it_refuses_to_compare_a_recording_too_short_to_mean_anything():
@@ -382,3 +417,48 @@ def test_a_shallower_host_dive_is_reported_as_a_different_aeroplane():
     assert "different aeroplane" in result["verdict"]
     assert result["samples"][0]["difference_ft"] == 0.0, "both start where the host started"
     assert result["samples"][-1]["difference_ft"] < 0, "ours is lower by the end"
+
+
+def test_a_mangled_windows_path_is_explained_not_traced(tmp_path, capsys, monkeypatch):
+    """Backslashes are escape characters in the shell this is run from, so a
+    pasted `data\\probe\\probe-....jsonl` arrives as one run-on word and the
+    traceback names a file nobody typed. That is a confusing way to learn it."""
+    from competition.probe import compare_recording
+
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "data" / "probe"
+    folder.mkdir(parents=True)
+    (folder / "probe-20260926-121044.jsonl").write_text("", encoding="utf-8")
+
+    assert compare_recording("dataprobeprobe-20260926-121044.jsonl") == 1
+    printed = capsys.readouterr().err
+    assert "forward slashes" in printed
+    assert "data/probe/probe-20260926-121044.jsonl" in printed, "and name what is there"
+
+
+def test_a_gap_that_opens_and_then_stops_growing_is_an_attitude_not_an_aeroplane():
+    """The finding the real recording forced.
+
+    Reporting "+14%, a different aeroplane" was the wrong conclusion from the
+    right number: the host loses 129 ft in its first ten seconds and ours
+    1,007, and thereafter the two descend within 10% of each other. A
+    difference created at the start and not sustained is a starting attitude.
+    Ours sets ic/theta-deg = 0, and level flight at 18,084 ft and 340 KCAS
+    needs a positive angle of attack.
+    """
+    from competition.probe import replay_locally
+
+    result = replay_locally(_host_shaped_dive())
+    assert "different opening attitude" in result["verdict"]
+    assert "different aeroplane" not in result["verdict"]
+    assert result["host_opening"]["ours_pitch_deg"] == 0.0
+
+
+def test_the_recording_own_opening_attitude_is_reported_not_inferred():
+    """A pitch fitted to the altitude trace is a guess; the recording carries
+    the host's own reading, so report that and let the fit be checked."""
+    from competition.probe import replay_locally
+
+    result = replay_locally(_host_shaped_dive())
+    assert result["host_opening"]["pitch_deg"] == 6.5
+    assert result["host_opening"]["alpha_deg"] == 6.5

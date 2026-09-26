@@ -237,15 +237,42 @@ def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[
     ours_rate = (first["alt_ft"] - samples[-1]["ours_ft"]) / (samples[-1]["t_s"] or 1.0)
     gap = (ours_rate - host_rate) / host_rate if host_rate else 0.0
 
+    # Where the gap comes from matters more than its size. Two aeroplanes
+    # disagree throughout; two starting attitudes disagree at the start and
+    # then descend alike, which is what the 2026-09-26 recording shows — the
+    # host loses 129 ft in the first ten seconds and ours loses 1,007, and by
+    # the third the two rates are within 10%.
+    late = samples[-3:] if len(samples) >= 4 else samples[-2:]
+    late_host = late[0]["host_ft"] - late[-1]["host_ft"]
+    late_ours = late[0]["ours_ft"] - late[-1]["ours_ft"]
+    late_gap = (late_ours - late_host) / late_host if late_host else 0.0
+    opening = samples[1]["difference_ft"] if len(samples) > 1 else 0.0
+
     if abs(gap) < 0.05:
         verdict = f"our plant matches the host's to {abs(gap):.0%} on descent rate"
+    elif abs(late_gap) < 0.15:
+        verdict = (
+            f"same aeroplane, different opening attitude: {opening:+,.0f} ft apart "
+            f"after ten seconds, but descending within {abs(late_gap):.0%} of each "
+            f"other by the end. Ours starts at pitch 0; compare that against the "
+            f"recording's own_pitch_deg"
+        )
     else:
         verdict = (
             f"our plant descends {gap:+.0%} against the host's "
-            f"({ours_rate:.0f} vs {host_rate:.0f} ft/s) — a different aeroplane, "
+            f"({ours_rate:.0f} vs {host_rate:.0f} ft/s) and keeps doing it "
+            f"({late_gap:+.0%} over the last stretch) — a different aeroplane, "
             "and a policy is trained on the aeroplane"
         )
-    return {"samples": samples, "verdict": verdict}
+    return {
+        "host_opening": {
+            "pitch_deg": round(first["pitch"], 2),
+            "alpha_deg": round(first["alpha"], 2),
+            "ours_pitch_deg": 0.0,
+        },
+        "samples": samples,
+        "verdict": verdict,
+    }
 
 
 def trim_verdict(frames: list[dict[str, Any]]) -> str:
@@ -326,6 +353,11 @@ def analyse(frames: list[dict[str, Any]]) -> dict[str, Any]:
             "vertical_separation_ft": round(_separation(first)[1], 1),
             "slant_separation_ft": round(_separation(first)[2], 0),
             "own_heading_deg": round(first["yaw"], 2),
+            # The opening attitude, because a round that starts at a different
+            # pitch is a different round however well the aerodynamics agree.
+            # Ours sets ic/theta-deg = 0.
+            "own_pitch_deg": round(first["pitch"], 2),
+            "own_alpha_deg": round(first["alpha"], 2),
         },
         "altitude_ft": {"min": round(min(altitudes), 1), "max": round(max(altitudes), 1)},
         "vc_kts": {"min": round(min(speeds), 1), "max": round(max(speeds), 1)},
@@ -563,7 +595,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def compare_recording(path: str) -> int:
     """`--compare`: our plant against a saved host recording, no network."""
-    frames = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line]
+    recording = Path(path)
+    if not recording.is_file():
+        # Backslashes are escape characters in the shell this is run from, so
+        # a pasted Windows path arrives as one run-on word and the traceback
+        # names a file nobody typed. Say what happened instead.
+        print(f"no such recording: {path}", file=sys.stderr)
+        if "\\" in path or (path and "/" not in path and "probe-" in path):
+            print("  use forward slashes: data/probe/probe-....jsonl", file=sys.stderr)
+        folder = Path("data/probe")
+        if folder.is_dir():
+            found = sorted(folder.glob("*.jsonl"))[-5:]
+            if found:
+                print("  recordings here:", file=sys.stderr)
+                for item in found:
+                    print(f"    {item.as_posix()}", file=sys.stderr)
+        return 1
+    frames = [json.loads(line) for line in recording.read_text(encoding="utf-8").splitlines() if line]
     result = replay_locally(frames)
     print()
     print(json.dumps(result, indent=2, ensure_ascii=False))
