@@ -170,3 +170,45 @@ def test_a_card_that_is_missing_entirely_still_scores():
     from competition.evaluate import config_from_card
 
     assert config_from_card({}, "reference", 1.0).observation == "reference"
+
+
+# ---------------------------------------------- asking a what-if of a policy
+
+
+def test_a_floor_can_be_bolted_onto_a_policy_that_never_trained_with_one():
+    """run1 reached five million steps, scores the best margin of anything
+    measured, and crashes in nineteen rounds out of twenty — so it wins none,
+    because losing the aircraft loses the round whatever the score.
+
+    The floor is a separate layer that needs no retraining, so "what would this
+    policy do with one under it" is a fair question to measure.
+    """
+    from competition.evaluate import config_from_card
+
+    trained_without = {"environment": {"opponent": "reference"}}
+    assert config_from_card(trained_without, "reference", 1.0).ground_avoidance is None
+
+    with_one = config_from_card(trained_without, "reference", 1.0, ground_avoidance=True)
+    assert with_one.ground_avoidance is not None
+
+
+def test_a_floor_can_be_taken_away_to_see_what_the_policy_did_alone():
+    from competition.evaluate import config_from_card
+
+    trained_with = {"environment": {"ground_avoidance": {"elevator": 0.6}}}
+    assert config_from_card(trained_with, "reference", 1.0).ground_avoidance is not None
+    assert config_from_card(trained_with, "reference", 1.0, ground_avoidance=False).ground_avoidance is None
+
+
+def test_a_borrowed_floor_is_marked_in_the_label():
+    """A report must not let a result look like something the policy did on its
+    own terms when a layer it never trained with was added underneath."""
+    from competition.evaluate import _floor_suffix
+
+    without = {"environment": {}}
+    with_one = {"environment": {"ground_avoidance": {"elevator": 0.6}}}
+
+    assert _floor_suffix(without, True) == " +floor"
+    assert _floor_suffix(with_one, False) == " -floor"
+    assert _floor_suffix(without, None) == "", "nothing borrowed, nothing to declare"
+    assert _floor_suffix(with_one, True) == "", "it already had one"

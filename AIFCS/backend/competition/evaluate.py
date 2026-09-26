@@ -272,7 +272,12 @@ def compare(reports: Sequence[Report]) -> str:
 # ------------------------------------------------------------------- the CLI
 
 
-def config_from_card(card: dict[str, Any], opponent: str, aggression: float) -> EnvConfig:
+def config_from_card(
+    card: dict[str, Any],
+    opponent: str,
+    aggression: float,
+    ground_avoidance: bool | None = None,
+) -> EnvConfig:
     """Rebuild the aircraft a session trained on, from what it wrote down.
 
     Each policy is flown in the plant it learned — its observation, its
@@ -288,6 +293,14 @@ def config_from_card(card: dict[str, Any], opponent: str, aggression: float) -> 
 
     described = card.get("environment", {})
     floor = described.get("ground_avoidance")
+    if ground_avoidance is True and floor is None:
+        # Asking what a policy would do with a floor it never trained under.
+        # A fair question to *measure* — the floor is a separate layer and
+        # bolting one on needs no retraining — and an unfair one to report
+        # without saying so, which the label does.
+        floor = {}
+    elif ground_avoidance is False:
+        floor = None
     return EnvConfig(
         observation=described.get("observation", "reference"),
         action_repeat=int(described.get("action_repeat", 1)),
@@ -295,10 +308,24 @@ def config_from_card(card: dict[str, Any], opponent: str, aggression: float) -> 
         rudder_limit=float(described.get("rudder_limit", 0.2)),
         high_speed_elevator_limit=float(described.get("high_speed_elevator_limit", 0.4)),
         speed_before_altitude=bool(described.get("speed_before_altitude", False)),
-        ground_avoidance=GroundAvoidance(**floor) if floor else None,
+        # `is not None`, not truthiness: an empty dict means "a floor, with its
+        # own defaults", which is exactly what --ground-avoidance asks for on a
+        # session that never recorded one. Testing the dict for truth turned
+        # that request back into no floor at all.
+        ground_avoidance=GroundAvoidance(**floor) if floor is not None else None,
         opponent=opponent,
         opponent_aggression=aggression,
     )
+
+
+def _floor_suffix(card: dict[str, Any], override: bool | None) -> str:
+    """Mark a result the policy did not achieve on its own terms."""
+    trained_with = card.get("environment", {}).get("ground_avoidance") is not None
+    if override is True and not trained_with:
+        return " +floor"
+    if override is False and trained_with:
+        return " -floor"
+    return ""
 
 
 def _describe(card: dict[str, Any]) -> str:
@@ -326,6 +353,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1000, help="the same for every session")
     parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
     parser.add_argument("--opponent-aggression", type=float, default=1.0)
+    floor = parser.add_mutually_exclusive_group()
+    floor.add_argument(
+        "--ground-avoidance",
+        dest="ground_avoidance",
+        action="store_true",
+        default=None,
+        help="fly every session with the rule-based floor, trained with one or not",
+    )
+    floor.add_argument(
+        "--no-ground-avoidance",
+        dest="ground_avoidance",
+        action="store_false",
+        help="fly every session without it, even those trained with one",
+    )
     parser.add_argument("--algorithm", choices=["sac", "ppo"], default="sac")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--json", type=Path, default=None, help="also write the full detail here")
@@ -356,10 +397,10 @@ def main(argv: list[str] | None = None) -> int:
         reports.append(
             evaluate(
                 policy,
-                config_from_card(card, args.opponent, args.opponent_aggression),
+                config_from_card(card, args.opponent, args.opponent_aggression, args.ground_avoidance),
                 rounds=args.rounds,
                 seed=args.seed,
-                label=session.name,
+                label=session.name + _floor_suffix(card, args.ground_avoidance),
             )
         )
 
