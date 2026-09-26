@@ -226,6 +226,58 @@ trim_verdict: host does NOT trim: -19,340 ft over 49 s (-395 ft/s).
 | `DOES trim` | HOST 幫你配平好 | **停下來跟我說** —— 環境要改,所有基準線要重量 |
 | `not enough flying frames` | 沒按到 START | 重來一次 |
 
+### 已回答(2026-09-26,對真實 HOST)
+
+```
+trim_verdict: host does NOT trim: +17,990 ft over 67 s (+267 ft/s)
+altitude_ft:  { "min": 94.3, "max": 18084.0 }
+vc_kts:       { "min": 339.9, "max": 673.8 }
+```
+
+**HOST 不配平。** 搖桿置中,18,084 ft 掉到 94 ft,340 衝到 674 KCAS。
+
+**所以:防墜地板的理由成立,`do nothing = 65% / +51` 那條門檻成立,
+run1 的判決成立。** 這條 E 級風險關閉。
+
+順帶第二次確認了初始速度 **339.9 KCAS** —— 規格寫的 340 就是真的。
+
+---
+
+## 第五個問題:我們練的是不是同一架飛機?(`--compare`)
+
+trim 那份資料同時暴露了一件事。拿**同樣的 18,084 ft** 兩邊各飛一次:
+
+| | 18,084 ft → 94 ft | 平均下降率 |
+|---|---|---|
+| 我們的環境 | **58.2 秒** | 309 ft/s |
+| 真實 HOST | **67.5 秒** | 267 ft/s |
+
+**我們的飛機俯衝快 16%。** 最高速只差 3%(686 對 674),所以不是氣動力差很遠 ——
+但這是一份實測的不吻合,而且正好落在文件開頭列著、一直沒答案的第二個問題上:
+**HOST 用哪一份 F-16?**(主辦方附的引擎和 pip 裝的旁通比、引氣、慢車轉速都不同)
+
+**策略是練在飛機上的。** 差 16% 的飛機,練出來的東西能不能轉移過去,現在沒有答案。
+
+### 怎麼查
+
+`--neutral` 的錄影已經夠了 —— 那一場的指令是已知的(全程搖桿置中),所以可以拿
+我們的飛機重飛一次同一個開局,逐段比。**不用連 HOST**:
+
+```bash
+.venv/Scripts/python.exe backend/competition/probe.py --compare data\probe\probe-20260926-121044.jsonl
+```
+
+會印每 10 秒一格的高度和速度對照,還有一句判定:
+
+```
+"verdict": "our plant descends +15% against the host's (306 vs 266 ft/s)
+            — a different aeroplane, and a policy is trained on the aeroplane"
+```
+
+差距在 5% 以內會說 matches。超過就是兩架不同的飛機,要往下查是哪一份 F-16。
+
+> 只能用在 `--neutral` 的錄影上。其他錄影的指令沒有被記下來,重飛不出同一條軌跡。
+
 門檻是 **每秒 100 呎**。我們的環境每秒掉約 390 呎,配平好的飛機是個位數 ——
 兩個答案差一個數量級,不需要細緻的判定線。
 

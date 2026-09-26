@@ -334,3 +334,51 @@ def test_a_centred_stick_is_centred_on_all_three_axes():
     command = NeutralPolicy()(np.zeros(20))
     assert list(command[:3]) == [0.0, 0.0, 0.0]
     assert command[3] == pytest.approx(0.8), "the throttle a round starts at"
+
+
+# ------------------------------------------- is it even the same aeroplane?
+
+
+def _dive(seconds: float, from_ft: float, to_ft: float) -> list[dict[str, object]]:
+    total = int(seconds * 60)
+    return [
+        {
+            "round": 1,
+            "frame_in_round": i,
+            "lat": 0.0,
+            "lon": 0.0,
+            "alt_ft": from_ft - (from_ft - to_ft) * (i / total),
+            "vc_fps": 339.9 / 0.5924838,
+            "vt_fps": 339.9 / 0.5924838,
+            "yaw": 1.0,
+            "enemy_lat": 0.012,
+            "enemy_lon": 0.0,
+            "enemy_alt_ft": from_ft,
+        }
+        for i in range(total)
+    ]
+
+
+def test_it_refuses_to_compare_a_recording_too_short_to_mean_anything():
+    """Four seconds of dive says nothing about an aeroplane, and answering
+    anyway would be worse than declining."""
+    from competition.probe import replay_locally
+
+    result = replay_locally(_dive(4.0, 18_084.0, 17_000.0))
+    assert "at least 10 s" in result["verdict"]
+    assert "samples" not in result
+
+
+def test_a_shallower_host_dive_is_reported_as_a_different_aeroplane():
+    """The real recording: 18,084 ft to 94 ft in 67.5 s, where ours takes 58.2.
+
+    Our plant reaching the ground sooner on the same centred stick is the whole
+    finding, and the verdict has to name it rather than report a pass with a
+    number buried underneath.
+    """
+    from competition.probe import replay_locally
+
+    result = replay_locally(_dive(67.5, 18_084.0, 94.3))
+    assert "different aeroplane" in result["verdict"]
+    assert result["samples"][0]["difference_ft"] == 0.0, "both start where the host started"
+    assert result["samples"][-1]["difference_ft"] < 0, "ours is lower by the end"

@@ -162,6 +162,92 @@ class Recorder:
         )
 
 
+def replay_locally(frames: list[dict[str, Any]], throttle: float = 0.8) -> dict[str, Any]:
+    """Fly our own plant through the host's recorded dive and compare the traces.
+
+    Only meaningful on a `--neutral` recording, because that is the one case
+    where the commands are known without having recorded them: a centred stick
+    every frame. Anything else would need the CMD packets too.
+
+    The question this settles is the one the docs have carried unanswered since
+    the start — whether the host's F-16 is the one we train on. Measured on the
+    2026-09-26 recording: from 18,084 ft the host reaches 94 ft in 67.5 s and
+    ours in 58.2 s, 16% quicker. Same direction, same terminal speed to within
+    3%, different aeroplane.
+
+    JSBSim is imported here rather than at module scope because the rest of
+    this file is the network probe and must run on a machine without it.
+    """
+    import numpy as np
+
+    from competition.action import JoystickState, shape_command
+    from competition.environment import Aircraft, resolve_jsbsim_root
+
+    flying = [f for f in frames if f["round"] >= 1]
+    if len(flying) < 10 * 60:
+        return {"verdict": "need at least 10 s of flying frames to compare"}
+
+    first = flying[0]
+    root = resolve_jsbsim_root(None)
+    own = Aircraft(
+        root=root,
+        lat_deg=first["lat"],
+        lon_deg=first["lon"],
+        altitude_ft=first["alt_ft"],
+        heading_deg=first["yaw"],
+        speed_kcas=first["vc_fps"] * KNOTS_PER_FPS,
+    )
+    foe = Aircraft(
+        root=root,
+        lat_deg=first["enemy_lat"],
+        lon_deg=first["enemy_lon"],
+        altitude_ft=first["enemy_alt_ft"],
+        heading_deg=first["yaw"] + 180.0,
+        speed_kcas=first["vc_fps"] * KNOTS_PER_FPS,
+    )
+
+    stick = JoystickState()
+    stick.last_command = np.array([0.0, 0.0, 0.0, throttle], dtype=np.float64)
+    centred = np.array([0.0, 0.0, 0.0, throttle], dtype=np.float64)
+
+    samples = []
+    for index, host_frame in enumerate(flying):
+        ours_ft = float(own.fdm["position/h-sl-ft"])
+        if index % (10 * 60) == 0:
+            samples.append(
+                {
+                    "t_s": round(index / 60.0, 1),
+                    "host_ft": round(host_frame["alt_ft"], 0),
+                    "ours_ft": round(ours_ft, 0),
+                    "difference_ft": round(ours_ft - host_frame["alt_ft"], 0),
+                    "host_kts": round(host_frame["vc_fps"] * KNOTS_PER_FPS, 0),
+                    "ours_kts": round(float(own.fdm["velocities/vc-kts"]), 0),
+                }
+            )
+        if ours_ft <= 0.0:
+            break
+        command = shape_command(centred, stick, own.telemetry_against(foe).reference_mach)
+        own.apply(command)
+        own.step()
+        foe.apply(centred)
+        foe.step()
+
+    descended = first["alt_ft"] - flying[-1]["alt_ft"]
+    host_rate = descended / (len(flying) / 60.0)
+    ours_rate = (first["alt_ft"] - samples[-1]["ours_ft"]) / (samples[-1]["t_s"] or 1.0)
+    gap = (ours_rate - host_rate) / host_rate if host_rate else 0.0
+
+    if abs(gap) < 0.05:
+        verdict = f"our plant matches the host's to {abs(gap):.0%} on descent rate"
+    else:
+        verdict = (
+            f"our plant descends {gap:+.0%} against the host's "
+            f"({ours_rate:.0f} vs {host_rate:.0f} ft/s) — a different aeroplane, "
+            "and a policy is trained on the aeroplane"
+        )
+    return {"samples": samples, "verdict": verdict}
+
+
 def trim_verdict(frames: list[dict[str, Any]]) -> str:
     """Does the host hand us a trimmed aircraft, or one that flies itself down?
 
@@ -460,6 +546,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--compare",
+        metavar="RECORDING.jsonl",
+        help=(
+            "do not connect to anything: replay our own plant through a saved "
+            "--neutral recording and report where the two traces part company"
+        ),
+    )
+    parser.add_argument(
         "--selftest",
         action="store_true",
         help="check this probe answers synthetic packets, without the host",
@@ -467,6 +561,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def compare_recording(path: str) -> int:
+    """`--compare`: our plant against a saved host recording, no network."""
+    frames = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line]
+    result = replay_locally(frames)
+    print()
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
 if __name__ == "__main__":
     _args = parse_args()
+    if _args.compare:
+        raise SystemExit(compare_recording(_args.compare))
     raise SystemExit(selftest(_args) if _args.selftest else run(_args))
