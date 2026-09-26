@@ -18,6 +18,7 @@ plain observation (how close, for how long), never a blend of them.
 from __future__ import annotations
 
 import statistics
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,9 +26,20 @@ from typing import Any
 
 import numpy as np
 
-from competition.action import INITIAL_THROTTLE
-from competition.environment import CompetitionRound, EnvConfig
-from competition.scoring import AttackEnvelope, RoundOutcome, Verdict, decide_round
+# Runnable as a file as well as importable. The path has to be set before the
+# package imports below, not inside the __main__ guard underneath them.
+_BACKEND = Path(__file__).resolve().parents[1]
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
+
+from competition.action import INITIAL_THROTTLE  # noqa: E402
+from competition.environment import CompetitionRound, EnvConfig  # noqa: E402
+from competition.scoring import (  # noqa: E402
+    AttackEnvelope,
+    RoundOutcome,
+    Verdict,
+    decide_round,
+)
 
 FT_PER_M = 1.0 / 0.3048
 
@@ -255,3 +267,111 @@ def compare(reports: Sequence[Report]) -> str:
             f"{report.mean_seconds_in_sweet_spot:>9.1f}"
         )
     return "\n".join(lines)
+
+
+# ------------------------------------------------------------------- the CLI
+
+
+def config_from_card(card: dict[str, Any], opponent: str, aggression: float) -> EnvConfig:
+    """Rebuild the aircraft a session trained on, from what it wrote down.
+
+    Each policy is flown in the plant it learned — its observation, its
+    decision rate, its floor, its rudder limit — because on the day that is
+    what it will have. Comparing two policies means comparing two *systems*,
+    and pretending otherwise would flatter whichever one happens to match
+    whatever single configuration the comparison chose.
+
+    The opponent and the round setup are *not* taken from the card. Those are
+    the exam, and both candidates have to sit the same one.
+    """
+    from competition.safety import GroundAvoidance
+
+    described = card.get("environment", {})
+    floor = described.get("ground_avoidance")
+    return EnvConfig(
+        observation=described.get("observation", "reference"),
+        action_repeat=int(described.get("action_repeat", 1)),
+        rudder_enabled=bool(described.get("rudder_enabled", False)),
+        rudder_limit=float(described.get("rudder_limit", 0.2)),
+        high_speed_elevator_limit=float(described.get("high_speed_elevator_limit", 0.4)),
+        speed_before_altitude=bool(described.get("speed_before_altitude", False)),
+        ground_avoidance=GroundAvoidance(**floor) if floor else None,
+        opponent=opponent,
+        opponent_aggression=aggression,
+    )
+
+
+def _describe(card: dict[str, Any]) -> str:
+    described = card.get("environment", {})
+    parts = [
+        f"{card.get('timesteps_done', 0):,} steps",
+        str(card.get("reward", "?")),
+        str(described.get("observation", "reference")),
+        f"{described.get('action_repeat', 1)}x",
+    ]
+    if described.get("ground_avoidance"):
+        parts.append("floor")
+    return ", ".join(parts)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(
+        description="Score saved sessions with the organiser's own rules, on the same engagements."
+    )
+    parser.add_argument("sessions", nargs="+", help="session directories, e.g. models/competition/run1")
+    parser.add_argument("--rounds", type=int, default=20)
+    parser.add_argument("--seed", type=int, default=1000, help="the same for every session")
+    parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
+    parser.add_argument("--opponent-aggression", type=float, default=1.0)
+    parser.add_argument("--algorithm", choices=["sac", "ppo"], default="sac")
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--json", type=Path, default=None, help="also write the full detail here")
+    args = parser.parse_args(argv)
+
+    print()
+    print(f"Scoring {len(args.sessions)} session(s) over {args.rounds} rounds")
+    print(f"每個 session 跑同一批 {args.rounds} 個回合(seed {args.seed}),對手 {args.opponent}")
+    print()
+
+    reports = []
+    for entry in args.sessions:
+        session = Path(entry)
+        card_path = session / "card.json"
+        card = json.loads(card_path.read_text(encoding="utf-8")) if card_path.is_file() else {}
+        if not card:
+            print(f"  {session.name}: no card.json — assuming the reference setup")
+
+        label = f"{session.name} ({_describe(card)})" if card else session.name
+        print(f"  {label}")
+        reports.append(
+            evaluate(
+                load_policy(session, args.algorithm, args.device),
+                config_from_card(card, args.opponent, args.opponent_aggression),
+                rounds=args.rounds,
+                seed=args.seed,
+                label=session.name,
+            )
+        )
+
+    print()
+    print(compare(reports))
+    print()
+    best = max(reports, key=lambda report: (report.win_rate, report.mean_margin))
+    print(f"  Best on win rate, then margin: {best.label}")
+    print(f"  勝率優先、其次分差,最好的是:{best.label}")
+    if len(reports) > 1:
+        print()
+        print("  Same seeds, so this is a paired comparison — the engagements were identical.")
+        print("  相同種子,配對比較 —— 兩邊打的是同一批對戰。")
+
+    if args.json is not None:
+        args.json.write_text(json.dumps([report.as_dict() for report in reports], indent=2), encoding="utf-8")
+        print(f"\n  detail: {args.json}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

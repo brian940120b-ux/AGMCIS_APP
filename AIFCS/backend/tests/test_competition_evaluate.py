@@ -117,3 +117,56 @@ def test_a_report_counts_what_it_says_it_counts():
     assert "rounds" in report.summary()
     assert report.as_dict()["rounds"] == 4
     assert len(report.as_dict()["detail"]) == 4
+
+
+# --------------------------------------------- rebuilding a session's aircraft
+
+
+def test_a_policy_is_flown_in_the_plant_it_learned(tmp_path):
+    """Two sessions trained under different settings cannot share one config —
+    a thirty-input policy will not even accept a twenty-input observation.
+
+    So each is rebuilt from its own card, and only the exam is held common.
+    Comparing two policies means comparing two systems, because a system is
+    what goes to the competition.
+    """
+    from competition.evaluate import config_from_card
+
+    modern = config_from_card(
+        {
+            "environment": {
+                "observation": "extended",
+                "action_repeat": 6,
+                "rudder_limit": 1.0,
+                "ground_avoidance": {"seconds_to_impact": 8.0, "elevator": 0.6},
+            }
+        },
+        opponent="pursuit",
+        aggression=1.5,
+    )
+    assert modern.observation == "extended"
+    assert modern.action_repeat == 6
+    assert modern.rudder_limit == 1.0
+    assert modern.ground_avoidance is not None
+    assert modern.ground_avoidance.elevator == 0.6
+
+    # The opponent is the exam, not the aircraft: it comes from the caller.
+    assert modern.opponent == "pursuit"
+    assert modern.opponent_aggression == 1.5
+
+
+def test_a_session_from_before_these_settings_rebuilds_as_the_reference():
+    """run1 was trained before most of them existed and still has to be
+    scoreable, or there is nothing to compare anything against."""
+    from competition.evaluate import config_from_card
+
+    old = config_from_card({"environment": {"opponent": "reference"}}, "reference", 1.0)
+    assert old.observation == "reference"
+    assert old.action_repeat == 1
+    assert old.ground_avoidance is None
+
+
+def test_a_card_that_is_missing_entirely_still_scores():
+    from competition.evaluate import config_from_card
+
+    assert config_from_card({}, "reference", 1.0).observation == "reference"

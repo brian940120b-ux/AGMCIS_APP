@@ -180,6 +180,7 @@ BATCH_FILES = [
     "start.bat",
     "stop.bat",
     "tryout.bat",
+    "evaluate.bat",
 ]
 
 

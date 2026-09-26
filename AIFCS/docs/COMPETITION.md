@@ -586,3 +586,67 @@ scripts/tryout.bat --rounds 6 --steps 5000    # 仔細
 ```
 
 `--rounds` 是每個比較跑幾個回合,`--steps` 是最後那段訓練的決策數。
+
+
+---
+
+# 量模型:`evaluate.bat`
+
+訓練印的是**獎勵**,比賽判的是**勝負**,兩個不是同一個函數 —— 這就是 `rewards.py`
+有四種模式的原因。所以「哪個模型比較好」不能看訓練曲線,要用主辦方的判定表去量。
+
+## 一行搞定
+
+雙擊 **`scripts\evaluate.bat`** —— 不給參數就會把 `models\competition\` 底下
+每個練過的 session 都量一遍。
+
+指定要比的:
+
+```bash
+scripts/evaluate.bat models/competition/run1 models/competition/v2
+```
+
+## 會印什麼
+
+```
+每個 session 跑同一批 20 個回合(seed 1000),對手 reference
+
+  run1 (5,000,000 steps, reference, reference, 1x)
+  v2   (2,000,000 steps, margin, extended, 6x, floor)
+
+                           won   killed    died  crashed      margin  152-500m
+run1                       25%      8%      0%      58%      -1,204       3.1
+v2                         70%     45%      0%       5%      +8,910      41.7
+
+  勝率優先、其次分差,最好的是:v2
+  相同種子,配對比較 —— 兩邊打的是同一批對戰。
+```
+
+| 欄位 | 意思 |
+|---|---|
+| `won` | 依 `decide_round`(主辦方表 3)的勝率 |
+| `killed` | 累積 3 秒追蹤達成率 |
+| `died` | 被對方達成 |
+| `crashed` | 撞地率 —— **訓練初期最該看這個** |
+| `margin` | 我方優勢分減對方,平均。時間到就是靠這個決勝 |
+| `152-500m` | 每回合待在甜蜜點的秒數 |
+
+## 兩個設計上的重點
+
+**每個模型飛它自己練的那架飛機。** 觀測維度、決策頻率、防墜地板、方向舵上限
+都從它自己的 `card.json` 重建 —— 30 維的策略根本吃不下 20 維的觀測,不可能共用
+一套設定。
+
+**但對手和初始條件是共用的。** 那是考題,兩個考生要考同一份。
+
+所以這是在比**兩個系統**,不是比兩組權重 —— 因為上場的是系統。
+
+**`seed` 一定要相同**,不然比的是兩批骰子。
+
+## 換對手再比一次
+
+```bash
+scripts/evaluate.bat --opponent pursuit models/competition/run1 models/competition/v2
+```
+
+對靶機的勝率會飽和,對會追的對手才看得出差別。
