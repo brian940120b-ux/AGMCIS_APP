@@ -146,56 +146,76 @@ def collect_checkpoints(paths: list[str]) -> dict[str, Path]:
     return found
 
 
-class LazyOpponent:
-    """A pool entry that carries a path, and loads the policy where it is used.
+def extract_actor(model: Any) -> dict[str, Any]:
+    """A trained SAC actor as plain numpy arrays.
 
-    `SubprocVecEnv` on Windows starts each worker as a fresh interpreter and
-    sends it the environment config through a pipe, so anything in
-    `EnvConfig.opponent_pool` is serialised once per worker. Putting a loaded
-    SAC model there means N copies of a neural network going down that pipe at
-    once, and v5 — the first self-play run — died on it before the first round:
+    The point is what the workers then do *not* need. A pool opponent used to
+    be a loaded SB3 model, which meant every `SubprocVecEnv` worker imported
+    torch, and every torch import brings an OpenMP thread pool sized to the
+    machine. Eight of those is how v5's second attempt died:
 
-        File "...multiprocessing/spawn.py", line 132, in _main
-          self = reduction.pickle.load(from_parent)
-        MemoryError
+        OMP: Error #137: Cannot create thread.
+        OMP: System error #1450
 
-    So this pickles as a path and a couple of strings. Each worker loads its
-    own copy from disk on first use, which is one model per process instead of
-    one per process *through a pipe, simultaneously*.
+    A SAC actor is a small MLP — two hidden layers and a linear head — so the
+    forward pass is three matrix multiplies and a tanh. In numpy the workers
+    stay what they were before self-play existed: JSBSim and arrays.
 
-    The weights are dropped on the way out rather than the way in, in
-    `__getstate__`, because a parent that has already loaded one should not
-    have to know not to.
+    Only SAC. PPO's actor is shaped differently and is not squashed the same
+    way, and guessing at it would be worse than saying so.
+    """
+    import torch
+
+    actor = model.policy.actor
+    layers: list[dict[str, Any]] = []
+    for module in [*actor.latent_pi, actor.mu]:
+        if isinstance(module, torch.nn.Linear):
+            layers.append(
+                {
+                    "kind": "linear",
+                    "weight": module.weight.detach().cpu().numpy().astype(np.float64),
+                    "bias": module.bias.detach().cpu().numpy().astype(np.float64),
+                }
+            )
+        elif isinstance(module, torch.nn.ReLU):
+            layers.append({"kind": "relu"})
+        elif isinstance(module, torch.nn.Tanh):
+            layers.append({"kind": "tanh"})
+        else:
+            raise NotImplementedError(f"the actor has a {type(module).__name__} this cannot replay in numpy")
+
+    low = np.asarray(model.action_space.low, dtype=np.float64)
+    high = np.asarray(model.action_space.high, dtype=np.float64)
+    return {"layers": layers, "low": low, "high": high, "squash": bool(model.policy.squash_output)}
+
+
+class NumpyActor:
+    """The forward pass of `extract_actor`'s weights, with no torch anywhere.
+
+    Deterministic only, which is what an opponent wants: a pool that samples
+    its actions is a pool whose difficulty moves under the policy learning
+    against it.
     """
 
-    def __init__(self, checkpoint: Path | str, algorithm: str = "sac", device: str = "cpu") -> None:
-        self.checkpoint = Path(checkpoint)
-        self.algorithm = algorithm
-        self.device = device
-        self._loaded: PolicyOpponent | None = None
+    def __init__(self, weights: dict[str, Any]) -> None:
+        self.weights = weights
 
-    def __getstate__(self) -> dict[str, Any]:
-        return {
-            "checkpoint": self.checkpoint,
-            "algorithm": self.algorithm,
-            "device": self.device,
-            "_loaded": None,
-        }
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        self.__dict__.update(state)
-
-    @property
-    def loaded(self) -> PolicyOpponent:
-        if self._loaded is None:
-            self._loaded = opponent_from_checkpoint(self.checkpoint, self.algorithm, self.device)
-        return self._loaded
-
-    def reset(self) -> None:
-        self.loaded.reset()
-
-    def __call__(self, telemetry: Telemetry) -> np.ndarray:
-        return self.loaded(telemetry)
+    def __call__(self, state: np.ndarray) -> np.ndarray:
+        value = np.asarray(state, dtype=np.float64)
+        for layer in self.weights["layers"]:
+            if layer["kind"] == "linear":
+                value = layer["weight"] @ value + layer["bias"]
+            elif layer["kind"] == "relu":
+                value = np.maximum(value, 0.0)
+            else:
+                value = np.tanh(value)
+        if self.weights["squash"]:
+            # tanh, then off [-1, 1] and onto the action space, which is what
+            # SB3 does in unscale_action.
+            value = np.tanh(value)
+            low, high = self.weights["low"], self.weights["high"]
+            value = low + 0.5 * (value + 1.0) * (high - low)
+        return np.clip(value, self.weights["low"], self.weights["high"])
 
 
 def opponent_from_checkpoint(
@@ -223,7 +243,7 @@ def opponent_from_checkpoint(
         described = json.loads(card_path.read_text(encoding="utf-8")).get("environment", {})
 
     return PolicyOpponent(
-        load_predict(checkpoint, algorithm, device=device),
+        load_actor(checkpoint, algorithm, device=device),
         action_repeat=int(described.get("action_repeat", 1)),
         rudder_limit=float(described.get("rudder_limit", RUDDER_LIMIT)),
         high_speed_elevator_limit=float(
@@ -231,6 +251,20 @@ def opponent_from_checkpoint(
         ),
         encoder=build_encoder(EnvConfig(observation=described.get("observation", "reference"))),
     )
+
+
+def load_actor(checkpoint: Path, algorithm: str = "sac", device: str = "cpu") -> NumpyActor:
+    """A saved policy as numpy weights, loaded here and never sent as a model.
+
+    The parent process has torch loaded already — it is the one training. The
+    workers do not, and this is what keeps it that way: what crosses the pipe
+    to each of them is three small arrays, not a neural network and the
+    OpenMP thread pool that comes with importing one.
+    """
+    from competition.runtime import load_algorithm
+
+    model = load_algorithm(algorithm).load(str(checkpoint), device=device)
+    return NumpyActor(extract_actor(model))
 
 
 def load_predict(checkpoint: Path, algorithm: str = "sac", device: str = "cpu"):

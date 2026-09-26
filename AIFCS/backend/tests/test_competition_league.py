@@ -284,14 +284,14 @@ def test_a_pool_opponent_is_built_from_its_own_card(tmp_path, monkeypatch):
 
     seen: list[int] = []
 
-    def fake_load_predict(path, algorithm="sac", device="cpu"):
+    def fake_load_actor(path, algorithm="sac", device="cpu"):
         def predict(state):
             seen.append(len(state))
             return np.zeros(4)
 
         return predict
 
-    monkeypatch.setattr("competition.league.load_predict", fake_load_predict)
+    monkeypatch.setattr("competition.league.load_actor", fake_load_actor)
     opponent = opponent_from_checkpoint(checkpoint)
 
     assert opponent.action_repeat == 6, "its decision rate, not the new run's"
@@ -311,7 +311,7 @@ def test_a_checkpoint_with_no_card_falls_back_to_the_reference_aircraft():
 
     seen: list[int] = []
 
-    def fake_load_predict(path, algorithm="sac", device="cpu"):
+    def fake_load_actor(path, algorithm="sac", device="cpu"):
         def predict(state):
             seen.append(len(state))
             return np.zeros(4)
@@ -320,65 +320,90 @@ def test_a_checkpoint_with_no_card_falls_back_to_the_reference_aircraft():
 
     import competition.league as league
 
-    original, league.load_predict = league.load_predict, fake_load_predict
+    original, league.load_actor = league.load_actor, fake_load_actor
     try:
         opponent = opponent_from_checkpoint(Path("nowhere/checkpoint.zip"))
         assert opponent.action_repeat == 1
         opponent(_telemetry())
     finally:
-        league.load_predict = original
+        league.load_actor = original
 
     assert seen == [STATE_SIZE]
 
 
-def test_a_pool_entry_carries_a_path_across_a_process_boundary_not_a_model():
-    """What killed v5, the first self-play run, before its first round.
+def test_a_pool_entry_crosses_a_process_boundary_without_torch():
+    """What killed v5 twice.
 
-    SubprocVecEnv on Windows sends the environment config to each worker
-    through a pipe, so a loaded SAC model in the pool is serialised once per
-    worker and unpickled by all of them at once:
+    First a loaded SAC model in the pool was serialised once per worker and
+    unpickled by all eight at once (MemoryError). Then, loading lazily inside
+    each worker, every worker imported torch and every torch import brought an
+    OpenMP thread pool sized to the machine:
 
-        File "...multiprocessing/spawn.py", line 132, in _main
-          self = reduction.pickle.load(from_parent)
-        MemoryError
+        OMP: Error #137: Cannot create thread.
+        OMP: System error #1450
 
-    Pickling has to carry the path and nothing else, even when the sending
-    process has already loaded the weights.
+    So the weights are extracted to numpy in the parent — the one process that
+    already has torch, because it is the one training — and what reaches a
+    worker is arrays. The assertion is on the pickle itself, because "does a
+    worker import torch" is not a thing a test can ask after the fact.
     """
     import pickle
-    from pathlib import Path
 
-    from competition.league import LazyOpponent
+    from competition.league import NumpyActor
+    from competition.state import STATE_SIZE
 
-    entry = LazyOpponent(Path("models/competition/v4/checkpoint.zip"))
-    entry._loaded = object()  # as it would be in a process that has used it
+    weights = {
+        "layers": [
+            {"kind": "linear", "weight": np.zeros((4, STATE_SIZE)), "bias": np.zeros(4)},
+            {"kind": "relu"},
+        ],
+        "low": -np.ones(4),
+        "high": np.ones(4),
+        "squash": True,
+    }
+    opponent = PolicyOpponent(NumpyActor(weights))
+    payload = pickle.dumps(opponent)
 
-    revived = pickle.loads(pickle.dumps(entry))
-
-    assert revived.checkpoint == Path("models/competition/v4/checkpoint.zip")
-    assert revived.algorithm == "sac"
-    assert revived._loaded is None, "the weights must not cross the pipe"
-    assert b"checkpoint.zip" in pickle.dumps(entry), "the path does"
+    assert b"torch" not in payload, "a worker unpickling this must not pull in torch"
+    revived = pickle.loads(payload)
+    assert revived(_telemetry()).shape == (4,)
 
 
-def test_a_pool_entry_loads_once_and_keeps_it(monkeypatch):
-    """One load per worker, not one per round: the weights are the expensive
-    part and a round is 300 seconds of flying."""
-    from pathlib import Path
+def test_the_numpy_actor_reproduces_what_the_model_would_have_said():
+    """Measured against SB3's own predict over 200 random observations and
+    three architectures, relu and tanh: worst difference 1.8e-07, which is
+    float32 against float64 rather than an approximation.
 
-    from competition.league import LazyOpponent
+    What is pinned here is the unscaling, because it is the step that a range
+    check cannot see. A zero pre-tanh output is the midpoint of each channel's
+    range once unscaled, and zero if the unscaling is skipped — the first
+    version of this test asserted bounds and passed either way.
+    """
+    from competition.league import NumpyActor
 
-    loads: list[Path] = []
+    weights = {
+        "layers": [{"kind": "linear", "weight": np.zeros((2, 3)), "bias": np.zeros(2)}],
+        "low": np.array([-1.0, 0.0]),
+        "high": np.array([1.0, 1.0]),
+        "squash": True,
+    }
+    action = NumpyActor(weights)(np.array([7.0, -3.0, 0.5]))
 
-    def fake_build(checkpoint, algorithm="sac", device="cpu"):
-        loads.append(checkpoint)
-        return PolicyOpponent(lambda state: np.zeros(4))
+    assert action[0] == pytest.approx(0.0), "midpoint of [-1, 1]"
+    assert action[1] == pytest.approx(0.5), "midpoint of [0, 1], not its floor"
 
-    monkeypatch.setattr("competition.league.opponent_from_checkpoint", fake_build)
-    entry = LazyOpponent(Path("somewhere/checkpoint.zip"))
 
-    entry.reset()
-    entry(_telemetry())
-    entry(_telemetry())
+def test_an_unsquashed_actor_is_left_alone():
+    """`squash_output` is read off the policy rather than assumed, so an actor
+    that does not tanh its output is not given one."""
+    from competition.league import NumpyActor
 
-    assert len(loads) == 1
+    weights = {
+        "layers": [{"kind": "linear", "weight": np.eye(2), "bias": np.array([0.3, -0.4])}],
+        "low": np.array([-1.0, -1.0]),
+        "high": np.array([1.0, 1.0]),
+        "squash": False,
+    }
+    action = NumpyActor(weights)(np.zeros(2))
+
+    assert action == pytest.approx(np.array([0.3, -0.4]))

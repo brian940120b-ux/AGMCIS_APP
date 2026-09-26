@@ -174,12 +174,12 @@ def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
     pool = {}
     if args.opponent_pool:
-        from competition.league import LazyOpponent, collect_checkpoints
+        from competition.league import collect_checkpoints, opponent_from_checkpoint
 
-        # Paths, not models: the pool crosses a process boundary once per
-        # worker. See LazyOpponent.
+        # Loaded here, in the one process that already has torch. What reaches
+        # each worker is numpy weights — see league.extract_actor.
         for name, checkpoint in collect_checkpoints(args.opponent_pool).items():
-            pool[name] = LazyOpponent(checkpoint, args.algorithm, device="cpu")
+            pool[name] = opponent_from_checkpoint(checkpoint, args.algorithm, device="cpu")
 
     return EnvConfig(
         setup=setup,

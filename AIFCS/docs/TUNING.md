@@ -187,10 +187,32 @@ MemoryError
 現在池子裡放的是 `LazyOpponent` —— **只帶路徑**,每個 worker 第一次用到時自己
 從硬碟載。一個 process 一份,而不是「N 份同時穿過一根管子」。
 
-> 已經載過的 process 也不會把權重送出去:`__getstate__` 在**送出的時候**把它
-> 丟掉,而不是要求呼叫端記得不要送。
+**然後它用另一種方式死了第二次:**
 
-**如果還是 `MemoryError`**,才是真的記憶體不夠,那時候降 worker 數:
+```
+OMP: Error #137: Cannot create thread.
+OMP: System error #1450: 系統資源不足
+```
+
+每個 worker 自己載模型 = 每個 worker 各自 `import torch` = 每個各自開一整組
+**OpenMP 執行緒池**,大小按 CPU 核心數算。八份。
+
+在對手池出現之前,worker 裡只有 JSBSim 和 numpy,**完全沒有 torch**。
+
+### 修法:worker 不需要 torch
+
+SAC 的 actor 就是一個小 MLP —— 兩層隱藏層加一個線性輸出。前向傳播是**三次矩陣
+乘法加一個 tanh**,numpy 就夠了。
+
+現在權重在**父程序**(唯一本來就有 torch 的那個,因為它在訓練)抽成 numpy 陣列,
+送給 worker 的就只是幾個陣列。worker 回到自我對戰出現之前的樣子。
+
+**對照 SB3 自己的 `predict` 驗證過:** 200 個隨機觀測 × 3 種架構 × relu 和 tanh,
+**最大差 1.8e-07** —— 那是 float32 對 float64 的捨入,不是近似。
+
+> 只支援 SAC。PPO 的 actor 結構不同、squash 方式也不同,猜它不如講清楚不支援。
+
+**如果還是 `MemoryError`**,那才是真的記憶體不夠,降 worker 數:
 
 ```bash
 train.bat --name v5 ... --workers 4
