@@ -310,7 +310,7 @@ session 自動接下去。Windows Update 半夜重開機,原本會浪費整晚,�
 ### 花錢之前:先量時間花在哪
 
 ```
-scripts\profile.bat models\competition\v4
+scripts/profile.bat models/competition/v4
 ```
 
 **不要在訓練跑的時候跑它** —— 兩個會互相搶機器,量出來的是打架的結果。腳本會
