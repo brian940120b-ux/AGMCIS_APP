@@ -100,6 +100,24 @@ def test_scoring_a_step_puts_it_against_its_own_opponents(tmp_path):
     assert "--opponent-pool" in command
 
 
+def test_a_step_trained_with_a_floor_is_scored_with_one(tmp_path):
+    """The baseline row is a centred stick, and a centred stick with no floor
+    crashes every round. The v6 report's `do nothing` rows read 100% crashed
+    and -139 margin for exactly that reason, which made every ladder report
+    compare a floored policy against an unfloored bar."""
+    step = Step(name="v6", flags="--reward shaped --ground-avoidance --g-limit 9", pool=["v4"])
+
+    assert "--ground-avoidance" in step.evaluate_command("python", tmp_path)
+
+
+def test_a_step_trained_without_a_floor_is_not_given_one(tmp_path):
+    """The flag is carried, not invented: a step that never had a floor is
+    scored the way it flew."""
+    step = Step(name="v6", flags="--reward shaped --timesteps 2000000")
+
+    assert "--ground-avoidance" not in step.evaluate_command("python", tmp_path)
+
+
 # --------------------------------------------------------- skipping and order
 
 

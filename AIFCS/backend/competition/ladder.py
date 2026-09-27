@@ -69,6 +69,15 @@ class Step:
 
     def evaluate_command(self, python: str, root: Path) -> list[str]:
         command = [python, "-m", "competition.evaluate", str(root / self.name), "--baseline"]
+        if "--ground-avoidance" in self.flags.split():
+            # The baseline row is a centred stick, and a centred stick with no
+            # floor flies into the ground: every `do nothing` row in the v6
+            # report read 100% crashed and -139 margin, which is not the bar a
+            # trained policy has to clear — the measured bar is 65% and +51,
+            # with the floor. The step trained under a floor, so the step is
+            # scored under one, or its own report compares two different
+            # aeroplanes.
+            command.append("--ground-avoidance")
         if self.pool:
             command += ["--opponent-pool", *self.pool_paths(root)]
         return command
