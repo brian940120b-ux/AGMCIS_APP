@@ -212,7 +212,21 @@ SAC 的 actor 就是一個小 MLP —— 兩層隱藏層加一個線性輸出。
 
 > 只支援 SAC。PPO 的 actor 結構不同、squash 方式也不同,猜它不如講清楚不支援。
 
-**如果還是 `MemoryError`**,那才是真的記憶體不夠,降 worker 數:
+### 以及 worker 本來就不該開執行緒池
+
+上面那個 numpy 修法沒有讓 OMP 錯誤消失,因為 **worker 一直都在 import torch** ——
+不是為了對手池,是為了 `Monitor`。它在 builder 的 closure 裡被參照,所以 worker
+一解 pickle 就會 import Stable-Baselines3,連帶 torch,連帶一整組按 CPU 核心數
+開的 OpenMP 執行緒池。八份。
+
+**worker 做的是純量的 JSBSim,加上一個小 numpy MLP 的前向傳播。它不需要執行緒池。**
+
+`OMP_NUM_THREADS` 只在 OpenMP **初始化那一刻**被讀一次,而那一刻在 worker 裡
+早於我們任何一行程式碼。所以現在是在**父程序 spawn 的那一瞬間**設成 1
+(子程序繼承父程序的環境),spawn 完立刻還原 —— 父程序要跑梯度更新,它該用
+整台機器。
+
+**如果還是 1450 或 `MemoryError`**,那才是真的資源不夠,降 worker 數:
 
 ```bash
 train.bat --name v5 ... --workers 4

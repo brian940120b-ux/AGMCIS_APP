@@ -12,6 +12,7 @@ happens to be in. That distinction is the whole reason there are two rewards.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import gymnasium as gym
@@ -194,6 +195,55 @@ def make_env(
     return build
 
 
+@contextlib.contextmanager
+def _spawning_single_threaded():
+    """Hold the thread-count variables at 1 for the duration of a spawn."""
+    import os
+
+    names = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+    saved = {name: os.environ.get(name) for name in names}
+    for name in names:
+        os.environ.setdefault(name, "1")
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _single_threaded() -> None:
+    """One thread per worker. Runs inside the worker, before anything heavy.
+
+    A worker's work is JSBSim, which is scalar, and a forward pass through a
+    small numpy MLP. What it does not need is a thread pool — but importing
+    Stable-Baselines3, which every worker does for `Monitor`, brings in torch,
+    and torch starts an OpenMP pool sized to the machine. Eight workers on a
+    many-core laptop is how v5 kept dying:
+
+        OMP: Error #137: Cannot create thread.
+        OMP: System error #1450
+
+    The environment variables only bite if they are set before OpenMP
+    initialises, which is why this is the first thing the builder does;
+    `torch.set_num_threads` is the belt to that pair of braces, and works
+    afterwards. The parent is left alone — it is the one doing the gradient
+    steps and it should use the machine.
+    """
+    import os
+
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ.setdefault(name, "1")
+    try:
+        import torch
+
+        torch.set_num_threads(1)
+    except Exception:
+        pass
+
+
 def make_vec_env(
     workers: int,
     config: EnvConfig | None = None,
@@ -222,6 +272,7 @@ def make_vec_env(
 
     def thunk(rank: int):
         def build() -> gym.Env:
+            _single_threaded()
             env: gym.Env = CompetitionEnv(config=config, reward_mode=reward_mode, seed=seed + rank)
             return Monitor(env) if monitor else env
 
@@ -230,6 +281,13 @@ def make_vec_env(
     builders = [thunk(rank) for rank in range(workers)]
     if workers == 1:
         return DummyVecEnv(builders)
-    if start_method is None:
-        return SubprocVecEnv(builders)
-    return SubprocVecEnv(builders, start_method=start_method)
+    # Set around the spawn, not inside the worker: a spawned worker unpickles
+    # the builder, and the builder's closure names `Monitor`, so importing
+    # Stable-Baselines3 — and torch, and OpenMP — happens before any line of
+    # ours runs in that process. Children inherit the parent's environment at
+    # spawn, so this is the last moment it can be said. Restored straight
+    # afterwards: the parent does the gradient steps and should use the machine.
+    with _spawning_single_threaded():
+        if start_method is None:
+            return SubprocVecEnv(builders)
+        return SubprocVecEnv(builders, start_method=start_method)
