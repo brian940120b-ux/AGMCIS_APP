@@ -265,6 +265,7 @@ def checkpoint_callback(
     state: SessionState,
     every: int,
     save_buffer: bool,
+    max_hours: float | None = None,
 ):
     """An SB3 callback that writes a resumable checkpoint every `every` steps.
 
@@ -286,8 +287,19 @@ def checkpoint_callback(
             #: Set when the stop file ended the run, so the caller can tell a
             #: run that was asked to stop from one that reached its target.
             self.stopped = False
+            #: A wall-clock budget, for a machine that will take the process
+            #: away at a deadline. Kaggle gives a free GPU for nine to twelve
+            #: hours a session and then stops the container; a run that is
+            #: still going at that moment loses everything since its last
+            #: checkpoint, and the session has nowhere to write the card.
+            #: Stopping ourselves first turns a hard cut into a clean exit.
+            self.deadline = None if max_hours is None else self.started_at + max_hours * 3600.0
 
         def _on_step(self) -> bool:
+            if self.deadline is not None and time.perf_counter() >= self.deadline:
+                print("\ntime budget reached — saving before exit", flush=True)
+                self.stopped = True
+                return False
             if session.stop_path.exists():
                 # Returning False is how Stable-Baselines3 is asked to stop.
                 # The save happens in train()'s `finally`, the same path a

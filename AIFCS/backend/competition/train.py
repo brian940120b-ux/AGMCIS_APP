@@ -367,7 +367,7 @@ def train(args: argparse.Namespace) -> int:
 
     remaining = args.timesteps - state.timesteps_done
     state.runs += 1
-    callback = checkpoint_callback(session, state, args.checkpoint_every, args.save_buffer)
+    callback = checkpoint_callback(session, state, args.checkpoint_every, args.save_buffer, args.max_hours)
 
     started = time.perf_counter()
     interrupted = False
@@ -465,6 +465,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="state-dependent exploration, as the organiser's own trainer uses",
     )
     parser.add_argument("--output", default="models/competition")
+    parser.add_argument(
+        "--max-hours",
+        type=float,
+        default=None,
+        metavar="H",
+        help=(
+            "stop cleanly after this many hours, having saved. For a machine "
+            "that takes the process away at a deadline: Kaggle's free GPU "
+            "sessions end at nine to twelve hours and everything since the "
+            "last checkpoint goes with them"
+        ),
+    )
     parser.add_argument(
         "--checkpoint-every",
         type=int,

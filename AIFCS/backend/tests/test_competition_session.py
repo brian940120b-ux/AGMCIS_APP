@@ -816,3 +816,44 @@ def test_the_name_is_printed_alone_so_a_batch_file_can_read_it(tmp_path, capsys)
     printed = capsys.readouterr()
     assert printed.out == "v5\n", "stdout is the name and nothing else"
     assert "350,000" in printed.err, "the detail goes where it will not be parsed"
+
+
+def test_a_time_budget_stops_the_run_before_the_machine_does(tmp_path, monkeypatch):
+    """For a free GPU session that ends at a deadline.
+
+    Kaggle stops the container after nine to twelve hours. A run still going
+    at that moment loses everything since its last checkpoint and never writes
+    its card. Stopping first turns a hard cut into a clean exit.
+    """
+    import time
+
+    from competition.session import Session, SessionState, checkpoint_callback
+
+    session = Session(root=tmp_path / "v6")
+    session.root.mkdir(parents=True)
+    state = SessionState(name="v6", algorithm="sac", target_timesteps=1_000_000)
+
+    callback = checkpoint_callback(session, state, every=10**9, save_buffer=False, max_hours=2.0)
+    callback.num_timesteps = 0
+    callback.save = lambda: None
+
+    assert callback._on_step() is True, "well inside the budget"
+
+    monkeypatch.setattr(time, "perf_counter", lambda: callback.deadline + 1.0)
+    assert callback._on_step() is False
+    assert callback.stopped is True
+
+
+def test_without_a_budget_a_run_is_never_stopped_by_the_clock(tmp_path):
+    from competition.session import Session, SessionState, checkpoint_callback
+
+    session = Session(root=tmp_path / "v6")
+    session.root.mkdir(parents=True)
+    state = SessionState(name="v6", algorithm="sac", target_timesteps=1_000_000)
+
+    callback = checkpoint_callback(session, state, every=10**9, save_buffer=False)
+    callback.num_timesteps = 0
+    callback.save = lambda: None
+
+    assert callback.deadline is None
+    assert callback._on_step() is True
