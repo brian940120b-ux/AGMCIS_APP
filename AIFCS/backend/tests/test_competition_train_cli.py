@@ -67,6 +67,51 @@ def test_a_run_can_be_stopped_and_carried_on(tmp_path: Path):
     assert state["runs"] == 2
 
 
+def test_a_run_stopped_early_still_writes_the_card(tmp_path: Path):
+    """The card describes the plant, and the plant is settled at the first step.
+
+    Without one, evaluate prints "no card.json - assuming the reference setup"
+    and scores the policy in an aeroplane it never flew; for an
+    extended-observation session it cannot even load it. A run stopped at a
+    time budget is the normal case on Kaggle, where the budget is what keeps
+    the work, so the normal case has to leave something usable behind.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TRAIN),
+            "--name",
+            "t",
+            "--algorithm",
+            "sac",
+            "--timesteps",
+            "100000",
+            "--workers",
+            "1",
+            "--device",
+            "cpu",
+            "--no-save-buffer",
+            "--observation",
+            "extended",
+            "--max-hours",
+            "0.0002",
+            "--output",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+
+    assert result.returncode == 130, "a stop is 130, not a failure and not a success"
+
+    card_path = tmp_path / "t" / "card.json"
+    assert card_path.is_file(), "nothing downstream can score a session with no card"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    assert card["finished"] is False, "it did not reach its target and must not claim to"
+    assert card["environment"]["observation"] == "extended", "the plant has to survive the stop"
+
+
 def test_both_paths_say_which_device_they_are_using(tmp_path: Path):
     """Asked as "is my graphics card being used?", and the answer was not there.
 

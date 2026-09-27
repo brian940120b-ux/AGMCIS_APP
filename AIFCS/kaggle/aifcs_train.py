@@ -31,6 +31,10 @@ from pathlib import Path
 REPO = "https://github.com/brian940120b-ux/AGMCIS_APP.git"
 BRANCH = "claude/aifcs-flight-simulation-u32h56"
 
+#: What train.py returns when a run was stopped rather than finished, which is
+#: what MAX_HOURS causes and is therefore the expected outcome here.
+INTERRUPTED = 130
+
 #: Stop with time to spare. Kaggle's own limit is 9-12 hours depending on the
 #: accelerator; leaving an hour covers the evaluation that follows training.
 MAX_HOURS = 7.5
@@ -100,22 +104,39 @@ def main() -> int:
         train += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
 
     code = run(train, cwd=AIFCS, env=environment)
-    if code != 0:
-        print(f"\ntraining exited {code}", flush=True)
-        return code
 
-    score = [sys.executable, "-m", "competition.evaluate", str(MODELS / NAME), "--baseline"]
-    if available:
-        score += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
-    run(score, cwd=AIFCS, env=environment)
+    # 130 is train.py's "somebody stopped this", and reaching MAX_HOURS is the
+    # way this script stops itself. Treating it as a failure was the whole
+    # arrangement working backwards: a session that used its full budget would
+    # skip its evaluation and skip the copy into the Output tab, throwing away
+    # the seven hours the budget existed to protect.
+    if code == INTERRUPTED:
+        print(f"\nstopped at the {MAX_HOURS} h budget with its checkpoint saved", flush=True)
+    elif code != 0:
+        print(f"\ntraining exited {code} — scoring is skipped, but whatever saved is kept", flush=True)
+
+    if code in (0, INTERRUPTED):
+        score = [sys.executable, "-m", "competition.evaluate", str(MODELS / NAME), "--baseline"]
+        if "--ground-avoidance" in FLAGS.split():
+            # Without this the baseline row is a centred stick with no floor,
+            # which crashes every round and reports 0% as the bar a trained
+            # policy has to clear. The real bar, with the floor, is 65%.
+            score.append("--ground-avoidance")
+        if available:
+            score += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
+        run(score, cwd=AIFCS, env=environment)
 
     # Out of the clone and into the notebook's own output, which is what the
     # Output tab offers for download and what a Dataset can be published from.
+    # Unconditional: a run that failed at its last step still has hours of GPU
+    # in its checkpoint, and Kaggle keeps nothing that is not in /kaggle/working.
+    collected = 0
     for session in sorted(MODELS.iterdir()):
         if (session / "checkpoint.zip").is_file():
             shutil.copytree(session, Path("/kaggle/working") / session.name, dirs_exist_ok=True)
-    print("\nsessions are in the Output tab", flush=True)
-    return 0
+            collected += 1
+    print(f"\n{collected} session(s) are in the Output tab", flush=True)
+    return 0 if code in (0, INTERRUPTED) else code
 
 
 if __name__ == "__main__":

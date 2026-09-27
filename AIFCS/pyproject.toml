@@ -26,7 +26,19 @@ ignore = [
 "backend/tests/*" = ["E402"]  # conftest adjusts sys.path before importing app code.
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12, not the 3.11 floor in requires-python, and not by choice. mypy applies
+# this version to every file it parses, third-party stubs included, and numpy's
+# stubs now use PEP 695 `type` statements, which are 3.12 syntax. At 3.11 mypy
+# stops at numpy/__init__.pyi with a [syntax] error and "errors prevented
+# further checking" — so none of our own code is checked at all. A per-module
+# override cannot help: a parse error happens before any per-module setting is
+# consulted (follow_imports = "skip" and ignore_errors = true were both tried
+# and both still fail).
+#
+# What this costs: mypy will no longer object if our own code uses 3.12-only
+# syntax, which would break the 3.11 installs this project still supports. That
+# floor is held by actually running the code on 3.11 instead.
+python_version = "3.12"
 files = ["backend"]
 mypy_path = "backend"
 explicit_package_bases = true

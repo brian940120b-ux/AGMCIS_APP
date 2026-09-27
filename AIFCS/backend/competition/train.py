@@ -418,17 +418,27 @@ def train(args: argparse.Namespace) -> int:
     if rate:
         print(f"this run: {rate:.0f} steps/s over {human_duration(elapsed)}")
     print(f"session:  {session.root}")
+    # Written whether or not the target was reached. The card describes the
+    # *plant* — observation, decision rate, floor, rudder limit — and that is
+    # settled at the first step, not the last. Without one, evaluate says "no
+    # card.json, assuming the reference setup" and scores the policy in an
+    # aeroplane it never flew, which for an extended-observation session is not
+    # even loadable. A run stopped at a time budget is the normal case on
+    # Kaggle, so this is the normal case, not the exception.
+    _write_card(session, state)
     if state.timesteps_done < state.target_timesteps:
         print("\nrun the same command again to carry on — it resumes from here.")
-    else:
-        _write_card(session, state)
-        print(f"card:     {session.card_path}")
+    print(f"card:     {session.card_path}")
     return 130 if interrupted else 0
 
 
 def _write_card(session: Session, state: SessionState) -> None:
     """What this policy was trained against, for the registry and for a person."""
     card = state.as_dict()
+    # Whether this is a finished policy or one caught mid-training. Anything
+    # reading a card to rebuild the plant does not care; anything reporting on
+    # a policy does.
+    card["finished"] = state.timesteps_done >= state.target_timesteps
     card["finished_at"] = datetime.now(UTC).isoformat()
     card["steps_per_second_mean"] = (
         round(state.timesteps_done / state.wall_clock_s, 1) if state.wall_clock_s else None
