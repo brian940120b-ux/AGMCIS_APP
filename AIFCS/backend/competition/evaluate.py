@@ -34,6 +34,7 @@ if str(_BACKEND) not in sys.path:
 
 from competition.action import INITIAL_THROTTLE  # noqa: E402
 from competition.environment import CompetitionRound, EnvConfig  # noqa: E402
+from competition.features import EXTENDED_STATE_SIZE, STATE_SIZE  # noqa: E402
 from competition.runtime import StackUnavailable  # noqa: E402
 from competition.scoring import (  # noqa: E402
     AttackEnvelope,
@@ -263,6 +264,10 @@ def load_policy(session_dir: Path, algorithm: str = "sac", device: str = "cpu") 
         action, _ = model.predict(observation, deterministic=True)
         return np.asarray(action, dtype=np.float64)
 
+    # What the saved network actually takes, so a caller can check it against
+    # the plant it is about to build rather than finding out thirty frames of
+    # Stable-Baselines3 traceback later.
+    policy.observation_width = int(model.observation_space.shape[0])  # type: ignore[attr-defined]
     return policy
 
 
@@ -503,6 +508,31 @@ def main(argv: list[str] | None = None) -> int:
             print(f"!!  {unavailable}")
             print()
             return 1
+        config = config_from_card(card, args.opponent, args.opponent_aggression, args.ground_avoidance)
+        expected = EXTENDED_STATE_SIZE if config.observation == "extended" else STATE_SIZE
+        width = getattr(policy, "observation_width", expected)
+        if width != expected:
+            # Almost always a missing card.json: the plant falls back to the
+            # reference setup, its observation is 10 numbers narrower than the
+            # extended one, and SB3 raises about a shape instead of about the
+            # file that is not there.
+            print()
+            print(f"!!  {session.name} was trained on a {width}-number observation, but the")
+            print(f"    setup being built for it gives {expected}.")
+            if not card:
+                print(f"    Its card.json is missing. Copy it next to {session / 'checkpoint.zip'}")
+                print("    — the card is what says which observation the policy was trained on.")
+            else:
+                print(
+                    "    Its card.json says "
+                    f"observation={config.observation!r}, which does not match the checkpoint."
+                )
+            print()
+            print(f"!!  {session.name} 的觀測寬度是 {width},但要建給它的環境給 {expected}。")
+            print("    通常是少了 card.json —— 把它放到 checkpoint.zip 旁邊即可。")
+            print()
+            return 1
+
         for foe_name, foe in foes:
             against = f" vs {foe_name}" if foe is not None else ""
             reports.append(

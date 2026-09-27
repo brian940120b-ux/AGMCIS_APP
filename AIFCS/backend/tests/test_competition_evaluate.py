@@ -360,6 +360,39 @@ def test_each_session_meets_each_pool_member_and_the_row_says_which(monkeypatch,
     assert labels == ["v5 vs v4", "v5 vs v3"]
 
 
+def test_a_checkpoint_wider_than_its_plant_says_which_file_is_missing(tmp_path, capsys):
+    """The failure a downloaded session actually produces.
+
+    A session copied off Kaggle without its card.json falls back to the
+    reference setup, whose observation is ten numbers narrower than the
+    extended one the policy was trained on. What came out was thirty lines of
+    Stable-Baselines3 traceback ending in "Unexpected observation shape (20,)"
+    — true, and no help at all in finding the file that is not there.
+    """
+    import competition.evaluate as ev
+
+    session = tmp_path / "v6k"
+    session.mkdir()
+    (session / "checkpoint.zip").write_bytes(b"")
+
+    def wide_policy(observation):
+        return observation
+
+    wide_policy.observation_width = 30
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(ev, "load_policy", lambda *a, **k: wide_policy)
+    try:
+        code = ev.main([str(session), "--rounds", "1"])
+    finally:
+        monkeypatch.undo()
+
+    printed = capsys.readouterr().out
+    assert code == 1, "scoring a policy in the wrong plant must not be attempted"
+    assert "card.json" in printed, "the message has to name the missing file"
+    assert "30" in printed and "20" in printed, "and both widths, so the gap is visible"
+
+
 def test_without_a_pool_the_row_is_just_the_session():
     """The built-in opponent is named in the header, not on every row."""
     import competition.evaluate as ev
