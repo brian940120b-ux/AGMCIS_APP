@@ -169,6 +169,27 @@ class Report:
         return statistics.fmean(r.seconds_in_sweet_spot for r in self.rounds)
 
     @property
+    def mean_attack_seconds(self) -> float:
+        """Seconds accumulated inside the one-degree cone, averaged.
+
+        The number the kill threshold is actually compared against, and it had
+        been computed every round and shown nowhere. `killed` is this crossing
+        3.0, so a board of 0% could mean 2.9 or 0.02 and nothing said which.
+        """
+        if not self.rounds:
+            return 0.0
+        # `.get`, because a hand-built outcome in a test carries only the keys
+        # that test is about, and a report should not raise over a column.
+        return statistics.fmean(_number(r.outcome.blue.get("attack_seconds", 0.0)) for r in self.rounds)
+
+    @property
+    def best_attack_seconds(self) -> float:
+        """The most any single round accumulated. How close the best case came."""
+        if not self.rounds:
+            return 0.0
+        return max(_number(r.outcome.blue.get("attack_seconds", 0.0)) for r in self.rounds)
+
+    @property
     def best_track_angle_deg(self) -> float:
         """The closest the nose came in any round, in degrees.
 
@@ -212,6 +233,8 @@ class Report:
                 f"  score margin   {self.mean_margin:+,.0f}  (ours minus theirs, mean)",
                 f"  in 152-500 m   {self.mean_seconds_in_sweet_spot:6.1f} s per round",
                 f"  within 5 deg   {self.mean_seconds_within_5deg:6.1f} s per round",
+                f"  in the cone    {self.mean_attack_seconds:6.2f} s mean, "
+                f"{self.best_attack_seconds:.2f} s best (3.00 is a kill)",
                 f"  best aim       {self.best_track_angle_deg:6.1f} deg (1.0 is a kill)",
                 f"  floor had it   {self.mean_floor_share:6.1%} of frames",
             )
@@ -341,7 +364,8 @@ def compare(reports: Sequence[Report]) -> str:
     """Side by side on the same seeds, which is the only fair way to read them."""
     lines = [
         f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}"
-        f"{'margin':>12}{'152-500m':>10}{'<5deg':>8}{'best':>8}{'floor':>8}",
+        f"{'margin':>12}{'152-500m':>10}{'<5deg':>8}{'best':>8}"
+        f"{'cone':>8}{'cone+':>8}{'floor':>8}",
     ]
     for report in reports:
         lines.append(
@@ -354,12 +378,17 @@ def compare(reports: Sequence[Report]) -> str:
             f"{report.mean_seconds_in_sweet_spot:>9.1f} "
             f"{report.mean_seconds_within_5deg:>7.1f} "
             f"{report.best_track_angle_deg:>7.1f} "
+            f"{report.mean_attack_seconds:>7.2f} "
+            f"{report.best_attack_seconds:>7.2f} "
             f"{report.mean_floor_share:>7.0%}"
         )
     lines.append("")
     lines.append("  <5deg = seconds in firing range with the nose within 5 degrees.")
     lines.append("  best  = closest the nose ever came, in degrees. A kill needs 1.0 for 3 s.")
+    lines.append("  cone  = seconds accumulated inside the one-degree cone, mean and best round.")
+    lines.append("          3.00 is a kill. This is the number the threshold compares.")
     lines.append("  <5deg = 在射程內、機首偏差五度以內的秒數;best = 機首最接近時的偏差度數。")
+    lines.append("  cone / cone+ = 一度錐內的累積秒數,平均與最好的一回合。3.00 就是擊殺。")
     return "\n".join(lines)
 
 
