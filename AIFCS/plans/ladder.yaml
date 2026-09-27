@@ -1,0 +1,52 @@
+# A self-play ladder, as a file.
+#
+# Not in configs/: that directory is the platform's settings, and a test
+# checks that every section of every file in it is read by load_settings.
+# A training plan is not a setting, and the test was right to say so.
+#
+# Run it with:  scripts/ladder.sh plans/ladder.yaml
+# See it without running it:  scripts/ladder.sh plans/ladder.yaml --dry-run
+#
+# Each step trains a session and then scores it against the same opponents it
+# trained against. `pool` names earlier sessions, so each generation fights
+# everything before it — which is the point, because both built-in opponents
+# are beaten by a centred stick (the drone 65% of the time, the pursuit
+# controller 90%) and beating them measures nothing.
+#
+# Safe to rerun. A step already at its target is skipped and a part-finished
+# one resumes, so a machine that dies at step three is recovered by running
+# the same command again.
+#
+# v4 and v5 are not steps here: they exist already and are only opponents.
+
+steps:
+  - name: v6
+    # The two changes aimed straight at `killed` being 0 against anything that
+    # moves. `shaped` gives the one-degree cone a slope to climb — as an
+    # indicator function it hands a policy that has never been inside it no
+    # gradient at all. The rudder is the fine-pointing control, capped at 0.2
+    # by the sample client and pinned to zero in its training action space,
+    # while 表 2 allows plus or minus one.
+    flags: >-
+      --reward shaped --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation extended --timesteps 2000000
+    pool: [v4, v5]
+
+  - name: v7
+    # Same again, now fighting what v6 became.
+    flags: >-
+      --reward shaped --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation extended --timesteps 2000000
+    pool: [v4, v5, v6]
+
+  - name: v8
+    flags: >-
+      --reward shaped --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation extended --timesteps 2000000
+    pool: [v4, v5, v6, v7]
