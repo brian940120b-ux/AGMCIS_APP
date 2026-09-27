@@ -439,6 +439,21 @@ def main(argv: list[str] | None = None) -> int:
     if not args.sessions and not args.baseline:
         parser.error("name at least one session, or pass --baseline on its own")
 
+    # `--opponent-pool` takes many paths, so it swallows a session named after
+    # it: `--baseline --opponent-pool v4/checkpoint.zip v5` put v5 in the pool
+    # and left nothing under test, and the report that came back compared a
+    # centred stick against two opponents while looking exactly like the run
+    # that had been asked for.
+    swallowed = [
+        entry for entry in args.opponent_pool if (Path(entry) / "card.json").is_file() and not args.sessions
+    ]
+    if swallowed:
+        parser.error(
+            f"{', '.join(swallowed)} looks like a session to score, not an opponent, "
+            "and --opponent-pool has taken it. Sessions go first:\n"
+            f"    evaluate {' '.join(swallowed)} --baseline --opponent-pool <checkpoint.zip>"
+        )
+
     # `None` means the built-in opponent named by --opponent. One entry per
     # pairing otherwise, so a session that meets three saved policies gets
     # three rows rather than one average over three different fights.

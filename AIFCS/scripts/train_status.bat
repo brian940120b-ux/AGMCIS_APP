@@ -31,7 +31,7 @@ if not defined LATEST (
 
 REM A python.exe alive at all is the honest signal available here. The
 REM worker processes are python too, so this counts more than one.
-tasklist /fi "IMAGENAME eq python.exe" 2>nul | find /i "python.exe" >nul
+tasklist /fi "IMAGENAME eq python.exe" 2>nul | %SystemRoot%\System32\find.exe /i "python.exe" >nul
 if errorlevel 1 (
   echo   RUNNING: no python process found - the run has finished or died
 ) else (

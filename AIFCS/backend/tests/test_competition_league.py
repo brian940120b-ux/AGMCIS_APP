@@ -407,3 +407,81 @@ def test_an_unsquashed_actor_is_left_alone():
     action = NumpyActor(weights)(np.zeros(2))
 
     assert action == pytest.approx(np.array([0.3, -0.4]))
+
+
+def test_a_pool_opponent_keeps_the_floor_it_learned_under(tmp_path, monkeypatch):
+    """The omission that probably cost v5 its two million steps.
+
+    v4 trained with a ground-avoidance floor. Flown as a pool opponent without
+    one it is a different aircraft, and the one it becomes flies into the
+    ground — so v5's whole curriculum was an opponent that kills itself.
+    Measured afterwards: a centred stick beats v5 65% of the time and v4 only
+    10%.
+
+    The encoder, decision rate and rudder cap were already rebuilt from the
+    card. The floor was the one left out, which is why it was worth a test
+    rather than a second reading of the same function.
+    """
+    import json
+
+    from competition.league import opponent_from_checkpoint
+
+    session = tmp_path / "v4"
+    session.mkdir()
+    (session / "card.json").write_text(
+        json.dumps({"environment": {"ground_avoidance": {"elevator": 1.0, "ceiling_ft": 15000.0}}}),
+        encoding="utf-8",
+    )
+    (session / "checkpoint.zip").write_bytes(b"")
+
+    monkeypatch.setattr("competition.league.load_actor", lambda *a, **k: lambda state: np.zeros(4))
+    opponent = opponent_from_checkpoint(session / "checkpoint.zip")
+
+    assert opponent.ground_avoidance is not None
+    assert opponent.ground_avoidance.elevator == 1.0
+    assert opponent.ground_avoidance.ceiling_ft == 15000.0
+
+
+def test_an_opponent_that_trained_without_a_floor_is_not_given_one(tmp_path, monkeypatch):
+    """Symmetry: the point is the aircraft it learned on, not a floor for
+    everybody."""
+    import json
+
+    from competition.league import opponent_from_checkpoint
+
+    session = tmp_path / "run1"
+    session.mkdir()
+    (session / "card.json").write_text(
+        json.dumps({"environment": {"ground_avoidance": None}}), encoding="utf-8"
+    )
+    (session / "checkpoint.zip").write_bytes(b"")
+
+    monkeypatch.setattr("competition.league.load_actor", lambda *a, **k: lambda state: np.zeros(4))
+    assert opponent_from_checkpoint(session / "checkpoint.zip").ground_avoidance is None
+
+
+def test_the_floor_reaches_the_command_an_opponent_sends():
+    """Not just held on the object. A floor that is stored and never applied is
+    the same as no floor, and looks correct in a debugger."""
+    from competition.league import PolicyOpponent
+    from competition.safety import GroundAvoidance
+    from competition.state import Telemetry
+
+    values = dict.fromkeys(Telemetry.__dataclass_fields__, 0.0)
+    values["own_alt_ft"] = 300.0  # below the floor's hard altitude
+    values["own_vd_fps"] = 500.0  # and descending fast
+    values["enemy_alt_ft"] = 300.0
+    diving = Telemetry(**values)
+
+    def nose_down(state):
+        return np.array([0.0, 1.0, 0.0, 0.8])  # positive elevator is nose down
+
+    unprotected = PolicyOpponent(nose_down)
+    protected = PolicyOpponent(nose_down, ground_avoidance=GroundAvoidance())
+
+    for _ in range(120):
+        loose = unprotected(diving)
+        held = protected(diving)
+
+    assert loose[1] > 0.0, "the policy asked to keep diving and got it"
+    assert held[1] < 0.0, "the floor pulled up instead"

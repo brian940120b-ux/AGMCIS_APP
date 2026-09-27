@@ -378,3 +378,53 @@ def test_without_a_pool_the_row_is_just_the_session():
         monkeypatch.undo()
 
     assert labels == ["do nothing"]
+
+
+def test_a_session_swallowed_by_the_opponent_pool_is_refused(tmp_path, capsys):
+    """What produced a report of two baseline rows and nothing under test.
+
+    `--opponent-pool` takes many paths, so `--baseline --opponent-pool
+    v4/checkpoint.zip v5` put v5 in the pool and scored nothing. The output
+    looked like a finished comparison — two rows, sensible numbers, a verdict
+    — which is worse than an error.
+    """
+    import competition.evaluate as ev
+
+    session = tmp_path / "v5"
+    session.mkdir()
+    (session / "card.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        ev.main(["--baseline", "--opponent-pool", "some/checkpoint.zip", str(session)])
+
+    assert "Sessions go first" in capsys.readouterr().err
+
+
+def test_a_pool_of_plain_checkpoints_with_no_session_is_still_allowed(tmp_path):
+    """ "What does a centred stick do against v4" is a real question."""
+    from pathlib import Path
+
+    import competition.evaluate as ev
+
+    labels: list[str] = []
+    original = ev.evaluate
+
+    def fake_evaluate(policy, config, *, rounds, seed, label, **kwargs):
+        labels.append(label)
+        return ev.Report(label=label)
+
+    ev.evaluate = fake_evaluate
+    try:
+        import competition.league as league
+
+        collect, build = league.collect_checkpoints, league.opponent_from_checkpoint
+        league.collect_checkpoints = lambda paths: {"v4": Path("v4/checkpoint.zip")}
+        league.opponent_from_checkpoint = lambda *a, **k: object()
+        try:
+            ev.main(["--baseline", "--opponent-pool", "v4/checkpoint.zip", "--rounds", "1"])
+        finally:
+            league.collect_checkpoints, league.opponent_from_checkpoint = collect, build
+    finally:
+        ev.evaluate = original
+
+    assert labels == ["do nothing vs v4"]

@@ -78,6 +78,7 @@ class PolicyOpponent:
         rudder_limit: float = RUDDER_LIMIT,
         high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
         encoder: Any = None,
+        ground_avoidance: Any = None,
     ) -> None:
         if action_repeat < 1:
             raise ValueError(f"action_repeat is a number of frames, not {action_repeat}")
@@ -91,6 +92,12 @@ class PolicyOpponent:
         # in a pool would have failed on a shape mismatch before the first
         # round finished.
         self.encoder = encoder if encoder is not None else StateEncoder()
+        #: The rule layer this policy learned to fly with, if it had one. An
+        #: opponent without it is not the opponent that was trained: v4 learned
+        #: under a floor, and flown as a pool opponent without one it flies
+        #: into the ground. v5 then spent 2,000,000 steps learning to beat
+        #: something that kills itself, and came out weaker than v4.
+        self.ground_avoidance = ground_avoidance
         self.joystick = JoystickState()
         self._held: np.ndarray | None = None
         self._frames = 0
@@ -106,8 +113,13 @@ class PolicyOpponent:
             self._held = np.asarray(self.predict(self.encoder.encode(telemetry)), dtype=np.float64)
             self._frames = 0
         self._frames += 1
+        action = self._held
+        if self.ground_avoidance is not None:
+            # Before the shaping, exactly where the player's side applies it,
+            # so a recovery is rate-limited the same way.
+            action = self.ground_avoidance(action, telemetry)
         return shape_command(
-            self._held,
+            action,
             self.joystick,
             telemetry.reference_mach,
             high_speed_elevator_limit=self.high_speed_elevator_limit,
@@ -218,6 +230,14 @@ class NumpyActor:
         return np.clip(value, self.weights["low"], self.weights["high"])
 
 
+def _floor_from(described: dict[str, Any]) -> Any:
+    """The ground-avoidance layer a session recorded, rebuilt."""
+    from competition.safety import GroundAvoidance
+
+    floor = described.get("ground_avoidance")
+    return GroundAvoidance(**floor) if floor is not None else None
+
+
 def opponent_from_checkpoint(
     checkpoint: Path,
     algorithm: str = "sac",
@@ -250,6 +270,7 @@ def opponent_from_checkpoint(
             described.get("high_speed_elevator_limit", ELEVATOR_LIMIT_HIGH_SPEED)
         ),
         encoder=build_encoder(EnvConfig(observation=described.get("observation", "reference"))),
+        ground_avoidance=_floor_from(described),
     )
 
 
