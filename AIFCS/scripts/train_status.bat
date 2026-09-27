@@ -15,6 +15,12 @@ if not exist "%LOGDIR%" (
   echo   Nothing has been started in the background yet.
   echo   Start one with:  scripts\train_background.bat --name v5
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 0
   pause
   exit /b 0
 )
@@ -25,6 +31,12 @@ for /f "delims=" %%f in ('dir /b /o-d "%LOGDIR%\train-*.log" 2^>nul') do if not 
 if not defined LATEST (
   echo   No logs in %LOGDIR% yet.
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 0
   pause
   exit /b 0
 )
@@ -46,4 +58,10 @@ echo.
 echo   The percentage line appears every 25,000 steps - about every five
 echo   minutes at 75 steps/s. No new line for 20 minutes means look closer.
 echo.
+
+REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+REM means Explorer launched this and the window would vanish unread. From a
+REM terminal, `pause` eats the first character of whatever is typed next:
+REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+if defined MSYSTEM exit /b %ERRORLEVEL%
 pause

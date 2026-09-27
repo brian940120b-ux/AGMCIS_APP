@@ -19,6 +19,12 @@ if not exist "%PY%" (
   echo Cannot find %PY%
   echo AIFCS is not installed yet. Run scripts\update.bat first.
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -39,5 +45,11 @@ if "%EXITCODE%"=="0" (
 ) else (
   echo Something went wrong - the lines above say what.
 )
+
+REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+REM means Explorer launched this and the window would vanish unread. From a
+REM terminal, `pause` eats the first character of whatever is typed next:
+REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+if defined MSYSTEM exit /b %EXITCODE%
 pause
 exit /b %EXITCODE%

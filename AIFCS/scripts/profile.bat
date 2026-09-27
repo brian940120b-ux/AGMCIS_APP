@@ -13,6 +13,12 @@ if not exist "%PY%" (
   echo.
   echo Cannot find %PY% - run scripts\update.bat first.
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -30,6 +36,12 @@ if not errorlevel 1 (
   echo   Timing it now would measure the two fighting over the machine.
   echo   Stop training first:  scripts\train_stop.bat --name ^<session^>
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -40,4 +52,10 @@ REM looks like the right one.
 set "PYTHONPATH=%CD%\backend;%PYTHONPATH%"
 "%PY%" -m competition.timing "%TARGET%" %2 %3 %4 %5
 echo.
+
+REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+REM means Explorer launched this and the window would vanish unread. From a
+REM terminal, `pause` eats the first character of whatever is typed next:
+REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+if defined MSYSTEM exit /b %ERRORLEVEL%
 pause

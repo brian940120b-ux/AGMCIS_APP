@@ -19,6 +19,12 @@ if /i "%~1"=="/remove" (
   echo.
   echo Auto-resume removed.
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 0
   pause
   exit /b 0
 )
@@ -29,6 +35,12 @@ if errorlevel 1 (
   echo.
   echo Could not register the task. Try running this file as administrator.
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -42,4 +54,10 @@ echo.
 echo   Check it:  scripts\train_status.bat
 echo   Turn off:  scripts\train_autoresume.bat /remove
 echo.
+
+REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+REM means Explorer launched this and the window would vanish unread. From a
+REM terminal, `pause` eats the first character of whatever is typed next:
+REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+if defined MSYSTEM exit /b %ERRORLEVEL%
 pause

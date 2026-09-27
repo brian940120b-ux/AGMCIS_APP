@@ -16,6 +16,12 @@ if errorlevel 1 (
   echo Git for Windows is not installed, or bash is not on PATH.
   echo Install it from https://git-scm.com/download/win then run this again.
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -26,6 +32,12 @@ set EXITCODE=%ERRORLEVEL%
 if not "%EXITCODE%"=="0" (
   echo.
   echo Something went wrong. The lines above say what.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b %ERRORLEVEL%
   pause
 )
 exit /b %EXITCODE%

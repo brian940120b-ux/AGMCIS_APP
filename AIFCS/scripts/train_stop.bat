@@ -15,6 +15,12 @@ if "%NAME%"=="" (
   echo Sessions on disk:
   dir /b models\competition 2>nul
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -24,6 +30,12 @@ if not exist "models\competition\%NAME%" (
   echo No session called %NAME%. Sessions on disk:
   dir /b models\competition 2>nul
   echo.
+
+  REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+  REM means Explorer launched this and the window would vanish unread. From a
+  REM terminal, `pause` eats the first character of whatever is typed next:
+  REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+  if defined MSYSTEM exit /b 1
   pause
   exit /b 1
 )
@@ -33,4 +45,10 @@ echo.
 echo Asked %NAME% to stop. It saves and exits within a few seconds.
 echo Run scripts\train_status.bat to watch it finish.
 echo.
+
+REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
+REM means Explorer launched this and the window would vanish unread. From a
+REM terminal, `pause` eats the first character of whatever is typed next:
+REM three pastes of `scripts\ladder.bat` arrived as `cripts/ladder.bat`.
+if defined MSYSTEM exit /b %ERRORLEVEL%
 pause
