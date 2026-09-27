@@ -77,6 +77,18 @@ class RoundReport:
     #: no floor. A high number next to a good outcome means the floor flew
     #: the round, not the policy.
     floor_share: float = 0.0
+    #: The closest the nose ever came, in degrees, while inside the firing
+    #: range. `seconds_in_sweet_spot` says how long the range was right; this
+    #: says whether the aim was ever near. Fifty-five seconds at the right
+    #: distance and no kills can mean 1.5 degrees off, which is a tuning
+    #: problem, or 40 degrees off, which is a different problem entirely, and
+    #: nothing measured so far could tell the two apart. 180.0 means the range
+    #: was never right at all.
+    best_track_angle_deg: float = 180.0
+    #: Seconds inside the firing range and within five degrees — twenty-five
+    #: times the area of the one-degree cone, so a policy that is trying to
+    #: point scores here long before it ever scores a kill.
+    seconds_within_5deg: float = 0.0
 
     @property
     def won(self) -> bool:
@@ -97,6 +109,8 @@ class RoundReport:
             "min_distance_m": round(self.min_distance_m, 1),
             "mean_distance_m": round(self.mean_distance_m, 1),
             "seconds_in_sweet_spot": round(self.seconds_in_sweet_spot, 2),
+            "best_track_angle_deg": round(self.best_track_angle_deg, 2),
+            "seconds_within_5deg": round(self.seconds_within_5deg, 2),
             "floor_share": round(self.floor_share, 4),
             "blue_crashed": self.blue_crashed,
             **self.outcome.as_dict(),
@@ -155,6 +169,24 @@ class Report:
         return statistics.fmean(r.seconds_in_sweet_spot for r in self.rounds)
 
     @property
+    def best_track_angle_deg(self) -> float:
+        """The closest the nose came in any round, in degrees.
+
+        The best case, not the average, because the question this answers is
+        whether the aim is ever nearly right — and one round that got to 1.5
+        degrees says something a mean of 40 would bury.
+        """
+        if not self.rounds:
+            return 180.0
+        return min(r.best_track_angle_deg for r in self.rounds)
+
+    @property
+    def mean_seconds_within_5deg(self) -> float:
+        if not self.rounds:
+            return 0.0
+        return statistics.fmean(r.seconds_within_5deg for r in self.rounds)
+
+    @property
     def mean_floor_share(self) -> float:
         """How much of the round the floor flew, averaged.
 
@@ -179,6 +211,8 @@ class Report:
                 f"  crashed        {self.crash_rate:6.1%}",
                 f"  score margin   {self.mean_margin:+,.0f}  (ours minus theirs, mean)",
                 f"  in 152-500 m   {self.mean_seconds_in_sweet_spot:6.1f} s per round",
+                f"  within 5 deg   {self.mean_seconds_within_5deg:6.1f} s per round",
+                f"  best aim       {self.best_track_angle_deg:6.1f} deg (1.0 is a kill)",
                 f"  floor had it   {self.mean_floor_share:6.1%} of frames",
             )
         )
@@ -204,14 +238,24 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
 
     distances: list[float] = []
     sweet_frames = 0
+    near_frames = 0
+    best_angle = 180.0
     reason = ""
     lo, hi = SWEET_SPOT_M
+    envelope = AttackEnvelope()
 
     while True:
         observation, geometry, finished, reason = game.step(policy(observation))
         distances.append(geometry.distance_m)
         if lo <= geometry.distance_m <= hi:
             sweet_frames += 1
+        # Aim is only meaningful where a shot could count, so it is measured
+        # against the envelope's own range rather than the narrower band the
+        # sweet spot uses for scoring.
+        if envelope.min_range_ft <= geometry.distance_ft <= envelope.max_range_ft:
+            best_angle = min(best_angle, float(geometry.track_angle_deg))
+            if geometry.track_angle_deg <= 5.0:
+                near_frames += 1
         if finished:
             break
 
@@ -229,6 +273,8 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
         min_distance_m=min(distances),
         mean_distance_m=statistics.fmean(distances),
         seconds_in_sweet_spot=sweet_frames / 60.0,
+        best_track_angle_deg=best_angle,
+        seconds_within_5deg=near_frames / 60.0,
         floor_share=game.floor_frames / game.frame if game.frame else 0.0,
         blue_crashed=reason == "CRASH",
     )
@@ -294,7 +340,8 @@ def neutral_policy(throttle: float = INITIAL_THROTTLE) -> Policy:
 def compare(reports: Sequence[Report]) -> str:
     """Side by side on the same seeds, which is the only fair way to read them."""
     lines = [
-        f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}{'margin':>12}{'152-500m':>10}{'floor':>8}",
+        f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}"
+        f"{'margin':>12}{'152-500m':>10}{'<5deg':>8}{'best':>8}{'floor':>8}",
     ]
     for report in reports:
         lines.append(
@@ -305,8 +352,14 @@ def compare(reports: Sequence[Report]) -> str:
             f"{report.crash_rate:>8.0%} "
             f"{report.mean_margin:>+11,.0f} "
             f"{report.mean_seconds_in_sweet_spot:>9.1f} "
+            f"{report.mean_seconds_within_5deg:>7.1f} "
+            f"{report.best_track_angle_deg:>7.1f} "
             f"{report.mean_floor_share:>7.0%}"
         )
+    lines.append("")
+    lines.append("  <5deg = seconds in firing range with the nose within 5 degrees.")
+    lines.append("  best  = closest the nose ever came, in degrees. A kill needs 1.0 for 3 s.")
+    lines.append("  <5deg = 在射程內、機首偏差五度以內的秒數;best = 機首最接近時的偏差度數。")
     return "\n".join(lines)
 
 

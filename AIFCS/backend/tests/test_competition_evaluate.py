@@ -360,6 +360,35 @@ def test_each_session_meets_each_pool_member_and_the_row_says_which(monkeypatch,
     assert labels == ["v5 vs v4", "v5 vs v3"]
 
 
+def test_the_aim_is_measured_separately_from_the_range():
+    """Fifty-five seconds at the right distance and no kills says nothing.
+
+    `152-500m` counts frames where the *aircraft* is in the right place; a
+    kill needs the *nose* in the right place too, within one degree for three
+    seconds. With only the first number measured, a policy 1.5 degrees off —
+    which is a tuning problem — looked identical to one 40 degrees off, which
+    is not. A centred stick is the clear case: it holds a heading and never
+    points at anybody.
+    """
+    report = evaluate(neutral_policy(), rounds=2, seed=1000)
+
+    assert report.best_track_angle_deg > 5.0, "a centred stick does not point at anything"
+    assert report.mean_seconds_within_5deg == 0.0
+
+
+def test_an_aim_never_taken_reads_as_no_aim_rather_than_a_perfect_one():
+    """A round that never reaches the firing range has no aim to report, and a
+    default of 0.0 would have read as dead on."""
+    import dataclasses
+
+    from competition.evaluate import RoundReport
+
+    defaults = {f.name: f.default for f in dataclasses.fields(RoundReport)}
+
+    assert defaults["best_track_angle_deg"] == 180.0
+    assert defaults["seconds_within_5deg"] == 0.0
+
+
 def test_a_checkpoint_wider_than_its_plant_says_which_file_is_missing(tmp_path, capsys):
     """The failure a downloaded session actually produces.
 
