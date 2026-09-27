@@ -264,7 +264,7 @@ trim 那份資料同時暴露了一件事。拿**同樣的 18,084 ft** 兩邊各
 我們的飛機重飛一次同一個開局,逐段比。**不用連 HOST**:
 
 ```bash
-.venv/Scripts/python.exe backend/competition/probe.py --compare data\probe\probe-20260926-121044.jsonl
+.venv/Scripts/python.exe backend/competition/probe.py --compare data/probe/probe-20260926-121044.jsonl
 ```
 
 會印每 10 秒一格的高度和速度對照,還有一句判定:

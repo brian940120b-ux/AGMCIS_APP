@@ -1,5 +1,10 @@
 # 什麼不能調、什麼能調 — 依規則原文
 
+> **指令裡的斜線方向。** 這份文件的指令是給 **Git Bash** 貼的,所以用 `/`。
+> 在 Git Bash 裡 `\` 是跳脫字元,`scripts\train.bat` 會變成
+> `scriptstrain.bat` 然後說找不到檔案 —— 這個錯誤在這個專案上已經發生三次。
+> 用 CMD 或檔案總管雙擊的話,`\` 才是對的。
+
 依據：**「AI 飛行員擂台賽」公告說明，版別 2026/09/18**（13 頁）
 以及 **附件2「AI 飛行員擂台賽」競賽規則**（115/09/09）
 
@@ -274,14 +279,14 @@ sleep:    held off — but closing the lid still sleeps (see docs/TUNING.md)
 ### 背景執行:關掉終端機、登出、重開機都不會中斷
 
 ```
-scripts\train_background.bat --name v5
+scripts/train_background.bat --name v5
 ```
 
 訓練跑在一個**最小化的視窗**裡,原本那個終端機可以關掉。停止不要按 X:
 
 ```
-scripts\train_stop.bat --name v5      本次進度會存好再退出
-scripts\train_status.bat              看它現在跑到哪
+scripts/train_stop.bat --name v5      本次進度會存好再退出
+scripts/train_status.bat              看它現在跑到哪
 ```
 
 `train_stop` 是放一個 `STOP` 檔進 session 資料夾,訓練每一步檢查一次,看到就
@@ -290,7 +295,7 @@ scripts\train_status.bat              看它現在跑到哪
 ### 重開機自動接續
 
 ```
-scripts\train_autoresume.bat          做一次就好
+scripts/train_autoresume.bat          做一次就好
 ```
 
 註冊一個**登入時觸發**的 Windows 排程工作:下次登入時,它會找出還沒練完的
@@ -626,7 +631,7 @@ train.bat --name v2 --reward margin --ground-avoidance --action-repeat 6 \
 ```bash
 train.bat --name v3 --reward margin --ground-avoidance --action-repeat 6 \
           --gamma 0.995 --gradient-steps -1 \
-          --opponent-pool models\competition\pool
+          --opponent-pool models/competition/pool
 ```
 
 每一回合從池裡抽一個對手。抽樣規則照 **PHANG-MAN 論文的門檻**:
@@ -640,7 +645,7 @@ train.bat --name v3 --reward margin --ground-avoidance --action-repeat 6 \
 
 ```bash
 # 每練一段就快照一次,快照本身就是階梯
-copy models\competition\v3\checkpoint.zip models\competition\pool\v3-2m.zip
+copy models/competition/v3/checkpoint.zip models/competition/pool/v3-2m.zip
 ```
 
 `--opponent-pool` 吃檔案也吃資料夾。資料夾裡的每個 `.zip` 都是一個對手。
