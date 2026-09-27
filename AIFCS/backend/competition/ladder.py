@@ -122,14 +122,23 @@ def already_done(step: Step, root: Path) -> bool:
     return target > 0 and int(state.get("timesteps_done", 0)) >= target
 
 
-def missing_opponents(step: Step, root: Path) -> list[str]:
-    """Pool members with no checkpoint on disk yet.
+def missing_opponents(step: Step, root: Path, coming: set[str] | None = None) -> list[str]:
+    """Pool members that neither exist yet nor are built by an earlier step.
 
     Checked before training rather than after eight hours of it: a plan that
     names a session it never builds is a typo, and the cost of finding out
     late is the whole step.
+
+    `coming` is what the steps before this one will have produced by the time
+    it runs, and leaving it out is what made the first dry run useless: a
+    ladder is *supposed* to fight what the step before it built, so a plan
+    whose every rung depends on the previous one reported every rung after the
+    first as blocked. In a real run they would all have been there.
     """
-    return [name for name in step.pool if not (root / name / "checkpoint.zip").is_file()]
+    built = coming or set()
+    return [
+        name for name in step.pool if name not in built and not (root / name / "checkpoint.zip").is_file()
+    ]
 
 
 def run_plan(
@@ -143,15 +152,19 @@ def run_plan(
     runner = runner or (lambda command: subprocess.call(command))
     results: list[dict[str, Any]] = []
 
+    # What the steps above this one will have produced by the time it runs.
+    coming: set[str] = set()
+
     for position, step in enumerate(steps, start=1):
         header = f"[{position}/{len(steps)}] {step.name}"
+        coming.add(step.name)
 
         if already_done(step, root):
             print(f"{header}: already at its target, skipping", flush=True)
             results.append({"name": step.name, "outcome": "skipped"})
             continue
 
-        absent = missing_opponents(step, root)
+        absent = missing_opponents(step, root, coming - {step.name})
         if absent:
             print(f"{header}: needs {', '.join(absent)}, which do not exist yet", flush=True)
             results.append({"name": step.name, "outcome": "blocked", "missing": absent})
@@ -161,7 +174,9 @@ def run_plan(
         if step.evaluate:
             commands.append(("evaluate", step.evaluate_command(python, root)))
 
-        outcome = "done"
+        # "done" would be a lie on a dry run, and the kind that reads as a
+        # green plan.
+        outcome = "would run" if dry_run else "done"
         started = time.perf_counter()
         for phase, command in commands:
             print(f"{header}: {phase}", flush=True)
@@ -203,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(f"  {result['name'][:20]:20} {result['outcome']}")
     print()
-    return 0 if all(r["outcome"] in ("done", "skipped") for r in results) else 1
+    return 0 if all(r["outcome"] in ("done", "skipped", "would run") for r in results) else 1
 
 
 if __name__ == "__main__":

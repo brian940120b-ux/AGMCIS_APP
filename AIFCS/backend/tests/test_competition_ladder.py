@@ -179,3 +179,60 @@ def test_a_blocked_step_runs_nothing_at_all(tmp_path):
 
     assert results[0]["outcome"] == "blocked"
     assert calls == []
+
+
+def test_a_rung_may_depend_on_the_rung_below_it(tmp_path):
+    """What made the first dry run useless.
+
+    A ladder is supposed to fight what the step before it built, so checking
+    each pool against the disk alone reported every rung after the first as
+    blocked — on a plan that was correct and would have run.
+    """
+    _session(tmp_path, "v4")
+
+    results = run_plan(
+        [
+            Step(name="v6", pool=["v4"]),
+            Step(name="v7", pool=["v4", "v6"]),
+            Step(name="v8", pool=["v4", "v6", "v7"]),
+        ],
+        tmp_path,
+        "python",
+        dry_run=True,
+    )
+
+    assert [r["outcome"] for r in results] == ["would run", "would run", "would run"]
+
+
+def test_a_pool_name_no_step_ever_builds_is_still_caught(tmp_path):
+    """The check still has to earn its place: a typo is the case it exists
+    for, and a ladder-aware check must not pass everything."""
+    results = run_plan([Step(name="v6", pool=["v5typo"])], tmp_path, "python", dry_run=True)
+
+    assert results[0]["outcome"] == "blocked"
+    assert results[0]["missing"] == ["v5typo"]
+
+
+def test_a_step_cannot_be_its_own_opponent(tmp_path):
+    """Naming itself would look satisfied by `coming` and then fail at the
+    command line, eight hours in."""
+    results = run_plan([Step(name="v6", pool=["v6"])], tmp_path, "python", dry_run=True)
+
+    assert results[0]["outcome"] == "blocked"
+
+
+def test_a_dry_run_does_not_report_work_as_done(tmp_path):
+    """ "done" on a plan where nothing ran reads as a green light."""
+    _session(tmp_path, "v4")
+    calls: list[list[str]] = []
+
+    results = run_plan(
+        [Step(name="v6", pool=["v4"])],
+        tmp_path,
+        "python",
+        dry_run=True,
+        runner=lambda command: calls.append(command) or 0,
+    )
+
+    assert results[0]["outcome"] == "would run"
+    assert calls == [], "and nothing was actually run"
