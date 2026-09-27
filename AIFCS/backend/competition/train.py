@@ -397,7 +397,17 @@ def train(args: argparse.Namespace) -> int:
             elapsed_s=elapsed,
             save_buffer=args.save_buffer,
         )
-        env.close()
+        try:
+            env.close()
+        except (BrokenPipeError, EOFError, OSError) as shutdown_error:
+            # Ctrl+C in a Windows console goes to the whole process group, so
+            # the SubprocVecEnv workers are already gone by the time close()
+            # tries to tell them to go: WinError 232, the pipe is being
+            # closed. The checkpoint above is already on disk, so this is
+            # tidying up after a run that succeeded in saving, and letting it
+            # raise turns a clean stop into a traceback and a non-zero exit —
+            # which the ladder then records as "train failed".
+            print(f"(workers had already exited: {shutdown_error})", flush=True)
 
     # A stop file ends `learn` normally, so without this the run would report
     # "Done." for a session it was asked to abandon halfway.

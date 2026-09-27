@@ -173,6 +173,43 @@ def test_the_queue_carries_on_past_a_step_that_fails(tmp_path):
     assert any("v7" in command for command in calls), "the next step still ran"
 
 
+def test_a_stopped_step_ends_the_plan_instead_of_starting_the_next(tmp_path):
+    """Stopping v7 and getting v8 in its place is the opposite of what the
+    person pressing the key asked for. train.py returns 130 for a run that was
+    stopped rather than one that broke, and the two mean different things to a
+    queue: broken is worth carrying on past, stopped is not."""
+    _session(tmp_path, "v4")
+    calls: list[list[str]] = []
+
+    def runner(command):
+        calls.append(command)
+        return 130 if "v7" in command else 0
+
+    results = run_plan(
+        [Step(name="v7", pool=["v4"]), Step(name="v8", pool=["v4"])],
+        tmp_path,
+        "python",
+        runner=runner,
+    )
+
+    assert [r["outcome"] for r in results] == ["stopped"]
+    assert not any("v8" in command for command in calls), "the next rung started anyway"
+
+
+def test_a_stopped_step_is_not_scored(tmp_path):
+    """Half a policy is not worth twenty rounds of evaluation."""
+    _session(tmp_path, "v4")
+    phases: list[str] = []
+
+    def runner(command):
+        phases.append("evaluate" if "competition.evaluate" in command else "train")
+        return 130
+
+    run_plan([Step(name="v7", pool=["v4"])], tmp_path, "python", runner=runner)
+
+    assert phases == ["train"]
+
+
 def test_a_failed_train_does_not_go_on_to_score_nothing(tmp_path):
     _session(tmp_path, "v4")
     phases: list[str] = []

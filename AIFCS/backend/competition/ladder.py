@@ -42,6 +42,10 @@ from typing import Any
 
 DEFAULT_ROOT = Path("models/competition")
 
+#: What train.py returns when a run was stopped rather than finished — the
+#: shell convention for "the person interrupted this".
+INTERRUPTED = 130
+
 
 @dataclass
 class Step:
@@ -186,6 +190,7 @@ def run_plan(
         # "done" would be a lie on a dry run, and the kind that reads as a
         # green plan.
         outcome = "would run" if dry_run else "done"
+        stop_the_plan = False
         started = time.perf_counter()
         for phase, command in commands:
             print(f"{header}: {phase}", flush=True)
@@ -193,6 +198,16 @@ def run_plan(
             if dry_run:
                 continue
             code = runner(command)
+            if code == INTERRUPTED:
+                # Somebody asked for this step to stop — a STOP file or Ctrl+C.
+                # "Carry on" is the wrong reading of that: stopping v7 and
+                # getting v8 started in its place is the opposite of what the
+                # person pressing the key wanted. The step's checkpoint is
+                # saved, so rerunning the plan resumes it.
+                print(f"{header}: {phase} was stopped — abandoning the rest of the plan", flush=True)
+                outcome = "stopped"
+                stop_the_plan = True
+                break
             if code != 0:
                 # One bad step does not cost the rest of the night.
                 print(f"{header}: {phase} exited {code} — carrying on", flush=True)
@@ -202,6 +217,8 @@ def run_plan(
         results.append(
             {"name": step.name, "outcome": outcome, "seconds": round(time.perf_counter() - started, 1)}
         )
+        if stop_the_plan:
+            break
 
     return results
 
@@ -227,6 +244,11 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(f"  {result['name'][:20]:20} {result['outcome']}")
     print()
+    if any(r["outcome"] == "stopped" for r in results):
+        print("  Stopped. Run the same command again to carry on from here.")
+        print("  已停止。再跑一次同樣的指令就會從這裡接續。")
+        print()
+        return INTERRUPTED
     return 0 if all(r["outcome"] in ("done", "skipped", "would run") for r in results) else 1
 
 
