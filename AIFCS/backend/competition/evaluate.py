@@ -69,6 +69,9 @@ class RoundReport:
     min_distance_m: float
     mean_distance_m: float
     seconds_in_sweet_spot: float
+    #: Our own aircraft was lost. Distinct from the round's EndReason,
+    #: which says a crash happened without saying whose.
+    blue_crashed: bool = False
     #: Share of frames the ground-avoidance layer had the stick. 0.0 with
     #: no floor. A high number next to a good outcome means the floor flew
     #: the round, not the policy.
@@ -94,6 +97,7 @@ class RoundReport:
             "mean_distance_m": round(self.mean_distance_m, 1),
             "seconds_in_sweet_spot": round(self.seconds_in_sweet_spot, 2),
             "floor_share": round(self.floor_share, 4),
+            "blue_crashed": self.blue_crashed,
             **self.outcome.as_dict(),
         }
 
@@ -122,7 +126,16 @@ class Report:
 
     @property
     def crash_rate(self) -> float:
-        return self._rate(lambda r: r.outcome.reason.value == "CRASH")
+        # Our aircraft, not "a crash happened". EndReason.CRASH covers all
+        # three cases — we were lost, they were, or both — so against a policy
+        # opponent this counted their crashes as ours and reported 90% crashed
+        # beside 85% won, which cannot both be true under 表 3.
+        #
+        # Right for every earlier measurement by luck: the drone flies straight
+        # and level and the pursuit controller holds 3,000 ft, so neither ever
+        # crashed and the two readings coincided. Self-play is what separated
+        # them.
+        return self._rate(lambda r: r.blue_crashed)
 
     @property
     def mean_margin(self) -> float:
@@ -216,6 +229,7 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
         mean_distance_m=statistics.fmean(distances),
         seconds_in_sweet_spot=sweet_frames / 60.0,
         floor_share=game.floor_frames / game.frame if game.frame else 0.0,
+        blue_crashed=reason == "CRASH",
     )
 
 

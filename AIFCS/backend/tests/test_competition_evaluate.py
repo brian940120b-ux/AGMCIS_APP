@@ -428,3 +428,52 @@ def test_a_pool_of_plain_checkpoints_with_no_session_is_still_allowed(tmp_path):
         ev.evaluate = original
 
     assert labels == ["do nothing vs v4"]
+
+
+def test_crashed_counts_our_aircraft_not_anyone_who_crashed():
+    """The column that produced 85% won beside 90% crashed.
+
+    EndReason.CRASH covers all three cases — we were lost, they were, or both
+    — so reading it as our crash rate reported the opponent's deaths as ours.
+    Against the drone and the pursuit controller the two coincided, because
+    neither ever crashes; self-play is what pulled them apart, and 表 3 makes
+    the pair impossible, which is how it was noticed.
+    """
+    from competition.evaluate import Report, RoundReport
+    from competition.scoring import EndReason, RoundOutcome, Verdict
+
+    def round_where(blue_crashed: bool, verdict: Verdict) -> RoundReport:
+        return RoundReport(
+            seed=0,
+            outcome=RoundOutcome(
+                verdict=verdict,
+                reason=EndReason.CRASH,
+                blue={"killed": False, "advantage_score": 0.0},
+                red={"killed": False, "advantage_score": 0.0},
+            ),
+            frames=100,
+            min_distance_m=300.0,
+            mean_distance_m=900.0,
+            seconds_in_sweet_spot=0.0,
+            blue_crashed=blue_crashed,
+        )
+
+    theirs = Report(label="x", rounds=[round_where(False, Verdict.BLUE)] * 4)
+    assert theirs.crash_rate == 0.0, "the opponent was lost, not us"
+    assert theirs.win_rate == 1.0, "and that is why we won"
+
+    ours = Report(label="y", rounds=[round_where(True, Verdict.RED)] * 4)
+    assert ours.crash_rate == 1.0
+    assert ours.win_rate == 0.0, "表 3: losing the aircraft loses the round"
+
+
+def test_a_round_records_which_side_was_lost():
+    """Read off the end reason the environment gave, which distinguishes them,
+    rather than off the verdict, which a kill also decides."""
+    from competition.evaluate import play_round
+    from competition.safety import GroundAvoidance
+
+    report = play_round(neutral_policy(), EnvConfig(ground_avoidance=GroundAvoidance()), seed=1000)
+
+    assert report.blue_crashed is False, "a centred stick on a working floor survives"
+    assert report.as_dict()["blue_crashed"] is False

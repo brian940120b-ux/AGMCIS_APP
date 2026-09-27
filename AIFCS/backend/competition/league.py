@@ -79,6 +79,7 @@ class PolicyOpponent:
         high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
         encoder: Any = None,
         ground_avoidance: Any = None,
+        g_limit: float | None = None,
     ) -> None:
         if action_repeat < 1:
             raise ValueError(f"action_repeat is a number of frames, not {action_repeat}")
@@ -98,6 +99,10 @@ class PolicyOpponent:
         #: into the ground. v5 then spent 2,000,000 steps learning to beat
         #: something that kills itself, and came out weaker than v4.
         self.ground_avoidance = ground_avoidance
+        #: v4 learned under a load-factor limit. Without it the opponent
+        #: flies the sample's Mach-based one instead, which is half the
+        #: turn rate above Mach 0.8 — a different aeroplane again.
+        self.g_limit = g_limit
         self.joystick = JoystickState()
         self._held: np.ndarray | None = None
         self._frames = 0
@@ -124,6 +129,8 @@ class PolicyOpponent:
             telemetry.reference_mach,
             high_speed_elevator_limit=self.high_speed_elevator_limit,
             rudder_limit=self.rudder_limit,
+            g_load=None if self.g_limit is None else telemetry.own_g_acc,
+            g_limit=self.g_limit,
         )
 
 
@@ -271,6 +278,7 @@ def opponent_from_checkpoint(
         ),
         encoder=build_encoder(EnvConfig(observation=described.get("observation", "reference"))),
         ground_avoidance=_floor_from(described),
+        g_limit=described.get("g_limit"),
     )
 
 

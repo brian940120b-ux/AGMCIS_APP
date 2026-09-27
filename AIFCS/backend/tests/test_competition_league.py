@@ -485,3 +485,92 @@ def test_the_floor_reaches_the_command_an_opponent_sends():
 
     assert loose[1] > 0.0, "the policy asked to keep diving and got it"
     assert held[1] < 0.0, "the floor pulled up instead"
+
+
+# --------------------------- every setting that makes it a different aircraft
+
+
+#: Fields of EnvConfig that change how an aircraft flies, and therefore have to
+#: reach a pool opponent too, against how each one gets there. Written out
+#: rather than inferred so that adding a field to EnvConfig fails this test and
+#: forces the question — which is the only thing that would have caught the
+#: five separate omissions this has already cost: the encoder, the decision
+#: rate, the rudder cap, the ground floor and the load-factor limit, each found
+#: one at a time and each after a training run that did not mean what it said.
+PLANT_FIELDS = {
+    "observation": "encoder",
+    "action_repeat": "action_repeat",
+    "rudder_limit": "rudder_limit",
+    "high_speed_elevator_limit": "high_speed_elevator_limit",
+    "ground_avoidance": "ground_avoidance",
+    "g_limit": "g_limit",
+}
+
+#: Fields that describe the engagement rather than the aeroplane. An opponent
+#: does not carry these: they belong to the round both sides are flying.
+NOT_THE_AIRCRAFT = {
+    "setup",
+    "weights",
+    "envelope",
+    "opponent",
+    "opponent_aggression",
+    "opponent_policy",
+    "opponent_pool",
+    "jsbsim_root",
+    "round_seconds",
+    "rudder_enabled",
+    "speed_before_altitude",
+    "seed",
+}
+
+
+def test_every_plant_setting_is_classified():
+    """A new EnvConfig field is a decision, not a default.
+
+    Each of the five omissions so far looked like this one: a field added to
+    the player's plant and not to the opponent's, discovered after a run.
+    """
+    from competition.environment import EnvConfig
+
+    known = set(PLANT_FIELDS) | NOT_THE_AIRCRAFT
+    unclassified = sorted(set(EnvConfig.__dataclass_fields__) - known)
+
+    assert not unclassified, (
+        f"EnvConfig gained {unclassified}: does a pool opponent need it? "
+        "Add it to PLANT_FIELDS and to opponent_from_checkpoint, or to "
+        "NOT_THE_AIRCRAFT if it describes the round rather than the aeroplane."
+    )
+
+
+def test_a_pool_opponent_carries_every_plant_setting(tmp_path, monkeypatch):
+    """And carries them from its own card, not from whatever is training."""
+    import json
+
+    from competition.league import opponent_from_checkpoint
+
+    session = tmp_path / "v4"
+    session.mkdir()
+    (session / "card.json").write_text(
+        json.dumps(
+            {
+                "environment": {
+                    "observation": "extended",
+                    "action_repeat": 6,
+                    "rudder_limit": 0.6,
+                    "high_speed_elevator_limit": 0.4,
+                    "ground_avoidance": {"elevator": 1.0},
+                    "g_limit": 9.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session / "checkpoint.zip").write_bytes(b"")
+
+    monkeypatch.setattr("competition.league.load_actor", lambda *a, **k: lambda state: np.zeros(4))
+    opponent = opponent_from_checkpoint(session / "checkpoint.zip")
+
+    for field, attribute in PLANT_FIELDS.items():
+        assert getattr(opponent, attribute, None) is not None, f"{field} did not reach the opponent"
+    assert opponent.g_limit == 9.0
+    assert opponent.action_repeat == 6
