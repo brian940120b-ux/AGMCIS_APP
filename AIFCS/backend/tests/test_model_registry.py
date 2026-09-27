@@ -198,7 +198,9 @@ def test_an_evaluation_is_written_onto_the_card(registry):
     assert entry["evaluation"]["mean_reward"] == 12.5
     # And it survives being read fresh from disk.
     assert (
-        json.loads(registry.path_for("ppo-scored").with_suffix(".json").read_text())["evaluation"]["episodes"]
+        json.loads(registry.path_for("ppo-scored").with_suffix(".json").read_text(encoding="utf-8"))[
+            "evaluation"
+        ]["episodes"]
         == 3
     )
 

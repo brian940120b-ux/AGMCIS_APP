@@ -7,6 +7,7 @@ scenario is never written, and a failed write never replaces a good file.
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 
@@ -146,6 +147,10 @@ def test_a_written_file_gets_normal_permissions(store):
     assert written == shipped
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows has no POSIX mode bits: chmod(0o640) reads back as 0o666",
+)
 def test_overwriting_keeps_the_existing_permissions(store):
     store.create(DEFAULT_TEMPLATE)
     path = store.directory / "new_scenario.yaml"

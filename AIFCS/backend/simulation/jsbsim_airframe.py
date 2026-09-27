@@ -338,7 +338,7 @@ def write_data_root(root: Path, airframes: dict[str, AircraftParameters]) -> lis
         stamp = directory / f"{name}.sha256"
         digest = airframe_hash(params)
 
-        if path.exists() and stamp.exists() and stamp.read_text().strip() == digest:
+        if path.exists() and stamp.exists() and stamp.read_text(encoding="utf-8").strip() == digest:
             continue
 
         path.write_text(airframe_xml(params), encoding="utf-8")

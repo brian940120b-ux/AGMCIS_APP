@@ -80,7 +80,9 @@ def test_the_pool_is_named_by_session_and_resolved_to_checkpoints(tmp_path):
     command = step.train_command("python", tmp_path)
 
     assert "--opponent-pool" in command
-    assert command[command.index("--opponent-pool") + 1].endswith("v4/checkpoint.zip")
+    # Compared as a path, not as text: on Windows the separator is a backslash
+    # and endswith("v4/checkpoint.zip") is false for a perfectly correct command.
+    assert Path(command[command.index("--opponent-pool") + 1]) == tmp_path / "v4" / "checkpoint.zip"
     assert "--reward" in command and "shaped" in command
 
 

@@ -57,6 +57,7 @@ def _run(blocked: tuple[str, ...], body: str) -> subprocess.CompletedProcess[str
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
 
@@ -173,6 +174,7 @@ def _doctor(env_extra: dict[str, str] | None = None) -> subprocess.CompletedProc
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
         env=env,
     )
@@ -221,6 +223,7 @@ def _run_with(shadow: Path, body: str) -> subprocess.CompletedProcess[str]:
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
 
@@ -304,6 +307,7 @@ def test_doctor_reports_a_broken_rl_stack_without_blocking_startup(shadow: Path)
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
         env=env,
     )

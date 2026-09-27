@@ -68,7 +68,7 @@ def test_writing_the_state_leaves_no_half_written_file(tmp_path: Path):
     session.write_state(a_state(timesteps_done=1))
     session.write_state(a_state(timesteps_done=2))
 
-    assert json.loads(session.state_path.read_text())["timesteps_done"] == 2
+    assert json.loads(session.state_path.read_text(encoding="utf-8"))["timesteps_done"] == 2
     assert not list(session.root.glob("*.tmp"))
 
 
@@ -77,7 +77,7 @@ def test_a_state_file_from_a_later_version_does_not_stop_the_run(tmp_path: Path)
     session = Session(tmp_path / "run1")
     session.root.mkdir(parents=True)
     session.write_state(a_state(timesteps_done=5))
-    raw = json.loads(session.state_path.read_text())
+    raw = json.loads(session.state_path.read_text(encoding="utf-8"))
     raw["something_added_later"] = True
     session.state_path.write_text(json.dumps(raw))
 
@@ -493,7 +493,12 @@ def test_the_shell_launcher_is_still_valid_shell():
     """bash -n, because a launcher that does not parse fails at the worst time."""
     import subprocess
 
-    result = subprocess.run(["bash", "-n", str(SCRIPTS / "start.sh")], capture_output=True, text=True)
+    result = subprocess.run(
+        ["bash", "-n", str(SCRIPTS / "start.sh")],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     assert result.returncode == 0, result.stderr
 
 

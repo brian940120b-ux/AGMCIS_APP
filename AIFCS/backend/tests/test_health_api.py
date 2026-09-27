@@ -96,7 +96,8 @@ def test_reported_phase_matches_the_last_completed_phase_in_the_docs():
     from api.health import BUILD_PHASE
 
     phases_md = Path(__file__).resolve().parents[2] / "docs" / "PHASES.md"
-    completed = re.findall(r"^## (PHASE [^—]+?) — .*\*\*Complete\*\*", phases_md.read_text(), re.M)
+    headings = phases_md.read_text(encoding="utf-8")
+    completed = re.findall(r"^## (PHASE [^—]+?) — .*\*\*Complete\*\*", headings, re.M)
     assert completed, "docs/PHASES.md lists no completed phase"
     # The headings use an en dash, the constant a plain hyphen.
     assert completed[-1].replace("\u2013", "-") == BUILD_PHASE

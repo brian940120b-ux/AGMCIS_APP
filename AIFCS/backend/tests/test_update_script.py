@@ -56,6 +56,7 @@ def _run(root: Path) -> subprocess.CompletedProcess[str]:
         ["bash", str(root / "scripts" / "update.sh"), "--no-start"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 

@@ -9,6 +9,7 @@ swallowing the API.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,14 @@ def built(tmp_path: Path) -> Path:
     (tmp_path / "secret.txt").write_text("not for the web", encoding="utf-8")
     # A symlink is the case the path arithmetic cannot catch on its own: the
     # name stays inside the bundle and the file it names does not.
-    (dist / "escape.txt").symlink_to(tmp_path / "secret.txt")
+    #
+    # Windows refuses this to an unprivileged account without Developer Mode
+    # (WinError 1314), and it used to take the whole module down with it: the
+    # fixture is shared, so one unmakeable symlink errored all nine tests,
+    # including the eight that never look at it. The one case that does need it
+    # skips itself below.
+    with contextlib.suppress(OSError, NotImplementedError):
+        (dist / "escape.txt").symlink_to(tmp_path / "secret.txt")
     return tmp_path
 
 
@@ -126,6 +134,9 @@ def test_nothing_outside_the_bundle_can_be_read(built: Path, path: str):
     Whatever the path normalises to, the only two answers available are a file
     inside the bundle or the bundle's own index.
     """
+    if path == "/escape.txt" and not (built / "frontend" / "dist" / "escape.txt").is_symlink():
+        pytest.skip("this machine will not make symlinks (Windows without Developer Mode)")
+
     response = TestClient(app_with(built)[0]).get(path)
     assert "not for the web" not in response.text
     assert "root:" not in response.text

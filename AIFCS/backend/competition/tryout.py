@@ -256,6 +256,7 @@ def check_training(steps: int) -> bool:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=1800,
         )
         elapsed = time.perf_counter() - started

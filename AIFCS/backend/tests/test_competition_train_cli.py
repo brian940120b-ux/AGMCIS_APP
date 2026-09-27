@@ -45,6 +45,7 @@ def run_trainer(output: Path, timesteps: int, checkpoint_every: int = 1_000_000)
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=600,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -100,6 +101,7 @@ def test_a_run_stopped_early_still_writes_the_card(tmp_path: Path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=600,
     )
 

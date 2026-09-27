@@ -129,7 +129,7 @@ def test_changing_a_parameter_regenerates_the_airframe(tmp_path):
     heavier = AircraftParameters(mass_kg=11000.0)
     written = write_data_root(tmp_path, {"fictional_aircraft": heavier})
     assert len(written) == 1
-    assert "11000" in written[0].read_text()
+    assert "11000" in written[0].read_text(encoding="utf-8")
 
 
 def test_the_airframe_hash_follows_the_parameters():

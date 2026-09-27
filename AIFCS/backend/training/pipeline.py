@@ -164,10 +164,21 @@ def _progress_bar_available() -> bool:
     return True
 
 
-def resolve_device(requested: str) -> str:
-    """Turn ``auto`` into the device actually available."""
+def resolve_device(requested: str, algorithm: str | None = None) -> str:
+    """Turn ``auto`` into the device actually available.
+
+    PPO with an MLP policy is the exception: Stable-Baselines3 warns that a GPU
+    makes it *slower*, because the network is small enough that the per-batch
+    transfer costs more than the arithmetic saves. On a machine with CUDA the
+    warning fires on every construction, and under the suite's warnings-as-
+    errors it fails the run outright — but the warning is right, so the fix is
+    to pick the device it recommends rather than to silence it. An explicitly
+    requested device is still honoured; this only decides what ``auto`` means.
+    """
     if requested != "auto":
         return requested
+    if algorithm == "ppo":
+        return "cpu"
     try:
         import torch
 
@@ -265,7 +276,7 @@ class TrainingPipeline:
         hyper = self.algorithm_settings(algorithm)
         steps = total_timesteps or hyper.total_timesteps
         seed = seed if seed is not None else self.settings.simulation.seed
-        device = resolve_device(self.settings.training.device)
+        device = resolve_device(self.settings.training.device, algorithm)
 
         training_id = new_training_id(algorithm)
         env = self.make_env(seed=seed)

@@ -262,6 +262,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         cwd=settings.project_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     if probe.returncode == 0:
