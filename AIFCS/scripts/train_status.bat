@@ -1,7 +1,8 @@
 @echo off
 REM AIFCS: what the background training is doing right now.
 REM
-REM Reads the newest log rather than asking Windows about windows: a
+REM Reads the newest log of either kind - a single run or a whole ladder -
+REM rather than asking Windows about windows: a
 REM tasklist window-title filter misses a run started from an ordinary
 REM terminal, and a run that has stopped leaves its log behind to read.
 REM
@@ -26,7 +27,7 @@ if not exist "%LOGDIR%" (
 )
 
 set "LATEST="
-for /f "delims=" %%f in ('dir /b /o-d "%LOGDIR%\train-*.log" 2^>nul') do if not defined LATEST set "LATEST=%%f"
+for /f "delims=" %%f in ('dir /b /o-d "%LOGDIR%\*.log" 2^>nul') do if not defined LATEST set "LATEST=%%f"
 
 if not defined LATEST (
   echo   No logs in %LOGDIR% yet.

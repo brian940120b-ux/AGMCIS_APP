@@ -391,11 +391,27 @@ do nothing vs v4    60%       0%           0%                  -137            0
 ## 四之六、本機的實驗佇列
 
 ```
-scripts/ladder.bat
+scripts/ladder_background.bat
 ```
 
 跑 `plans/ladder.yaml` 裡的每一步:練 v6 → 評估 → 練 v7(對手包含 v6)→ 評估 …
 **不需要有人半夜起來開下一輪。**
+
+### 「關掉」到底是關掉什麼
+
+| 你關掉的 | 會停嗎 |
+|---|---|
+| 終端機 / Git Bash 視窗 | **不會** |
+| 登出 Windows | **不會** |
+| 蓋上螢幕(機器還開著) | **不會**(電源設定要先改) |
+| Windows Update 半夜重開 | **不會**(`train_autoresume.bat` 之後,登入就接續) |
+| **筆電關機或睡眠** | **會。沒有解。** |
+
+最後一項是物理:**沒有 CPU 在轉就沒有東西在算。** 唯一的辦法是換一台不會關的
+機器,那就是 `docs/CLOUD.md`。
+
+> `scripts/ladder.bat`(沒有 `_background`)是**前景**執行的 —— 關掉那個視窗
+> 佇列就死了。要看著它跑才用那個。
 
 ```
 scripts/ladder.bat --dry-run      先看它要做什麼
