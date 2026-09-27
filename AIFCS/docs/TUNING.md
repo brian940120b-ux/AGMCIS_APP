@@ -271,6 +271,37 @@ sleep:    held off — but closing the lid still sleeps (see docs/TUNING.md)
 **斷掉也不會全部白費。** 每 **25,000 步**存一次檔,最多損失那一段。再打同一行
 指令就從斷點接下去 —— 續訓會照卡片重建同一架飛機,不會偷偷換設定。
 
+### 背景執行:關掉終端機、登出、重開機都不會中斷
+
+```
+scripts\train_background.bat --name v5
+```
+
+訓練跑在一個**最小化的視窗**裡,原本那個終端機可以關掉。停止不要按 X:
+
+```
+scripts\train_stop.bat --name v5      本次進度會存好再退出
+scripts\train_status.bat              看它現在跑到哪
+```
+
+`train_stop` 是放一個 `STOP` 檔進 session 資料夾,訓練每一步檢查一次,看到就
+存檔退出 —— 跟 Ctrl+C 走同一條路。**直接關視窗會損失最多 25,000 步。**
+
+### 重開機自動接續
+
+```
+scripts\train_autoresume.bat          做一次就好
+```
+
+註冊一個**登入時觸發**的 Windows 排程工作:下次登入時,它會找出還沒練完的
+session 自動接下去。Windows Update 半夜重開機,原本會浪費整晚,現在只浪費到
+你早上登入為止。
+
+> 用登入而不是開機觸發:開機觸發要嘛跑在 SYSTEM 帳戶,要嘛存你的密碼,
+> 為了省下「凌晨三點重開到早上登入」那幾小時,兩個都不划算。
+
+關掉:`scripts\train_autoresume.bat /remove`
+
 ### 真的想關電腦的話
 
 只剩租雲端 GPU 一條路。可行,但要花錢、要另外架環境、要把程式和訓練資料搬上去,

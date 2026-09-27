@@ -105,6 +105,22 @@ class Session:
         return self.root / "card.json"
 
     @property
+    def stop_path(self) -> Path:
+        """Create this file and the run stops at its next step, having saved.
+
+        Ctrl+C is the answer when there is a console to press it in. A run
+        launched in the background has no console, and the alternatives on
+        Windows are all bad: taskkill without /F does nothing to a console
+        program, and taskkill /F is a power cut — it takes the checkpoint
+        interval with it.
+
+        A file is checked once per step, costs a stat call, and works from
+        anywhere: another terminal, Explorer, a scheduled task. The run
+        removes it on the way out so the next one does not stop immediately.
+        """
+        return self.root / "STOP"
+
+    @property
     def exists(self) -> bool:
         return self.state_path.is_file() and self.model_path.is_file()
 
@@ -267,8 +283,19 @@ def checkpoint_callback(
             self.started_wall_clock = state.wall_clock_s
             self.started_at = time.perf_counter()
             self.next_at = every
+            #: Set when the stop file ended the run, so the caller can tell a
+            #: run that was asked to stop from one that reached its target.
+            self.stopped = False
 
         def _on_step(self) -> bool:
+            if session.stop_path.exists():
+                # Returning False is how Stable-Baselines3 is asked to stop.
+                # The save happens in train()'s `finally`, the same path a
+                # Ctrl+C takes, so the two stops cannot drift apart.
+                print("\nstop requested — saving before exit", flush=True)
+                session.stop_path.unlink(missing_ok=True)
+                self.stopped = True
+                return False
             if self.num_timesteps >= self.next_at:
                 self.next_at = self.num_timesteps + every
                 self.save()
@@ -356,3 +383,36 @@ def describe_progress(state: SessionState, steps_per_second: float | None) -> st
     if steps_per_second and done < target:
         line += f" — about {human_duration((target - done) / steps_per_second)} left"
     return line
+
+
+def unfinished_sessions(root: Path) -> list[tuple[str, int, int]]:
+    """Sessions with steps left, oldest-touched first, as (name, done, target).
+
+    What a machine resumes after a reboot. Windows Update restarting at three
+    in the morning used to cost the whole night; with this and a logon task it
+    costs the minutes until someone signs in.
+
+    Oldest first so a queue of sessions is worked through in the order it was
+    started, rather than whichever the filesystem happens to list first.
+    A session with no target, or one already at it, is not unfinished.
+    """
+    if not root.is_dir():
+        return []
+
+    found: list[tuple[float, str, int, int]] = []
+    for entry in sorted(root.iterdir()):
+        state_path = entry / "state.json"
+        if not state_path.is_file():
+            continue
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # A half-written state file is a reason to leave that session
+            # alone, not a reason to refuse to resume any of the others.
+            continue
+        done = int(state.get("timesteps_done", 0))
+        target = int(state.get("target_timesteps", 0))
+        if target > 0 and done < target:
+            found.append((state_path.stat().st_mtime, entry.name, done, target))
+
+    return [(name, done, target) for _, name, done, target in sorted(found)]

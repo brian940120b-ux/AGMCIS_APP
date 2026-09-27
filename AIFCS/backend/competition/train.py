@@ -399,6 +399,10 @@ def train(args: argparse.Namespace) -> int:
         )
         env.close()
 
+    # A stop file ends `learn` normally, so without this the run would report
+    # "Done." for a session it was asked to abandon halfway.
+    interrupted = interrupted or bool(getattr(callback, "stopped", False))
+
     rate = (state.timesteps_done - callback.started_steps) / elapsed if elapsed else None
     print(f"\n{describe_progress(state, rate)}")
     if rate:

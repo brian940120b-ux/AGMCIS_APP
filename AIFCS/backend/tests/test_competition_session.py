@@ -703,3 +703,116 @@ def test_the_sleep_state_is_said_out_loud_not_only_logged():
     assert "lid" in awake.describe()
     awake.held = False
     assert "NOT held off" in awake.describe()
+
+
+def test_a_stop_file_ends_the_run_and_is_cleared(tmp_path):
+    """How a background run is stopped when there is no console to Ctrl+C in.
+
+    taskkill without /F does nothing to a console program and taskkill /F is a
+    power cut that costs the checkpoint interval. A file is one stat call a
+    step and works from anywhere.
+    """
+    from competition.session import Session
+
+    session = Session(root=tmp_path / "v5")
+    session.root.mkdir(parents=True)
+    session.stop_path.write_text("", encoding="utf-8")
+
+    callback = _stub_callback(session)
+    assert callback._on_step() is False, "False is how SB3 is asked to stop"
+    assert callback.stopped is True
+    assert not session.stop_path.exists(), "or the next run stops immediately too"
+
+
+def test_without_a_stop_file_the_run_carries_on(tmp_path):
+    from competition.session import Session
+
+    session = Session(root=tmp_path / "v5")
+    session.root.mkdir(parents=True)
+
+    callback = _stub_callback(session)
+    assert callback._on_step() is True
+    assert callback.stopped is False
+
+
+def _stub_callback(session):
+    """The real callback with the model and saving stubbed out."""
+    from competition.session import SessionState, checkpoint_callback
+
+    state = SessionState(name="v5", algorithm="sac", target_timesteps=1_000_000)
+    callback = checkpoint_callback(session, state, every=10**9, save_buffer=False)
+    callback.num_timesteps = 0
+    callback.save = lambda: None
+    return callback
+
+
+# ------------------------------------------------ what to resume after a boot
+
+
+def _session_at(root, name, done, target, age=0.0):
+    import json
+    import os
+    import time
+
+    folder = root / name
+    folder.mkdir(parents=True)
+    (folder / "state.json").write_text(
+        json.dumps({"name": name, "timesteps_done": done, "target_timesteps": target}),
+        encoding="utf-8",
+    )
+    when = time.time() - age
+    os.utime(folder / "state.json", (when, when))
+    return folder
+
+
+def test_it_finds_the_sessions_with_steps_left(tmp_path):
+    from competition.session import unfinished_sessions
+
+    _session_at(tmp_path, "v4", 2_000_000, 2_000_000)
+    _session_at(tmp_path, "v5", 350_000, 2_000_000)
+
+    assert unfinished_sessions(tmp_path) == [("v5", 350_000, 2_000_000)]
+
+
+def test_the_oldest_one_is_resumed_first(tmp_path):
+    """A queue is worked in the order it was started, not whatever order the
+    filesystem lists."""
+    from competition.session import unfinished_sessions
+
+    _session_at(tmp_path, "newer", 10, 100, age=60.0)
+    _session_at(tmp_path, "older", 10, 100, age=6000.0)
+
+    assert [name for name, _, _ in unfinished_sessions(tmp_path)] == ["older", "newer"]
+
+
+def test_a_half_written_state_file_does_not_stop_the_others(tmp_path):
+    """A reboot mid-save is exactly when this runs, so a truncated json is the
+    expected case, not a corrupt install."""
+    from competition.session import unfinished_sessions
+
+    _session_at(tmp_path, "good", 10, 100)
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "state.json").write_text('{"timesteps_done": 1', encoding="utf-8")
+
+    assert [name for name, _, _ in unfinished_sessions(tmp_path)] == ["good"]
+
+
+def test_nothing_to_resume_is_not_an_error_but_says_so(tmp_path, capsys):
+    """Most reboots happen with no run in flight. The caller reads stdout, so
+    an exit code is how "nothing" is said."""
+    from competition.unfinished import main
+
+    assert main([str(tmp_path)]) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_the_name_is_printed_alone_so_a_batch_file_can_read_it(tmp_path, capsys):
+    from competition.unfinished import main
+
+    _session_at(tmp_path, "v5", 350_000, 2_000_000)
+
+    assert main([str(tmp_path)]) == 0
+    printed = capsys.readouterr()
+    assert printed.out == "v5\n", "stdout is the name and nothing else"
+    assert "350,000" in printed.err, "the detail goes where it will not be parsed"
