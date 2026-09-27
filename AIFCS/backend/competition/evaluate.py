@@ -279,7 +279,7 @@ def compare(reports: Sequence[Report]) -> str:
     ]
     for report in reports:
         lines.append(
-            f"{report.label[:21]:22}"
+            f"{report.label[:29]:30}"
             f"{report.win_rate:>7.0%} "
             f"{report.kill_rate:>8.0%} "
             f"{report.death_rate:>7.0%} "
@@ -299,6 +299,7 @@ def config_from_card(
     opponent: str,
     aggression: float,
     ground_avoidance: bool | None = None,
+    opponent_policy: Any = None,
 ) -> EnvConfig:
     """Rebuild the aircraft a session trained on, from what it wrote down.
 
@@ -338,6 +339,7 @@ def config_from_card(
         ground_avoidance=GroundAvoidance(**floor) if floor is not None else None,
         opponent=opponent,
         opponent_aggression=aggression,
+        opponent_policy=opponent_policy,
     )
 
 
@@ -416,6 +418,19 @@ def main(argv: list[str] | None = None) -> int:
             "the floor changes the bar too"
         ),
     )
+    parser.add_argument(
+        "--opponent-pool",
+        nargs="+",
+        default=[],
+        metavar="PATH",
+        help=(
+            "fly against saved policies instead of a built-in opponent, as files "
+            "or directories of .zip. Each session meets each of them and gets a "
+            "row per pairing. This is the only way to ask whether one generation "
+            "beat the last: both built-in opponents are beaten by a centred "
+            "stick, so beating them says nothing"
+        ),
+    )
     parser.add_argument("--algorithm", choices=["sac", "ppo"], default="sac")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--json", type=Path, default=None, help="also write the full detail here")
@@ -424,9 +439,22 @@ def main(argv: list[str] | None = None) -> int:
     if not args.sessions and not args.baseline:
         parser.error("name at least one session, or pass --baseline on its own")
 
+    # `None` means the built-in opponent named by --opponent. One entry per
+    # pairing otherwise, so a session that meets three saved policies gets
+    # three rows rather than one average over three different fights.
+    foes: list[tuple[str, Any]] = [(args.opponent, None)]
+    if args.opponent_pool:
+        from competition.league import collect_checkpoints, opponent_from_checkpoint
+
+        foes = [
+            (name, opponent_from_checkpoint(path, args.algorithm, args.device))
+            for name, path in collect_checkpoints(args.opponent_pool).items()
+        ]
+
     print()
     print(f"Scoring {len(args.sessions)} session(s) over {args.rounds} rounds")
-    print(f"每個 session 跑同一批 {args.rounds} 個回合(seed {args.seed}),對手 {args.opponent}")
+    described_foes = ", ".join(name for name, _ in foes)
+    print(f"每個 session 跑同一批 {args.rounds} 個回合(seed {args.seed}),對手 {described_foes}")
     print()
 
     reports = []
@@ -446,15 +474,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"!!  {unavailable}")
             print()
             return 1
-        reports.append(
-            evaluate(
-                policy,
-                config_from_card(card, args.opponent, args.opponent_aggression, args.ground_avoidance),
-                rounds=args.rounds,
-                seed=args.seed,
-                label=session.name + _floor_suffix(card, args.ground_avoidance),
+        for foe_name, foe in foes:
+            against = f" vs {foe_name}" if foe is not None else ""
+            reports.append(
+                evaluate(
+                    policy,
+                    config_from_card(
+                        card,
+                        args.opponent,
+                        args.opponent_aggression,
+                        args.ground_avoidance,
+                        opponent_policy=foe,
+                    ),
+                    rounds=args.rounds,
+                    seed=args.seed,
+                    label=session.name + _floor_suffix(card, args.ground_avoidance) + against,
+                )
             )
-        )
 
     print()
     if args.baseline:
@@ -469,21 +505,24 @@ def main(argv: list[str] | None = None) -> int:
         baseline_floor: dict[str, Any] | None = {} if args.ground_avoidance else None
         described_floor = "floor" if baseline_floor is not None else "no floor"
         print(f"  do nothing (centred stick, reference plant, {described_floor})")
-        reports.append(
-            evaluate(
-                neutral_policy(),
-                EnvConfig(
-                    opponent=args.opponent,
-                    opponent_aggression=args.opponent_aggression,
-                    ground_avoidance=GroundAvoidance(**baseline_floor)
-                    if baseline_floor is not None
-                    else None,
-                ),
-                rounds=args.rounds,
-                seed=args.seed,
-                label="do nothing",
+        for foe_name, foe in foes:
+            against = f" vs {foe_name}" if foe is not None else ""
+            reports.append(
+                evaluate(
+                    neutral_policy(),
+                    EnvConfig(
+                        opponent=args.opponent,
+                        opponent_aggression=args.opponent_aggression,
+                        ground_avoidance=GroundAvoidance(**baseline_floor)
+                        if baseline_floor is not None
+                        else None,
+                        opponent_policy=foe,
+                    ),
+                    rounds=args.rounds,
+                    seed=args.seed,
+                    label="do nothing" + against,
+                )
             )
-        )
 
     print(compare(reports))
     print()

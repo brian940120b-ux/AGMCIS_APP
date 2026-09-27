@@ -887,6 +887,36 @@ scripts/evaluate.bat --baseline --ground-avoidance models/competition/run1
 scripts/evaluate.bat --baseline --ground-avoidance
 ```
 
+## 讓兩個世代直接打:`--opponent-pool`
+
+```bash
+scripts/evaluate.bat --opponent-pool models/competition/v4/checkpoint.zip models/competition/v5
+```
+
+**這是唯一能回答「新的一代有沒有比舊的強」的方法。** 兩個內建對手都被搖桿置中
+打敗(靶機 65%、pursuit 90%),所以打贏它們什麼都不代表 —— v4 對 pursuit
+100% 勝率,但甜蜜點只有 2 秒、零擊殺。
+
+報表的每一列會標出對手是誰:
+
+```
+                               won   killed    died  crashed      margin  152-500m   floor
+v5 vs v4                       ??%      ??%     ??%      ??%        ????      ???     ??%
+do nothing vs v4               ??%       0%     ??%      ??%        ????      ???     ??%
+```
+
+**一個 session 對上幾個對手就有幾列**,不是把三場不同的對戰平均成一列 ——
+那會剛好蓋掉最該看到的情況:對其中一個輸。
+
+池子吃檔案也吃資料夾,所以之後把快照丟進同一個資料夾就會自動被納入:
+
+```bash
+scripts/evaluate.bat --opponent-pool models/competition/pool models/competition/v6
+```
+
+**對手飛的是它自己練的那架飛機** —— 觀測維度、決策頻率、方向舵上限、升降舵
+限制全部從它自己的 `card.json` 重建,跟評估受測策略同一條規則。
+
 ## `floor` 欄:地板到底飛了多少
 
 報表最後一欄是**地板搶走操縱桿的幀數比例**。

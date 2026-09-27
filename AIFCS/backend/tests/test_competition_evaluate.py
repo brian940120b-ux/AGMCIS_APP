@@ -306,3 +306,75 @@ def test_a_round_flown_with_a_floor_reports_the_frames_it_took():
     )
     assert report.floor_share > 0.0, "a centred stick reaches the floor inside a round"
     assert report.floor_share < 1.0, "and is not flown by it the whole way"
+
+
+# ------------------------------------------- one saved policy against another
+
+
+def test_a_saved_policy_can_be_the_opponent():
+    """The question neither built-in opponent can answer.
+
+    A centred stick beats the drone 65% of the time and the pursuit controller
+    90%, so beating either says nothing about whether one generation is better
+    than the last. Self-play needs the generations to meet.
+    """
+    from competition.evaluate import config_from_card
+
+    sentinel = object()
+    config = config_from_card({}, "reference", 1.0, opponent_policy=sentinel)
+    assert config.opponent_policy is sentinel
+
+
+def test_each_session_meets_each_pool_member_and_the_row_says_which(monkeypatch, tmp_path):
+    """The wiring and the labelling together.
+
+    A row that reads `v5` when it was flown against v4 is worse than no row:
+    the whole point of the pairing is that who it was against is the
+    measurement. And one average over three different opponents would hide
+    exactly the case worth seeing, which is losing to one of them.
+    """
+    from pathlib import Path
+
+    import competition.evaluate as ev
+
+    for name in ("v4", "v5"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "card.json").write_text("{}", encoding="utf-8")
+
+    labels: list[str] = []
+
+    def fake_evaluate(policy, config, *, rounds, seed, label, **kwargs):
+        labels.append(label)
+        return ev.Report(label=label)
+
+    monkeypatch.setattr(ev, "evaluate", fake_evaluate)
+    monkeypatch.setattr(ev, "load_policy", lambda *a, **k: lambda obs: obs)
+    monkeypatch.setattr(
+        "competition.league.collect_checkpoints",
+        lambda paths: {"v4": Path("v4/checkpoint.zip"), "v3": Path("v3/checkpoint.zip")},
+    )
+    monkeypatch.setattr("competition.league.opponent_from_checkpoint", lambda *a, **k: object())
+
+    ev.main([str(tmp_path / "v5"), "--opponent-pool", "anywhere", "--rounds", "1"])
+
+    assert labels == ["v5 vs v4", "v5 vs v3"]
+
+
+def test_without_a_pool_the_row_is_just_the_session():
+    """The built-in opponent is named in the header, not on every row."""
+    import competition.evaluate as ev
+
+    labels: list[str] = []
+
+    def fake_evaluate(policy, config, *, rounds, seed, label, **kwargs):
+        labels.append(label)
+        return ev.Report(label=label)
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(ev, "evaluate", fake_evaluate)
+        ev.main(["--baseline", "--rounds", "1"])
+    finally:
+        monkeypatch.undo()
+
+    assert labels == ["do nothing"]
