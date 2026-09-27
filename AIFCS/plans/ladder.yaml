@@ -18,6 +18,12 @@
 # the same command again.
 #
 # v4 and v5 are not steps here: they exist already and are only opponents.
+#
+# --batch-size 512 is in every step because the timing says so: 93% of a
+# training step is the gradient update and the GPU sits at 33% utilisation, so
+# the calls are small rather than the card slow. A bigger batch is more work
+# per call to a card that is waiting. It changes the experiment — measure the
+# result rather than assuming it.
 
 steps:
   - name: v6
@@ -31,7 +37,7 @@ steps:
       --reward shaped --rudder-limit 0.6
       --ground-avoidance --g-limit 9
       --action-repeat 6 --gamma 0.995 --gradient-steps -1
-      --observation extended --timesteps 2000000
+      --observation extended --batch-size 512 --timesteps 2000000
     pool: [v4, v5]
 
   - name: v7
@@ -40,7 +46,7 @@ steps:
       --reward shaped --rudder-limit 0.6
       --ground-avoidance --g-limit 9
       --action-repeat 6 --gamma 0.995 --gradient-steps -1
-      --observation extended --timesteps 2000000
+      --observation extended --batch-size 512 --timesteps 2000000
     pool: [v4, v5, v6]
 
   - name: v8
@@ -48,5 +54,5 @@ steps:
       --reward shaped --rudder-limit 0.6
       --ground-avoidance --g-limit 9
       --action-repeat 6 --gamma 0.995 --gradient-steps -1
-      --observation extended --timesteps 2000000
+      --observation extended --batch-size 512 --timesteps 2000000
     pool: [v4, v5, v6, v7]
