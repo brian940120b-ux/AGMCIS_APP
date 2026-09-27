@@ -14,7 +14,12 @@ set "LOGDIR=models\competition\_logs"
 echo.
 if not exist "%LOGDIR%" (
   echo   Nothing has been started in the background yet.
-  echo   Start one with:  scripts\train_background.bat --name v5
+  echo.
+  echo   One session:   scripts/train_background.bat --name v6
+  echo   A whole queue: scripts/ladder_background.bat
+  echo.
+  echo   ^(a foreground run - train.bat or ladder.bat without _background -
+  echo    leaves no log here, so this does not mean nothing is training^)
   echo.
 
   REM Pause only when double-clicked. Git Bash sets MSYSTEM, so its absence
