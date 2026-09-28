@@ -50,6 +50,19 @@ FT_PER_M = 1.0 / 0.3048
 #: ends. Arithmetic, not judgement — see `docs/COMPETITION.md`.
 SWEET_SPOT_M = (AttackEnvelope().min_range_ft * 0.3048, 500.0)
 
+OPPONENT_NAMES = [
+    "reference",
+    "level",
+    "pursuit",
+    # The scripted set from competition/adversaries.py, roughly in order of how
+    # hard they are to score against.
+    "wanderer",
+    "scissors",
+    "energy",
+    "break",
+]
+
+
 Policy = Callable[[np.ndarray], np.ndarray]
 
 
@@ -533,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1000, help="the same for every session")
-    parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default="reference")
+    parser.add_argument("--opponent", choices=OPPONENT_NAMES, default="reference")
     parser.add_argument("--opponent-aggression", type=float, default=1.0)
     floor = parser.add_mutually_exclusive_group()
     floor.add_argument(

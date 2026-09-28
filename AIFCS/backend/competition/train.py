@@ -446,6 +446,9 @@ def _write_card(session: Session, state: SessionState) -> None:
     session.card_path.write_text(json.dumps(card, indent=2), encoding="utf-8")
 
 
+from competition.evaluate import OPPONENT_NAMES  # noqa: E402
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", default="run1", help="session directory name; resumed if it exists")
@@ -514,7 +517,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=[mode.value for mode in RewardMode],
         default=None,
     )
-    parser.add_argument("--opponent", choices=["reference", "level", "pursuit"], default=None)
+    parser.add_argument("--opponent", choices=OPPONENT_NAMES, default=None)
     parser.add_argument(
         "--observation",
         choices=["reference", "extended"],

@@ -491,7 +491,9 @@ class CompetitionRound:
             speed_kcas=setup.speed_kcas,
             speed_before_altitude=self.config.speed_before_altitude,
         )
-        self.opponent = _build_opponent(self.config, foe_altitude_ft, setup.speed_kcas)
+        self.opponent = _build_opponent(
+            self.config, foe_altitude_ft, setup.speed_kcas, seed=self.random.randrange(2**31)
+        )
 
         self.encoder.reset()
         self.joystick.reset()
@@ -716,8 +718,11 @@ def pursuit_opponent(
     return fly
 
 
-def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float) -> Opponent:
+def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float, *, seed: int = 0) -> Opponent:
     """One place that knows the names, so adding one cannot miss a call site."""
+    from competition.adversaries import ADVERSARIES
+    from competition.adversaries import build as build_adversary
+
     if config.opponent_policy is not None:
         # A policy outlives a round, so its per-round state is cleared here
         # rather than rebuilt — the weights are the expensive part.
@@ -727,4 +732,12 @@ def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float) ->
         return level_opponent(altitude_ft)
     if config.opponent == "pursuit":
         return pursuit_opponent(speed_kcas, aggression=config.opponent_aggression)
+    if config.opponent in ADVERSARIES:
+        # The scripted set: a break turn, an energy fighter, a scissors and a
+        # wanderer. Imported here rather than at module scope because
+        # adversaries imports StateEncoder from state, and state is imported by
+        # this module — at the top it is a cycle.
+        # The round's own seed, drawn from the round's own generator, so a
+        # seeded evaluation replays the wanderer's choices exactly.
+        return build_adversary(config.opponent, speed_kcas=speed_kcas, seed=seed)
     return reference_opponent(altitude_ft, speed_kcas)
