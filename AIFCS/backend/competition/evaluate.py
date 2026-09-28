@@ -89,6 +89,14 @@ class RoundReport:
     #: times the area of the one-degree cone, so a policy that is trying to
     #: point scores here long before it ever scores a kill.
     seconds_within_5deg: float = 0.0
+    #: How fast the aim is moving during the terminal phase, in degrees per
+    #: second, averaged over the frames inside the firing range and within
+    #: five degrees. Against the decision interval this says whether holding
+    #: a one-degree cone is a control problem or a choice: at 10 Hz a rate of
+    #: 19 deg/s moves the target 1.9 degrees between decisions, which is wider
+    #: than the cone, and no policy can regulate an error it cannot see
+    #: between one command and the next.
+    track_rate_deg_s: float = 0.0
 
     @property
     def won(self) -> bool:
@@ -111,6 +119,7 @@ class RoundReport:
             "seconds_in_sweet_spot": round(self.seconds_in_sweet_spot, 2),
             "best_track_angle_deg": round(self.best_track_angle_deg, 2),
             "seconds_within_5deg": round(self.seconds_within_5deg, 2),
+            "track_rate_deg_s": round(self.track_rate_deg_s, 2),
             "floor_share": round(self.floor_share, 4),
             "blue_crashed": self.blue_crashed,
             **self.outcome.as_dict(),
@@ -190,6 +199,19 @@ class Report:
         return max(_number(r.outcome.blue.get("attack_seconds", 0.0)) for r in self.rounds)
 
     @property
+    def mean_track_rate_deg_s(self) -> float:
+        """How fast the aim moves in the terminal phase, degrees per second.
+
+        Read against the decision interval. The policies here decide every six
+        frames — 0.1 s — so this number divided by ten is how far the target
+        travels between one command and the next. More than one degree of that
+        and the cone is narrower than the control's own step, which is a
+        different problem from a policy that will not hold still.
+        """
+        rates = [r.track_rate_deg_s for r in self.rounds if r.track_rate_deg_s > 0.0]
+        return statistics.fmean(rates) if rates else 0.0
+
+    @property
     def best_track_angle_deg(self) -> float:
         """The closest the nose came in any round, in degrees.
 
@@ -263,6 +285,8 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
     sweet_frames = 0
     near_frames = 0
     best_angle = 180.0
+    swings: list[float] = []
+    previous_angle: float | None = None
     reason = ""
     lo, hi = SWEET_SPOT_M
     envelope = AttackEnvelope()
@@ -276,9 +300,20 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
         # against the envelope's own range rather than the narrower band the
         # sweet spot uses for scoring.
         if envelope.min_range_ft <= geometry.distance_ft <= envelope.max_range_ft:
-            best_angle = min(best_angle, float(geometry.track_angle_deg))
-            if geometry.track_angle_deg <= 5.0:
+            angle = float(geometry.track_angle_deg)
+            best_angle = min(best_angle, angle)
+            if angle <= 5.0:
                 near_frames += 1
+                # Only across consecutive in-close frames: a gap would measure
+                # the jump between two separate passes, not how fast the aim
+                # moves while it is being held.
+                if previous_angle is not None:
+                    swings.append(abs(angle - previous_angle) * 60.0)
+                previous_angle = angle
+            else:
+                previous_angle = None
+        else:
+            previous_angle = None
         if finished:
             break
 
@@ -298,6 +333,7 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
         seconds_in_sweet_spot=sweet_frames / 60.0,
         best_track_angle_deg=best_angle,
         seconds_within_5deg=near_frames / 60.0,
+        track_rate_deg_s=statistics.fmean(swings) if swings else 0.0,
         floor_share=game.floor_frames / game.frame if game.frame else 0.0,
         blue_crashed=reason == "CRASH",
     )
@@ -365,7 +401,7 @@ def compare(reports: Sequence[Report]) -> str:
     lines = [
         f"{'':22}{'won':>8}{'killed':>9}{'died':>8}{'crashed':>9}"
         f"{'margin':>12}{'152-500m':>10}{'<5deg':>8}{'best':>8}"
-        f"{'cone':>8}{'cone+':>8}{'floor':>8}",
+        f"{'cone':>8}{'cone+':>8}{'deg/s':>8}{'floor':>8}",
     ]
     for report in reports:
         lines.append(
@@ -380,6 +416,7 @@ def compare(reports: Sequence[Report]) -> str:
             f"{report.best_track_angle_deg:>7.1f} "
             f"{report.mean_attack_seconds:>7.2f} "
             f"{report.best_attack_seconds:>7.2f} "
+            f"{report.mean_track_rate_deg_s:>7.1f} "
             f"{report.mean_floor_share:>7.0%}"
         )
     lines.append("")
@@ -387,8 +424,11 @@ def compare(reports: Sequence[Report]) -> str:
     lines.append("  best  = closest the nose ever came, in degrees. A kill needs 1.0 for 3 s.")
     lines.append("  cone  = seconds accumulated inside the one-degree cone, mean and best round.")
     lines.append("          3.00 is a kill. This is the number the threshold compares.")
+    lines.append("  deg/s = how fast the aim moves inside five degrees. At a 10 Hz decision")
+    lines.append("          rate, over 10 deg/s means the cone is narrower than one command.")
     lines.append("  <5deg = 在射程內、機首偏差五度以內的秒數;best = 機首最接近時的偏差度數。")
     lines.append("  cone / cone+ = 一度錐內的累積秒數,平均與最好的一回合。3.00 就是擊殺。")
+    lines.append("  deg/s = 末端瞄準的移動速率。10 Hz 決策下,超過 10 代表錐比一個指令還窄。")
     return "\n".join(lines)
 
 

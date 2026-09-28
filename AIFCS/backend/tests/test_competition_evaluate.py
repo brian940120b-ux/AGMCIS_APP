@@ -376,6 +376,34 @@ def test_the_aim_is_measured_separately_from_the_range():
     assert report.mean_seconds_within_5deg == 0.0
 
 
+def test_the_aim_rate_ignores_rounds_that_never_got_close():
+    """Nineteen rounds that never reached five degrees have no rate to report,
+    and averaging their zeros in would have halved the one reading that exists
+    every time a policy only occasionally gets a shot."""
+    from competition.evaluate import Report, RoundReport
+    from competition.scoring import EndReason, RoundOutcome, Verdict
+
+    def round_at(rate: float) -> RoundReport:
+        return RoundReport(
+            seed=0,
+            outcome=RoundOutcome(
+                verdict=Verdict.BLUE,
+                reason=EndReason.TIME,
+                blue={"killed": False, "advantage_score": 0.0},
+                red={"killed": False, "advantage_score": 0.0},
+            ),
+            frames=1,
+            min_distance_m=0.0,
+            mean_distance_m=0.0,
+            seconds_in_sweet_spot=0.0,
+            track_rate_deg_s=rate,
+        )
+
+    report = Report(label="x", rounds=[round_at(0.0), round_at(0.0), round_at(20.0)])
+
+    assert report.mean_track_rate_deg_s == pytest.approx(20.0)
+
+
 def test_an_aim_never_taken_reads_as_no_aim_rather_than_a_perfect_one():
     """A round that never reaches the firing range has no aim to report, and a
     default of 0.0 would have read as dead on."""
