@@ -110,6 +110,40 @@ def bring_in_previous_sessions() -> None:
             print(f"  brought in {session.parent.name}", flush=True)
 
 
+def describe_inputs() -> str:
+    """Everything mounted under /kaggle/input, and where the checkpoints are.
+
+    A missing opponent has two causes that look identical from the outside:
+    the Dataset was never attached, or it was attached and its folders are not
+    named what the pool asks for. This prints enough to tell which without
+    another round trip through Save & Run All.
+    """
+    root = Path("/kaggle/input")
+    if not root.is_dir():
+        return "   Nothing is attached: /kaggle/input does not exist.\n   完全沒有掛任何 Input。"
+
+    lines = ["\n   What is attached under /kaggle/input:"]
+    datasets = sorted(root.iterdir())
+    if not datasets:
+        lines.append("     (nothing)")
+    for dataset in datasets:
+        lines.append(f"     {dataset.name}/")
+        found = sorted(dataset.glob("**/checkpoint.zip"))
+        if not found:
+            # Two levels is enough to see a flattened upload for what it is.
+            for entry in sorted(dataset.iterdir())[:10]:
+                lines.append(f"       {entry.name}{'/' if entry.is_dir() else ''}")
+            lines.append("       ^ no checkpoint.zip anywhere in here")
+        for checkpoint in found:
+            # The folder name is what the pool matches on, so it is the thing
+            # worth printing.
+            lines.append(
+                f"       {checkpoint.relative_to(dataset)}   -> would be session {checkpoint.parent.name!r}"
+            )
+    lines.append("   對手是用資料夾名字比對的,上面的名字要跟 POOL 一樣。")
+    return "\n".join(lines)
+
+
 def main() -> int:
     setup()
     bring_in_previous_sessions()
@@ -126,6 +160,10 @@ def main() -> int:
         print(
             f"\n!! POOL asks for {', '.join(POOL)} and these are not here: {', '.join(missing)}", flush=True
         )
+        # What IS mounted, because "it is not there" and "it is there under a
+        # name you did not expect" need different fixes and the message above
+        # cannot tell them apart.
+        print(describe_inputs(), flush=True)
         print("   Attach them: Input -> Add Input -> your Dataset of sessions.", flush=True)
         print("   Or set POOL = [] above if training against the built-in", flush=True)
         print("   opponent is really what you want.", flush=True)
