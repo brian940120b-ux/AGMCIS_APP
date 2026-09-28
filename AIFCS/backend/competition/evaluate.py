@@ -289,8 +289,13 @@ class Report:
         }
 
 
-def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
-    """One round to its end, scored the way the day scores it."""
+def play_round(policy: Policy, config: EnvConfig, seed: int, trace: Any | None = None) -> RoundReport:
+    """One round to its end, scored the way the day scores it.
+
+    `trace`, when given, is a `RoundTrace` that gets every frame. Off by
+    default: eighteen thousand frames a round is megabytes, and most rounds are
+    not worth keeping.
+    """
     game = CompetitionRound(config=config, seed=seed)
     observation = game.reset(seed=seed)
 
@@ -300,6 +305,7 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
     best_angle = 180.0
     swings: list[float] = []
     previous_angle: float | None = None
+    floor_before = 0
     reason = ""
     lo, hi = SWEET_SPOT_M
     envelope = AttackEnvelope()
@@ -327,6 +333,14 @@ def play_round(policy: Policy, config: EnvConfig, seed: int) -> RoundReport:
                 previous_angle = None
         else:
             previous_angle = None
+        if trace is not None:
+            trace.record(
+                geometry,
+                attack_seconds=game.score.attack_seconds,
+                g_load=game.own.g_load,
+                floor_active=game.floor_frames > floor_before,
+            )
+            floor_before = game.floor_frames
         if finished:
             break
 
@@ -360,16 +374,55 @@ def evaluate(
     seed: int = 0,
     label: str = "policy",
     on_round: Callable[[RoundReport], None] | None = None,
+    trace_dir: Path | None = None,
 ) -> Report:
-    """`rounds` engagements from consecutive seeds, so two runs are comparable."""
+    """`rounds` engagements from consecutive seeds, so two runs are comparable.
+
+    `trace_dir` records every frame of every round into it, one file each, in
+    the platform's replay format. Off by default.
+    """
     config = config or EnvConfig()
     report = Report(label=label)
     for index in range(rounds):
-        result = play_round(policy, config, seed + index)
+        trace = _trace_for(trace_dir, label, config, seed + index) if trace_dir else None
+        result = None
+        if trace is not None:
+            trace.open()
+        try:
+            result = play_round(policy, config, seed + index, trace=trace)
+        finally:
+            if trace is not None:
+                # Closed even when the round raised: a half-written trace of
+                # the round that broke is the one most worth having.
+                trace.close(
+                    outcome=result.outcome.as_dict() if result is not None else {},
+                    reason=result.outcome.reason.value if result is not None else "ERROR",
+                )
         report.rounds.append(result)
         if on_round is not None:
             on_round(result)
     return report
+
+
+def _trace_for(trace_dir: Path, label: str, config: EnvConfig, seed: int) -> Any:
+    """One trace file per round, named so a directory sorts into an experiment."""
+    from competition.trace import RoundTrace
+
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    return RoundTrace(
+        trace_dir / f"{safe}-seed{seed}.jsonl.gz",
+        label=label,
+        opponent=config.opponent,
+        seed=seed,
+        envelope=config.envelope,
+        plant={
+            "observation": config.observation,
+            "action_repeat": config.action_repeat,
+            "rudder_limit": config.rudder_limit,
+            "ground_avoidance": config.ground_avoidance is not None,
+        },
+    )
 
 
 def load_policy(session_dir: Path, algorithm: str = "sac", device: str = "cpu") -> Policy:
@@ -588,6 +641,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--algorithm", choices=["sac", "ppo"], default="sac")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--json", type=Path, default=None, help="also write the full detail here")
+    parser.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "record every frame of every round into DIR, one gzipped JSON Lines "
+            "file each, in the platform's replay format. The averages say a "
+            "policy reaches the cone and does not stay; only a trace says when, "
+            "how often, and what it was doing on the way in"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.sessions and not args.baseline:
@@ -683,6 +748,7 @@ def main(argv: list[str] | None = None) -> int:
                     rounds=args.rounds,
                     seed=args.seed,
                     label=session.name + _floor_suffix(card, args.ground_avoidance) + against,
+                    trace_dir=args.trace,
                 )
             )
 
@@ -715,6 +781,7 @@ def main(argv: list[str] | None = None) -> int:
                     rounds=args.rounds,
                     seed=args.seed,
                     label="do nothing" + against,
+                    trace_dir=args.trace,
                 )
             )
 
