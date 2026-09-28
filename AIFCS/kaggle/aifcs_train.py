@@ -1,4 +1,9 @@
-"""Paste this into one Kaggle notebook cell, then Save Version -> Save & Run All.
+"""One rung of the ladder, run on Kaggle's GPU.
+
+Not the thing to paste into the notebook — that is kaggle/bootstrap.py, which
+clones the repository and runs this. Pasting this file works too, but then the
+copy in the browser and the copy in git drift, and the version that actually
+ran is the one nobody can read.
 
 Kaggle copies the notebook to its own machine and runs it there. The browser,
 the laptop and the network stop mattering the moment you press the button, and
@@ -10,12 +15,21 @@ Before running, in the notebook's right-hand panel:
 
   * Settings -> Accelerator -> GPU P100   (or T4)
   * Settings -> Internet -> On            (needed to clone and pip install)
-  * Input -> Add Input -> Datasets        (only from the second run on; see below)
+  * Input -> Add Input -> the Dataset holding the opponents in POOL
 
-What comes out lands in /kaggle/working and is downloadable from the finished
-version's Output tab. To carry on from it next time, publish that output as a
-Kaggle Dataset and attach it as an Input — the next run picks the checkpoints
-up automatically.
+The opponents are not optional. A POOL member that is not attached stops the
+run before it starts: last time it printed a warning and carried on, and seven
+GPU hours trained against the built-in drone under the name of the run that
+was supposed to train against v4 and v5. Two different experiments, one name,
+and nobody noticed until they were scored side by side.
+
+Sessions are written straight to /kaggle/working/sessions, which is what the
+Output tab shows. Straight there rather than copied at the end, so a
+checkpoint is safe from the moment it is saved. The clone goes to /kaggle/temp
+so the repository does not bury them.
+
+To carry on from a run next time, publish its output as a Kaggle Dataset and
+attach it as an Input — the next run picks those checkpoints up automatically.
 
 MAX_HOURS is the important number. A free session is stopped at nine to twelve
 hours, and whatever is running when that happens loses everything since its
@@ -49,9 +63,18 @@ FLAGS = (
     "--observation extended --batch-size 512 --timesteps 2000000"
 )
 
-HOME = Path("/kaggle/working/AGMCIS_APP")
+#: The clone goes in scratch, not in the output. /kaggle/working is what the
+#: Output tab shows and what a Dataset is published from, and a repository
+#: dropped in there buries the thing you came for: last time the sessions were
+#: in the output the whole while, under a card listing several hundred files
+#: of trading system, and finding them took longer than the download.
+HOME = Path("/kaggle/temp/AGMCIS_APP")
 AIFCS = HOME / "AIFCS"
-MODELS = AIFCS / "models" / "competition"
+
+#: Sessions are written straight into the output rather than copied there at
+#: the end, so a checkpoint is safe from the moment it is saved — a run killed
+#: by the session limit at hour nine still leaves everything it had.
+MODELS = Path("/kaggle/working/sessions")
 
 
 def run(command, **kwargs):
@@ -60,6 +83,7 @@ def run(command, **kwargs):
 
 
 def setup() -> None:
+    HOME.parent.mkdir(parents=True, exist_ok=True)
     if not HOME.exists():
         run(["git", "clone", "--depth", "1", "--branch", BRANCH, REPO, str(HOME)])
     for requirements in ("requirements.txt", "requirements-ml.txt", "requirements-physics.txt"):
@@ -111,7 +135,7 @@ def main() -> int:
     environment = dict(os.environ, PYTHONPATH=str(AIFCS / "backend"))
     train = [sys.executable, "-m", "competition.train", "--name", NAME]
     train += FLAGS.split()
-    train += ["--max-hours", str(MAX_HOURS), "--device", "auto"]
+    train += ["--max-hours", str(MAX_HOURS), "--device", "auto", "--output", str(MODELS)]
     if available:
         train += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
 
@@ -138,16 +162,14 @@ def main() -> int:
             score += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
         run(score, cwd=AIFCS, env=environment)
 
-    # Out of the clone and into the notebook's own output, which is what the
-    # Output tab offers for download and what a Dataset can be published from.
-    # Unconditional: a run that failed at its last step still has hours of GPU
-    # in its checkpoint, and Kaggle keeps nothing that is not in /kaggle/working.
-    collected = 0
+    # Nothing to copy: MODELS is already inside /kaggle/working. Said out loud
+    # anyway, because "where did it go" has cost more time on this than any
+    # bug in it.
+    print("\nin the Output tab, under sessions/:", flush=True)
     for session in sorted(MODELS.iterdir()):
         if (session / "checkpoint.zip").is_file():
-            shutil.copytree(session, Path("/kaggle/working") / session.name, dirs_exist_ok=True)
-            collected += 1
-    print(f"\n{collected} session(s) are in the Output tab", flush=True)
+            card = "with card.json" if (session / "card.json").is_file() else "NO card.json"
+            print(f"  sessions/{session.name}  ({card})", flush=True)
     return 0 if code in (0, INTERRUPTED) else code
 
 
