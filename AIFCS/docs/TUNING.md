@@ -866,3 +866,46 @@ PHANG-MAN 的排程寫得很明確:
 | ~40°+ | 根本沒在瞄 | 課程順序 |
 
 先量,再改。
+
+### 再查一次:主辦方的射擊條件是從 AlphaDogfight 抄來的
+
+同一篇論文(arXiv 2105.00990)裡,WEZ 的定義是:
+
+> the locus of points in between **500-3000 ft** that also lie within a
+> spherical cone of **2° aperture**
+
+我們 `AttackEnvelope` 的預設值:
+
+```python
+half_angle_deg: float = 1.0      # 2 度全角
+min_range_ft:   float = 500.0
+max_range_ft:   float = 3000.0
+```
+
+**一模一樣。** 500–3000 呎、2 度全角。主辦方把 AlphaDogfight 的 WEZ 直接搬過來,
+只多加了「累積 3 秒」這個條件(論文本身沒有 dwell 要求)。
+
+這件事的意義比看起來大:**PHANG-MAN 解的就是我們這一題**,不是「類似的題」。
+它的設計可以直接對照,不用打折。
+
+### 三個可以直接抄的做法
+
+| 它做的 | 我們現在 | 差距 |
+|---|---|---|
+| 低階策略 **50 Hz**,只有高階選擇器 10 Hz | **全部 10 Hz**(`--action-repeat 6`) | **5 倍** |
+| 血量調高 **10 倍**,「to further increase the ratio of WEZ to non-WEZ memories stored in the replay buffer」 | 沒有對應處理 | 緩衝區裡幾乎沒有錐內樣本 |
+| 兩個專門的近戰策略:Aggressive Shooter / Conservative Shooter | 單一策略要同時學飛行和射擊 | 階層式 vs 單層 |
+
+第一條最直接。論文明說 50 Hz 是為了讓低階策略「execute fine-grained control」——
+**細控制**。而 action repeat 的文獻也講得很清楚:它會 degrade precise control,
+中間被跳過的幀等於丟掉。
+
+第二條是**任務課程**,不是對手課程:他們發現接戰時間太短、緩衝區裡學不到東西,
+就在訓練時把接戰**人為拉長**。我們的對應做法是訓練時放寬 `kill_seconds`
+(例如 1.5 秒)或放寬錐角,評分時仍用真實的 3.0 秒 —— `scoring.py` 一行不動,
+只有訓練環境拿到不同的 `AttackEnvelope`。
+
+### 但還是先看 `deg/s`
+
+文獻給的是很強的先驗,不是我們這架飛機的量測。`deg/s` 除以 10 就是每個決策之間
+視線移動幾度;超過 1 度,就證實 10 Hz 是瓶頸,而且跟論文用 50 Hz 的理由對上。
