@@ -26,33 +26,33 @@
 # result rather than assuming it.
 
 steps:
-  - name: v6
-    # The two changes aimed straight at `killed` being 0 against anything that
-    # moves. `shaped` gives the one-degree cone a slope to climb — as an
-    # indicator function it hands a policy that has never been inside it no
-    # gradient at all. The rudder is the fine-pointing control, capped at 0.2
-    # by the sample client and pinned to zero in its training action space,
-    # while 表 2 allows plus or minus one.
+  # One step, and one change from v6. v6 is the best thing on the board — 90%
+  # and +5,501 against v4 — and its best round accumulated 2.22 of the 3.00
+  # seconds a kill needs. What is missing was measured, not guessed:
+  #
+  #   deg/s 3.2   the aim drifts a third of a degree between decisions, so
+  #               10 Hz has room to hold the cone. Not a control problem.
+  #   best  0.0   it reaches dead centre. Not an ability problem.
+  #   cone  0.38   against 10.1 s within five degrees. That ratio is 3.8% and
+  #   <5deg 10.1   the solid angle of one degree inside five is 4%, so it
+  #               spends time in the cone exactly as often as drifting through
+  #               at random would give. It passes through because nothing pays
+  #               it to stay.
+  #
+  # `pointed` is `shaped` plus a second tracking term that is steep near the
+  # cone. Over five degrees down to one the old term pays 0.022 of its weight
+  # and the new one pays 0.793. At forty degrees the new term is zero, so the
+  # coarse turn v6 already does well is untouched.
+  #
+  # Named v7p, not v7: models/competition/v7 is the half-finished `shaped` run
+  # that was stopped, and these are two different experiments.
+  #
+  # Everything else is v6's, unchanged, because a run that moves two things
+  # cannot say which one moved the result.
+  - name: v7p
     flags: >-
-      --reward shaped --rudder-limit 0.6
+      --reward pointed --rudder-limit 0.6
       --ground-avoidance --g-limit 9
       --action-repeat 6 --gamma 0.995 --gradient-steps -1
       --observation extended --batch-size 512 --timesteps 2000000
     pool: [v4, v5]
-
-  - name: v7
-    # Same again, now fighting what v6 became.
-    flags: >-
-      --reward shaped --rudder-limit 0.6
-      --ground-avoidance --g-limit 9
-      --action-repeat 6 --gamma 0.995 --gradient-steps -1
-      --observation extended --batch-size 512 --timesteps 2000000
-    pool: [v4, v5, v6]
-
-  - name: v8
-    flags: >-
-      --reward shaped --rudder-limit 0.6
-      --ground-avoidance --g-limit 9
-      --action-repeat 6 --gamma 0.995 --gradient-steps -1
-      --observation extended --batch-size 512 --timesteps 2000000
-    pool: [v4, v5, v6, v7]

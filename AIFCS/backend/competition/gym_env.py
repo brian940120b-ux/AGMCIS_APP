@@ -26,7 +26,13 @@ from competition.environment import (
     observation_space,
 )
 from competition.league import League
-from competition.rewards import ReferenceReward, RewardMode, ScoreReward, ShapedReward
+from competition.rewards import (
+    PointedReward,
+    ReferenceReward,
+    RewardMode,
+    ScoreReward,
+    ShapedReward,
+)
 from competition.scoring import Verdict, decide_round
 from competition.state import Geometry
 from core.logging_config import get_logger
@@ -79,8 +85,9 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
     def _build_reward(self) -> ReferenceReward | ScoreReward | ShapedReward:
         if self.reward_mode is RewardMode.REFERENCE:
             return ReferenceReward()
-        if self.reward_mode is RewardMode.SHAPED:
-            return ShapedReward(
+        if self.reward_mode in (RewardMode.SHAPED, RewardMode.POINTED):
+            build = PointedReward if self.reward_mode is RewardMode.POINTED else ShapedReward
+            return build(
                 weights=self.config.weights,
                 envelope=self.config.envelope,
                 tick_hz=float(SIM_HZ),

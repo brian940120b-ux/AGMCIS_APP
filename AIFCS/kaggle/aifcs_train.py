@@ -41,10 +41,10 @@ MAX_HOURS = 7.5
 
 #: One step of the ladder per session, because a session is not long enough for
 #: three. The name is what to change between runs: v6, then v7, then v8.
-NAME = "v6"
+NAME = "v7p"
 POOL = ["v4", "v5"]
 FLAGS = (
-    "--reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 "
+    "--reward pointed --rudder-limit 0.6 --ground-avoidance --g-limit 9 "
     "--action-repeat 6 --gamma 0.995 --gradient-steps -1 "
     "--observation extended --batch-size 512 --timesteps 2000000"
 )
@@ -93,8 +93,20 @@ def main() -> int:
     available = [name for name in POOL if (MODELS / name / "checkpoint.zip").is_file()]
     missing = sorted(set(POOL) - set(available))
     if missing:
-        print(f"\n!! not attached, so not in the pool: {', '.join(missing)}", flush=True)
-        print("   Add them as a Dataset input, or edit POOL.", flush=True)
+        # Refused, not warned. Last time this printed a line and carried on,
+        # and seven GPU hours trained against the built-in drone instead of
+        # the pool that was asked for — a different experiment, named the same
+        # as the one on the laptop, and nobody noticed until the two were
+        # scored side by side. A run that cannot be what it says it is should
+        # not start.
+        print(
+            f"\n!! POOL asks for {', '.join(POOL)} and these are not here: {', '.join(missing)}", flush=True
+        )
+        print("   Attach them: Input -> Add Input -> your Dataset of sessions.", flush=True)
+        print("   Or set POOL = [] above if training against the built-in", flush=True)
+        print("   opponent is really what you want.", flush=True)
+        print(f"\n!! 對手池少了 {', '.join(missing)},沒有開始訓練。", flush=True)
+        return 2
 
     environment = dict(os.environ, PYTHONPATH=str(AIFCS / "backend"))
     train = [sys.executable, "-m", "competition.train", "--name", NAME]

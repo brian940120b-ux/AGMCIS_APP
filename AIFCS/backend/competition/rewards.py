@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from competition.scoring import (
     G_LIMIT,
@@ -44,6 +45,10 @@ class RewardMode(StrEnum):
     #: The margin plus shaping the score cannot provide, because the score is a
     #: measurement and not a teacher. See `ShapedReward`.
     SHAPED = "shaped"
+    #: `shaped` with a second tracking term that is steep near the cone. A new
+    #: name rather than a changed `shaped`, so v6 stays reproducible and the
+    #: two are one measured difference apart. See `PointedReward`.
+    POINTED = "pointed"
 
 
 def sigmoid(x: float, rate: float, midpoint: float) -> float:
@@ -211,6 +216,15 @@ class ShapedReward:
     crash_penalty: float = -10.0
     #: Weight on the soft tracking bonus, in the same units as the score.
     tracking: float = 400.0
+    #: Weight on the second, steep tracking term. Zero in `shaped`, which is
+    #: what v6 trained under; `pointed` turns it on.
+    fine_tracking: float = 0.0
+    #: Where the steep term is half paid, in degrees of track angle, and how
+    #: quickly it falls away either side. 2.0 and 0.7 put nearly all of its
+    #: gradient between five degrees and half a degree, which is the span the
+    #: linear term cannot see.
+    fine_midpoint_deg: float = 2.0
+    fine_scale_deg: float = 0.7
     #: Weight on the overshoot penalty.
     too_close: float = 200.0
     #: Weight on the deck penalty, the reference's own value.
@@ -273,9 +287,29 @@ class ShapedReward:
         )
 
         dt = 1.0 / self.tick_hz
+        window = self.range_factor(geometry.distance_ft)
         # A slope towards the cone, worth most where a shot would count.
         aim = max(0.0, 1.0 - geometry.track_angle_deg / 180.0)
-        reward += self.tracking * dt * aim * self.range_factor(geometry.distance_ft)
+        reward += self.tracking * dt * aim * window
+
+        # The same idea again, but steep, and only near the cone. The linear
+        # term above pays +0.278 for closing from 90 degrees to 40 and +0.022
+        # for the whole of five degrees down to one — so the coarse turn is
+        # worth more than the shot, and there is next to no gradient left over
+        # the span that decides whether anything scores. Measured on v6: the
+        # aim reaches 0.0 degrees, drifts at only 3.2 deg/s so the control has
+        # room to hold it, and still spends just 3.8% of its close time inside
+        # one degree, which is what the solid angle would give by chance
+        # alone. It passes through because nothing pays it to stay.
+        #
+        # PHANG-MAN (arXiv 2105.00990) has two tracking terms for this reason:
+        # a linear one for the turn and a logistic of steepness 1e5 on the
+        # cone itself. Theirs is a step; this is a logistic with a real width,
+        # because a step hands back the same flat gradient one degree further
+        # out.
+        if self.fine_tracking:
+            fine = sigmoid(geometry.track_angle_deg, -1.0 / self.fine_scale_deg, self.fine_midpoint_deg)
+            reward += self.fine_tracking * dt * fine * window
 
         # Overshoot. Below the envelope's minimum the score collapses anyway,
         # and a collision ends the round for both sides.
@@ -287,3 +321,15 @@ class ShapedReward:
         reward -= self.deck * (1.0 - sigmoid(altitude_ft, 1 / 20, 1300))
 
         return reward / self.scale
+
+
+def PointedReward(**kwargs: Any) -> ShapedReward:
+    """`shaped` with the steep near-cone term switched on.
+
+    A separate name, not a changed `shaped`, for two reasons. v6 is the only
+    thing on the board that is any good and it has to stay reproducible; and
+    the point of the run is to attribute a change, which needs the two to
+    differ by one thing that was written down.
+    """
+    kwargs.setdefault("fine_tracking", 400.0)
+    return ShapedReward(**kwargs)

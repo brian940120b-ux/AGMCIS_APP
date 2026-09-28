@@ -146,3 +146,79 @@ def test_a_policy_optimal_for_one_reward_is_not_for_the_other():
 def test_the_modes_are_named_the_way_the_command_line_names_them():
     assert RewardMode("reference") is RewardMode.REFERENCE
     assert RewardMode("score") is RewardMode.SCORE
+
+
+# ------------------------------------------- the steep near-cone term (v7)
+
+
+def _geometry_at(track_deg: float, distance_m: float = 300.0):
+    """A frame with the nose this far off, inside the firing range."""
+    return Geometry(
+        distance_m=distance_m,
+        track_angle_deg=track_deg,
+        azimuth_deg=track_deg,
+        elevation_deg=0.0,
+        aspect_angle_deg=0.0,
+        own_alt_m=3000.0,
+        enemy_alt_m=3000.0,
+    )
+
+
+def _pointed_minus_shaped(track_deg: float) -> float:
+    """What the new term alone pays at this track angle."""
+    from competition.rewards import PointedReward, ShapedReward
+    from competition.scoring import AttackEnvelope, ScoringWeights
+
+    common = {"weights": ScoringWeights(), "envelope": AttackEnvelope(), "scale": 1.0}
+    geometry = _geometry_at(track_deg)
+    frame = {"g_load": 1.0, "crashed": False, "foe_crashed": False}
+    pointed = PointedReward(**common)(geometry, **frame)
+    shaped = ShapedReward(**common)(geometry, **frame)
+    return pointed - shaped
+
+
+def test_shaped_is_unchanged_so_v6_stays_reproducible():
+    """The one good result on the board trained under `shaped`. Adding the new
+    term to it rather than beside it would have made v6 unrepeatable and the
+    comparison meaningless."""
+    from competition.rewards import ShapedReward
+    from competition.scoring import AttackEnvelope, ScoringWeights
+
+    reward = ShapedReward(weights=ScoringWeights(), envelope=AttackEnvelope())
+
+    assert reward.fine_tracking == 0.0
+
+
+def test_the_new_term_pays_where_the_linear_one_is_flat():
+    """The measured failure. `shaped` pays +0.278 of its tracking term to close
+    from 90 degrees to 40, and +0.022 for the whole of five degrees down to
+    one — so the coarse turn is worth more than the shot, and the span that
+    decides whether anything scores has almost no gradient in it. v6 reaches
+    0.0 degrees, drifts at only 3.2 deg/s, and still spends 3.8% of its close
+    time inside one degree, which is what chance alone would give."""
+    at_five = _pointed_minus_shaped(5.0)
+    at_one = _pointed_minus_shaped(1.0)
+
+    assert at_one > at_five, "closer has to be worth more"
+    # The linear term pays 0.022 of its weight over this span. This one has to
+    # pay enough to be seen next to it, not merely more.
+    assert (at_one - at_five) > 20 * 0.0222 * 400.0 / 60.0
+
+
+def test_the_new_term_leaves_the_coarse_turn_alone():
+    """It is an addition near the cone, not a reweighting of the whole turn. At
+    forty degrees it must be indistinguishable from zero, or it would move the
+    behaviour v6 already does well."""
+    assert _pointed_minus_shaped(40.0) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_new_term_is_a_slope_not_a_step():
+    """PHANG-MAN's is a logistic of steepness 1e5, which is a step at the cone
+    edge. A step hands back the same flat gradient one degree further out, so
+    this one has a real width: it has to be climbing at three degrees, where a
+    policy that has never scored actually is."""
+    three = _pointed_minus_shaped(3.0)
+    two = _pointed_minus_shaped(2.0)
+    one = _pointed_minus_shaped(1.0)
+
+    assert two - three > 0.2 * (one - three), "the climb starts well outside the cone"
