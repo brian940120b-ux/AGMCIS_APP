@@ -16,34 +16,48 @@ deliberate: a session that cannot be the experiment it is named after should
 not spend seven GPU hours pretending to be.
 """
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = "https://github.com/brian940120b-ux/AGMCIS_APP.git"
 BRANCH = "claude/aifcs-flight-simulation-u32h56"
-HOME = Path("/kaggle/working/AGMCIS_APP")
 
-if not HOME.exists():
-    subprocess.run(
-        ["git", "clone", "--depth", "1", "--branch", BRANCH, REPO, str(HOME)],
-        check=True,
-    )
-else:
-    # A rerun in the same session: take whatever was pushed since.
-    subprocess.run(["git", "-C", str(HOME), "fetch", "--depth", "1", "origin", BRANCH], check=False)
-    subprocess.run(["git", "-C", str(HOME), "reset", "--hard", f"origin/{BRANCH}"], check=False)
+#: Scratch, not /kaggle/working. Two reasons, both learned the hard way.
+#: /kaggle/working is what the Output tab lists, and a repository dropped in
+#: there buries the sessions you came for. And it is *restored from the
+#: previous version's output* when a new version starts — so a clone left
+#: there comes back stale, and the first version of this tried to update it in
+#: place with a fetch and a reset that were allowed to fail quietly. They did.
+#: A run then used week-old code while its log said nothing was wrong, and the
+#: only clue was a diagnostic that should have printed and did not.
+HOME = Path("/kaggle/temp/AGMCIS_APP")
 
-trainer = HOME / "AIFCS" / "kaggle" / "aifcs_train.py"
-print(f"running {trainer}", flush=True)
-print(
-    subprocess.run(
-        ["git", "-C", str(HOME), "log", "--oneline", "-1"], capture_output=True, text=True, encoding="utf-8"
-    ).stdout,
-    flush=True,
+# Deleted and recloned, every time. A clone takes seconds; being unsure which
+# code ran costs a six-hour round trip.
+for stale in (HOME, Path("/kaggle/working/AGMCIS_APP")):
+    if stale.exists():
+        print(f"removing stale {stale}", flush=True)
+        shutil.rmtree(stale, ignore_errors=True)
+
+HOME.parent.mkdir(parents=True, exist_ok=True)
+subprocess.run(
+    ["git", "clone", "--depth", "1", "--branch", BRANCH, REPO, str(HOME)],
+    check=True,
 )
 
-code = subprocess.call([sys.executable, str(trainer)])
+# Printed loudly, at the top, because "which version of the code ran" was the
+# question that could not be answered from the log.
+head = subprocess.run(
+    ["git", "-C", str(HOME), "log", "--oneline", "-1"],
+    capture_output=True,
+    text=True,
+    encoding="utf-8",
+).stdout.strip()
+print(f"\n=== running commit {head} ===\n", flush=True)
+
+code = subprocess.call([sys.executable, str(HOME / "AIFCS" / "kaggle" / "aifcs_train.py")])
 if code:
     # Fail the cell, so the finished version is marked failed rather than
     # looking like a run that produced nothing on purpose.
