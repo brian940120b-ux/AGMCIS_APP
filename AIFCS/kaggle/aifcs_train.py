@@ -90,33 +90,87 @@ def setup() -> None:
         run([sys.executable, "-m", "pip", "install", "-q", "-r", str(AIFCS / requirements)])
 
 
+#: What an extracted Stable-Baselines3 model looks like from the outside, used
+#: to recognise one Kaggle has unpacked rather than trusting a folder's name.
+SB3_MARKER = "policy.pth"
+
+
+def _session_folders(dataset: Path) -> dict[str, Path]:
+    """Every session in an attached dataset, however Kaggle left it.
+
+    Three shapes, because putting a model on Kaggle is not as simple as it
+    sounds:
+
+    * ``v4/checkpoint.zip`` — what was uploaded, if it survived.
+    * ``v4/checkpoint/`` — what usually arrives instead. Kaggle unpacks .zip
+      files when a Dataset is created, and a Stable-Baselines3 model *is* a
+      zip, so checkpoint.zip reaches the notebook as a directory and the file
+      the pool looks for no longer exists. Nothing warns you: the only sign is
+      the Dataset preview reading "1 directories, 1 files".
+    * ``v4/checkpoint.sb3`` — the same file renamed before upload to dodge
+      that, which is the tidier fix when building a Dataset fresh.
+
+    Returned as {session name: the folder holding it}, so the caller can match
+    on the name the pool asks for.
+    """
+    found: dict[str, Path] = {}
+    for entry in sorted(dataset.glob("**/*")):
+        packed = entry.is_file() and entry.name in ("checkpoint.zip", "checkpoint.sb3")
+        unpacked = entry.is_dir() and (entry / SB3_MARKER).is_file()
+        if packed or unpacked:
+            # Either way the session is the folder *containing* it, and that
+            # folder's name is what the pool matches on.
+            found.setdefault(entry.parent.name, entry.parent)
+    return found
+
+
+def _install(source: Path, target: Path) -> None:
+    """Put one session where training can read and write it.
+
+    Kaggle mounts /kaggle/input read-only and training writes, so this copies
+    rather than links, and rebuilds the checkpoint if it arrived unpacked.
+    Re-zipping is exact: the archive that comes out has the same entries with
+    the same bytes as the one that went in.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(source.iterdir()):
+        if entry.is_file() and entry.name == "checkpoint.sb3":
+            shutil.copy2(entry, target / "checkpoint.zip")
+        elif entry.is_file():
+            shutil.copy2(entry, target / entry.name)
+        elif entry.is_dir() and (entry / SB3_MARKER).is_file():
+            shutil.make_archive(str(target / "checkpoint"), "zip", root_dir=entry)
+            print(f"    rebuilt checkpoint.zip from {entry.name}/ (Kaggle unpacked it)", flush=True)
+
+
 def bring_in_previous_sessions() -> None:
     """Copy checkpoints from any attached dataset into the models directory.
 
-    Kaggle mounts datasets read-only under /kaggle/input, and training writes,
-    so they are copied rather than linked. A first run has nothing attached and
-    that is not an error — it only means the pool has to be empty.
+    A first run has nothing attached and that is not an error — it only means
+    the pool has to be empty.
     """
     MODELS.mkdir(parents=True, exist_ok=True)
     root = Path("/kaggle/input")
     if not root.is_dir():
         return
     for dataset in sorted(root.iterdir()):
-        for session in sorted(dataset.glob("**/checkpoint.zip")):
-            target = MODELS / session.parent.name
+        for name, folder in _session_folders(dataset).items():
+            target = MODELS / name
             if target.exists():
                 continue
-            shutil.copytree(session.parent, target)
-            print(f"  brought in {session.parent.name}", flush=True)
+            _install(folder, target)
+            card = "with card.json" if (target / "card.json").is_file() else "NO card.json"
+            print(f"  brought in {name} ({card})", flush=True)
 
 
 def describe_inputs() -> str:
     """Everything mounted under /kaggle/input, and where the checkpoints are.
 
-    A missing opponent has two causes that look identical from the outside:
-    the Dataset was never attached, or it was attached and its folders are not
-    named what the pool asks for. This prints enough to tell which without
-    another round trip through Save & Run All.
+    A missing opponent has causes that look identical from the browser: the
+    Dataset was never attached, or it was attached and its folders are not
+    named what the pool asks for, or Kaggle unpacked the checkpoints on the way
+    in. This prints enough to tell which without another round trip through
+    Save & Run All.
     """
     root = Path("/kaggle/input")
     if not root.is_dir():
@@ -128,18 +182,14 @@ def describe_inputs() -> str:
         lines.append("     (nothing)")
     for dataset in datasets:
         lines.append(f"     {dataset.name}/")
-        found = sorted(dataset.glob("**/checkpoint.zip"))
+        found = _session_folders(dataset)
+        for name, folder in found.items():
+            lines.append(f"       {folder.relative_to(dataset)}/   -> session {name!r}")
         if not found:
             # Two levels is enough to see a flattened upload for what it is.
             for entry in sorted(dataset.iterdir())[:10]:
                 lines.append(f"       {entry.name}{'/' if entry.is_dir() else ''}")
-            lines.append("       ^ no checkpoint.zip anywhere in here")
-        for checkpoint in found:
-            # The folder name is what the pool matches on, so it is the thing
-            # worth printing.
-            lines.append(
-                f"       {checkpoint.relative_to(dataset)}   -> would be session {checkpoint.parent.name!r}"
-            )
+            lines.append("       ^ no checkpoint here, unpacked or otherwise")
     lines.append("   對手是用資料夾名字比對的,上面的名字要跟 POOL 一樣。")
     return "\n".join(lines)
 
