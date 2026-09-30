@@ -169,11 +169,11 @@ def _pointed_minus_shaped(track_deg: float) -> float:
     from competition.rewards import PointedReward, ShapedReward
     from competition.scoring import AttackEnvelope, ScoringWeights
 
-    common = {"weights": ScoringWeights(), "envelope": AttackEnvelope(), "scale": 1.0}
     geometry = _geometry_at(track_deg)
-    frame = {"g_load": 1.0, "crashed": False, "foe_crashed": False}
-    pointed = PointedReward(**common)(geometry, **frame)
-    shaped = ShapedReward(**common)(geometry, **frame)
+    pointed_reward = PointedReward(weights=ScoringWeights(), envelope=AttackEnvelope(), scale=1.0)
+    shaped_reward = ShapedReward(weights=ScoringWeights(), envelope=AttackEnvelope(), scale=1.0)
+    pointed = pointed_reward(geometry, g_load=1.0, crashed=False, foe_crashed=False)
+    shaped = shaped_reward(geometry, g_load=1.0, crashed=False, foe_crashed=False)
     return pointed - shaped
 
 

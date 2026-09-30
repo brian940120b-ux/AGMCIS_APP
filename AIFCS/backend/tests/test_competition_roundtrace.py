@@ -11,20 +11,22 @@ from pathlib import Path
 
 import pytest
 
+from competition.roundtrace import RoundTrace, passes, read_trace, summarise
 from competition.scoring import AttackEnvelope
-from competition.trace import RoundTrace, passes, read_trace, summarise
+from competition.state import Geometry
 
 
-class _Geometry:
-    """Just the fields a trace records."""
-
-    def __init__(self, track_angle_deg: float, distance_m: float = 300.0) -> None:
-        self.track_angle_deg = track_angle_deg
-        self.distance_m = distance_m
-        self.distance_ft = distance_m / 0.3048
-        self.aspect_angle_deg = 0.0
-        self.own_alt_m = 3000.0
-        self.enemy_alt_m = 3000.0
+def _geometry(track_angle_deg: float, distance_m: float = 300.0) -> Geometry:
+    """A frame with the nose this far off, inside the firing range."""
+    return Geometry(
+        distance_m=distance_m,
+        track_angle_deg=track_angle_deg,
+        azimuth_deg=track_angle_deg,
+        elevation_deg=0.0,
+        aspect_angle_deg=0.0,
+        own_alt_m=3000.0,
+        enemy_alt_m=3000.0,
+    )
 
 
 def _write(tmp_path: Path, angles: list[float]) -> Path:
@@ -33,7 +35,7 @@ def _write(tmp_path: Path, angles: list[float]) -> Path:
     trace.open()
     accumulated = 0.0
     for angle in angles:
-        geometry = _Geometry(angle)
+        geometry = _geometry(angle)
         if AttackEnvelope().contains(geometry):
             accumulated += 1 / 60.0
         trace.record(geometry, attack_seconds=accumulated, g_load=1.0, floor_active=False)

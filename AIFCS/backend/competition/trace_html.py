@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from competition.trace import passes, read_trace
+from competition.roundtrace import passes, read_trace
 
 #: Points drawn per chart. Eighteen thousand frames is more SVG than a browser
 #: enjoys and more detail than a screen can show.

@@ -406,7 +406,7 @@ def evaluate(
 
 def _trace_for(trace_dir: Path, label: str, config: EnvConfig, seed: int) -> Any:
     """One trace file per round, named so a directory sorts into an experiment."""
-    from competition.trace import RoundTrace
+    from competition.roundtrace import RoundTrace
 
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
     trace_dir.mkdir(parents=True, exist_ok=True)
