@@ -1,4 +1,4 @@
-# A self-play ladder, as a file.
+# The experiments, as a ladder for the laptop.
 #
 # Not in configs/: that directory is the platform's settings, and a test
 # checks that every section of every file in it is read by load_settings.
@@ -7,52 +7,64 @@
 # Run it with:  scripts/ladder.sh plans/ladder.yaml
 # See it without running it:  scripts/ladder.sh plans/ladder.yaml --dry-run
 #
-# Each step trains a session and then scores it against the same opponents it
-# trained against. `pool` names earlier sessions, so each generation fights
-# everything before it — which is the point, because both built-in opponents
-# are beaten by a centred stick (the drone 65% of the time, the pursuit
-# controller 90%) and beating them measures nothing.
+# The records under experiments/ are the source of truth for what each step
+# is and why (EXP-002 to EXP-007); this file is the same recipes in the order
+# a laptop would run them overnight, one after another. Kaggle runs them as
+# separate notebook versions instead (docs/TRAINING_ROADMAP.md 4.5).
+#
+# A pool may name scripted opponents (break, energy, scissors, wanderer,
+# pursuit, reference) beside sessions; only the sessions have to exist under
+# models/competition. v4 and v5 are not steps: they exist already.
 #
 # Safe to rerun. A step already at its target is skipped and a part-finished
-# one resumes, so a machine that dies at step three is recovered by running
-# the same command again.
-#
-# v4 and v5 are not steps here: they exist already and are only opponents.
-#
-# --batch-size 512 is in every step because the timing says so: 93% of a
-# training step is the gradient update and the GPU sits at 33% utilisation, so
-# the calls are small rather than the card slow. A bigger batch is more work
-# per call to a card that is waiting. It changes the experiment — measure the
-# result rather than assuming it.
+# one resumes.
 
 steps:
-  # One step, and one change from v6. v6 is the best thing on the board — 90%
-  # and +5,501 against v4 — and its best round accumulated 2.22 of the 3.00
-  # seconds a kill needs. What is missing was measured, not guessed:
-  #
-  #   deg/s 3.2   the aim drifts a third of a degree between decisions, so
-  #               10 Hz has room to hold the cone. Not a control problem.
-  #   best  0.0   it reaches dead centre. Not an ability problem.
-  #   cone  0.38   against 10.1 s within five degrees. That ratio is 3.8% and
-  #   <5deg 10.1   the solid angle of one degree inside five is 4%, so it
-  #               spends time in the cone exactly as often as drifting through
-  #               at random would give. It passes through because nothing pays
-  #               it to stay.
-  #
-  # `pointed` is `shaped` plus a second tracking term that is steep near the
-  # cone. Over five degrees down to one the old term pays 0.022 of its weight
-  # and the new one pays 0.793. At forty degrees the new term is zero, so the
-  # coarse turn v6 already does well is untouched.
-  #
-  # Named v7p, not v7: models/competition/v7 is the half-finished `shaped` run
-  # that was stopped, and these are two different experiments.
-  #
-  # Everything else is v6's, unchanged, because a run that moves two things
-  # cannot say which one moved the result.
-  - name: v7p
+  # EXP-002: v6's recipe, one change — the opponent distribution. The
+  # scripted set joins v4 and v5 in the pool, and the league weights whoever
+  # is beating the policy from the first round (the paper rule's gate never
+  # opens in a 2,000,000-step run; see league.py).
+  - name: v8_pool
     flags: >-
-      --reward pointed --rudder-limit 0.6
+      --reward shaped --rudder-limit 0.6
       --ground-avoidance --g-limit 9
       --action-repeat 6 --gamma 0.995 --gradient-steps -1
-      --observation extended --batch-size 512 --timesteps 2000000
-    pool: [v4, v5]
+      --observation extended --batch-size 512 --league ema --timesteps 2000000
+    pool: [v4, v5, break, energy, scissors, wanderer, pursuit]
+
+  # EXP-003: v8_pool plus mirrored replay.
+  - name: v8_mirror
+    flags: >-
+      --reward shaped --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation extended --batch-size 512 --league ema --mirror --timesteps 2000000
+    pool: [v4, v5, break, energy, scissors, wanderer, pursuit]
+
+  # EXP-005: v8_pool with the tracking bonus paid as a potential difference.
+  - name: v8_potential
+    flags: >-
+      --reward potential --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation extended --batch-size 512 --league ema --timesteps 2000000
+    pool: [v4, v5, break, energy, scissors, wanderer, pursuit]
+
+  # EXP-006: v8_pool on the 105-wide frames observation.
+  - name: v8_frames
+    flags: >-
+      --reward shaped --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation frames --batch-size 512 --league ema --timesteps 2000000
+    pool: [v4, v5, break, energy, scissors, wanderer, pursuit]
+
+  # EXP-007: v8_pool trained on abreast : head-on = 4 : 1 starts. Scored, as
+  # every step is, on the rules' random start.
+  - name: v8_mix
+    flags: >-
+      --reward shaped --rudder-limit 0.6
+      --ground-avoidance --g-limit 9
+      --action-repeat 6 --gamma 0.995 --gradient-steps -1
+      --observation extended --batch-size 512 --league ema --geometry mix --timesteps 2000000
+    pool: [v4, v5, break, energy, scissors, wanderer, pursuit]

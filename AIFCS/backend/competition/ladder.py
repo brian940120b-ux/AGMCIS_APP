@@ -56,19 +56,32 @@ class Step:
     pool: list[str] = field(default_factory=list)
     evaluate: bool = True
 
+    def scripted(self) -> list[str]:
+        """The pool entries that are scripted opponents, not sessions."""
+        from competition.environment import opponent_names
+
+        names = set(opponent_names())
+        return [name for name in self.pool if name in names]
+
+    def sessions(self) -> list[str]:
+        """The pool entries that have to exist as sessions under the root."""
+        scripted = set(self.scripted())
+        return [name for name in self.pool if name not in scripted]
+
     def pool_paths(self, root: Path) -> list[str]:
         """Opponent checkpoints, by session name.
 
         Named rather than pathed so a plan reads as a ladder and does not
-        repeat the directory layout on every line.
+        repeat the directory layout on every line. Scripted names are not
+        paths and are not here; `train_command` passes them as themselves.
         """
-        return [str(root / name / "checkpoint.zip") for name in self.pool]
+        return [str(root / name / "checkpoint.zip") for name in self.sessions()]
 
     def train_command(self, python: str, root: Path) -> list[str]:
         command = [python, "-m", "competition.train", "--name", self.name]
         command += self.flags.split()
         if self.pool:
-            command += ["--opponent-pool", *self.pool_paths(root)]
+            command += ["--opponent-pool", *self.scripted(), *self.pool_paths(root)]
         return command
 
     def evaluate_command(self, python: str, root: Path) -> list[str]:
@@ -82,7 +95,9 @@ class Step:
             # scored under one, or its own report compares two different
             # aeroplanes.
             command.append("--ground-avoidance")
-        if self.pool:
+        if self.pool_paths(root):
+            # The scoreboard already fights the scripted set; the pool row is
+            # for the saved policies the step trained against.
             command += ["--opponent-pool", *self.pool_paths(root)]
         return command
 
@@ -150,7 +165,9 @@ def missing_opponents(step: Step, root: Path, coming: set[str] | None = None) ->
     """
     built = coming or set()
     return [
-        name for name in step.pool if name not in built and not (root / name / "checkpoint.zip").is_file()
+        name
+        for name in step.sessions()
+        if name not in built and not (root / name / "checkpoint.zip").is_file()
     ]
 
 

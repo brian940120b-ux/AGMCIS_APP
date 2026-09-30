@@ -105,6 +105,7 @@ def test_build_config_splits_names_from_paths(tmp_path, monkeypatch):
         g_limit=0.0,
         algorithm="sac",
         league="ema",
+        geometry="published",
     )
     config = train.build_config(args)
     assert config.opponent_pool == {"break": "break", "scissors": "scissors"}

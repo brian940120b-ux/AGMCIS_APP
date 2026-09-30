@@ -81,7 +81,7 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 | H3 | **Exploiter**：凍結最好的模型，從零練一個專打它的，進池 | **已做**：`--opponent-pool v6 --stop-at-win-rate 0.7 --win-window 50`；紀錄 `EXP-004-exploiter`（Dataset 要加 v6） | 韓國冠軍每 500 輪做一次；揭露固定弱點最直接的方法 |
 | H4 | **位能差 shaping** Φ(s′)−Φ(s) | **已做**：`--reward potential`；紀錄 `EXP-005-potential-shaping`（= EXP-002 只換獎勵） | 三個來源都用；但 v7p 的教訓是獎勵改動最容易白跑，所以排在對手之後 |
 | H5 | 視線系/速度系觀測 | **已做**：`--observation frames`（105 維）；紀錄 `EXP-006-frames-observation`（= EXP-002 只換觀測） | 改觀測 = 跟舊 pool 不相容，代價最大 |
-| H6 | 課程初始分佈 | `RoundSetup` 選項 | 只影響訓練，評測仍用 3/6/9 千呎 |
+| H6 | 課程初始分佈 | **已做**：`--geometry published/abreast/headon/offensive/defensive/mix`；續練可以換（= 課程），card 記歷史；紀錄 `EXP-007-start-geometry` | 只影響訓練，評測仍用規則的隨機起始 |
 
 **不做的**：HP 模型、200 秒、放寬的錐、離散動作、任何改 OBS/CMD/計分的東西。
 
@@ -108,6 +108,32 @@ v6 量出來就是這樣（1° 內的時間只有立體角的機率值）。`pot
 × 5 個座標系（世界 NED、我機體、我速度系、敵速度系、視線系），去掉常數或已經有的組合。
 封包**沒有**敵機姿態與角速度，所以沒有「敵機體座標系」和「敵角速度」—— 不編造。
 鏡像符號表也涵蓋 105 維（普通向量 y 翻號、角速度 x/z 翻號），由編碼器本身驗證，所以 `--mirror` 可以疊加。
+
+## 4.4 H6 已做好的部分：`--geometry`
+
+只改**訓練回合**開始時兩機怎麼面對：`published`（規則：隨機方位、隨機航向，預設）、`abreast`（3/9 線並排反向，
+韓國冠軍的主分佈）、`headon`（迎頭）、`offensive`（目標在前方飛離，我們一開始就在錐附近）、`defensive`（目標在後面追）、
+`mix`（abreast : headon = 4 : 1，SRC-012 的訓練分佈）。距離 3/6/9 千呎、高度 10–20 千呎、340 節**不變**。
+評測器從不讀 card 的 setup（測試鎖住），所以訓練用什麼幾何都不會改變考試。
+
+**課程 = 同一個 session 續練時換幾何**：`--geometry offensive` 練 50 萬步，再用 `--geometry published` 續練，
+不會被擋（geometry 是 growable），card 的 `geometry_history` 記錄每一段從第幾步開始。
+
+## 4.5 四個假設全部做完之後：跑的順序
+
+| 順序 | 實驗 | 比誰 | 改了什麼 |
+|---|---|---|---|
+| 1 | EXP-001 | — | 主辦方原配方（地板） |
+| 2 | EXP-002 | v6 | 對手分佈（池 + ema） |
+| 3 | EXP-003 | EXP-002 | + `--mirror` |
+| 4 | EXP-005 | EXP-002 | 獎勵 `potential` |
+| 5 | EXP-006 | EXP-002 | 觀測 `frames` |
+| 6 | EXP-007 | EXP-002 | 起始 `mix` |
+| 7 | EXP-004 | v6 的勝率 | exploiter（Dataset 要加 v6） |
+
+3–6 各自只跟 EXP-002 差一件事，可以**平行跑**（Kaggle 一次一個 notebook version，開四個 version 就是四個實驗）。
+每個都要先 `git pull`、改 `kaggle/aifcs_train.py` 第 60 行的 EXPERIMENT、push，再 Save & Run All。
+贏的那些旗標最後疊在一起，變成 EXP-009（那時再寫紀錄）。
 
 ## 5. 每次跑完都要看的三個數字
 

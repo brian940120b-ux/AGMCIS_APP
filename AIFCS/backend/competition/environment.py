@@ -67,6 +67,20 @@ FT_TO_M = 0.3048
 OBSERVATION_BOUND = 500.0
 
 
+#: How the two aircraft face each other at the start of a *training* round.
+#: "published" is the rules' own: random bearing, random headings. The rest
+#: are training distributions only (a curriculum), never the exam: the
+#: evaluator does not read the setup from a card (evaluate.config_from_card).
+#:
+#:   abreast    side by side on the 3/9 line, flying opposite ways — a
+#:              neutral merge; the Korean winners' main training start
+#:   headon     nose to nose
+#:   offensive  the target ahead and flying away: we start near the cone
+#:   defensive  the target behind us, chasing
+#:   mix        abreast : headon = 4 : 1, SRC-012's training distribution
+GEOMETRIES: tuple[str, ...] = ("published", "abreast", "headon", "offensive", "defensive", "mix")
+
+
 @dataclass(frozen=True)
 class RoundSetup:
     """Initial conditions. 競賽規則 1 of NCSIST-AIPilot-01."""
@@ -74,6 +88,9 @@ class RoundSetup:
     separations_ft: tuple[float, ...] = (3000.0, 6000.0, 9000.0)
     altitude_range_ft: tuple[float, float] = (10_000.0, 20_000.0)
     speed_kcas: float = 340.0
+    #: One of GEOMETRIES. Separation, altitude and speed stay the rules' own
+    #: whatever this says; it only decides the headings and the bearing.
+    geometry: str = "published"
     #: Where the engagement happens. Only the relative geometry matters, but
     #: latitude enters the tangent-plane conversion, so it is not arbitrary.
     centre_lat_deg: float = 23.060552
@@ -400,6 +417,7 @@ class EnvConfig:
             "separations_ft": list(self.setup.separations_ft),
             "altitude_range_ft": list(self.setup.altitude_range_ft),
             "speed_kcas": self.setup.speed_kcas,
+            "geometry": self.setup.geometry,
             "jsbsim_root": self.jsbsim_root or "installed package",
             "rudder_enabled": self.rudder_enabled,
             "rudder_limit": self.rudder_limit,
@@ -473,9 +491,7 @@ class CompetitionRound:
         # a foot. Two independent draws from a 10,000 ft range do not do that,
         # so the altitude is shared by construction and is shared here.
         foe_altitude_ft = altitude_ft
-        bearing_deg = self.random.uniform(0.0, 360.0)
-        own_heading = self.random.uniform(0.0, 360.0)
-        foe_heading = self.random.uniform(0.0, 360.0)
+        bearing_deg, own_heading, foe_heading = initial_geometry(self.random, setup.geometry)
 
         foe_lat, foe_lon = _offset(
             setup.centre_lat_deg, setup.centre_lon_deg, bearing_deg, separation_ft * FT_TO_M
@@ -586,6 +602,33 @@ class CompetitionRound:
         if self.frame >= int(self.config.round_seconds * SIM_HZ):
             return "TIME"
         return ""
+
+
+def initial_geometry(rng: random.Random, geometry: str) -> tuple[float, float, float]:
+    """(bearing to the target, own heading, target heading), in degrees.
+
+    "published" draws its three numbers in the order the round always has,
+    so a seeded round is the round it was before this function existed.
+    """
+    if geometry == "published":
+        return rng.uniform(0.0, 360.0), rng.uniform(0.0, 360.0), rng.uniform(0.0, 360.0)
+    if geometry not in GEOMETRIES:
+        raise ValueError(f"geometry must be one of {GEOMETRIES}, not {geometry!r}")
+    own = rng.uniform(0.0, 360.0)
+    if geometry == "mix":
+        geometry = "abreast" if rng.random() < 0.8 else "headon"
+    side = rng.choice((-1.0, 1.0))
+    if geometry == "abreast":
+        bearing, foe = own + side * 90.0, own + 180.0
+    elif geometry == "headon":
+        bearing, foe = own, own + 180.0
+    elif geometry == "offensive":
+        # Not dead astern: a little off to a side, so the first seconds are a
+        # small correction rather than nothing at all.
+        bearing, foe = own + side * rng.uniform(0.0, 20.0), own
+    else:  # defensive
+        bearing, foe = own + 180.0 + side * rng.uniform(0.0, 20.0), own
+    return bearing % 360.0, own, foe % 360.0
 
 
 def _offset(lat_deg: float, lon_deg: float, bearing_deg: float, distance_m: float) -> tuple[float, float]:

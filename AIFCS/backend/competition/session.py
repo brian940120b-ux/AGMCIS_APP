@@ -151,7 +151,10 @@ class Session:
     #: is here because a pool that grows is the curriculum working as intended:
     #: self-play means dropping this session's own snapshots into it, so
     #: refusing the resume would refuse the technique.
-    GROWABLE = frozenset({"opponent_pool"})
+    #: `geometry` for the same reason: a curriculum is this session started on
+    #: offensive starts and resumed on the published ones, and the card keeps
+    #: the history of that under `geometry_history`.
+    GROWABLE = frozenset({"opponent_pool", "geometry", "geometry_history"})
 
     def check_compatible(self, state: SessionState, wanted: SessionState) -> None:
         """Refuse to continue a run against a different problem."""

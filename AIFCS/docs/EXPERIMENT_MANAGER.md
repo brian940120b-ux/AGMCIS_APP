@@ -57,3 +57,4 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-004-exploiter` | PLANNED | v6 配方、池只有 v6、`--stop-at-win-rate 0.7`。H3；Dataset 要加 v6 |
 | `EXP-005-potential-shaping` | PLANNED | EXP-002 配方，`--reward potential`。H4；看 cone+ |
 | `EXP-006-frames-observation` | PLANNED | EXP-002 配方，`--observation frames`。H5 |
+| `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |

@@ -293,3 +293,38 @@ def test_a_dry_run_does_not_report_work_as_done(tmp_path):
 
     assert results[0]["outcome"] == "would run"
     assert calls == [], "and nothing was actually run"
+
+
+# ------------------------------------------ scripted names in a pool (H2)
+
+
+def test_scripted_names_ride_through_as_themselves_and_sessions_become_paths(tmp_path):
+    step = Step(name="v8", pool=["v4", "break", "scissors", "v5"])
+
+    command = step.train_command("python", tmp_path)
+    entries = command[command.index("--opponent-pool") + 1 :]
+
+    assert entries[:2] == ["break", "scissors"]
+    assert [Path(entry) for entry in entries[2:]] == [
+        tmp_path / "v4" / "checkpoint.zip",
+        tmp_path / "v5" / "checkpoint.zip",
+    ]
+
+
+def test_a_scripted_name_is_never_reported_missing(tmp_path):
+    _session(tmp_path, "v4")
+
+    assert missing_opponents(Step(name="v8", pool=["v4", "break", "wanderer"]), tmp_path) == []
+
+
+def test_scoring_passes_only_the_saved_policies(tmp_path):
+    step = Step(name="v8", pool=["break", "v4"])
+
+    command = step.evaluate_command("python", tmp_path)
+
+    assert "break" not in command
+    assert Path(command[command.index("--opponent-pool") + 1]) == tmp_path / "v4" / "checkpoint.zip"
+
+
+def test_a_pool_of_scripted_names_only_scores_without_a_pool_flag(tmp_path):
+    assert "--opponent-pool" not in Step(name="v8", pool=["break"]).evaluate_command("python", tmp_path)

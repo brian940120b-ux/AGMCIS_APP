@@ -17,6 +17,12 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — H6：`--geometry`（訓練用起始幾何，可當課程）
+
+- `environment.GEOMETRIES`、`RoundSetup.geometry`、`initial_geometry()`：published 的三個亂數順序不變（同 seed 同回合）；abreast / headon / offensive / defensive / mix（4:1）。距離、高度、速度不動。card 記 `geometry`；`evaluate.config_from_card` 不讀（測試鎖住）。
+- `session.GROWABLE` 加 `geometry`、`geometry_history`；`train.refresh_growable` 續練換幾何時寫下 `{from_step, geometry}` 歷史並印一行。
+- 紀錄 `EXP-007-start-geometry`：EXP-002 配方 + `--geometry mix`。路線圖 4.5：七個實驗的執行順序與比較對象。
+
 ## 2026-09-30 — H5：`--observation frames`（多座標系觀測）
 
 - `competition/frames.py`：`FramesEncoder` = extended + 25 組 (向量, 座標系) × 3 = 75，共 105 維；速度系/視線系以重力固定滾轉，垂直退化用北。`environment.OBSERVATIONS` 與 `observation_width()` 成為唯一的名單與寬度來源（evaluate 改用它）。`mirror.observation_signs` 涵蓋 105 維。

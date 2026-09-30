@@ -20,6 +20,7 @@ that spawn workers.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 import time
@@ -31,7 +32,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from competition.action import RUDDER_LIMIT
-from competition.environment import OBSERVATIONS, EnvConfig, RoundSetup, opponent_names
+from competition.environment import GEOMETRIES, OBSERVATIONS, EnvConfig, RoundSetup, opponent_names
 from competition.gym_env import make_vec_env
 from competition.league import LEAGUE_SCHEMES
 from competition.rewards import RewardMode
@@ -78,6 +79,7 @@ INHERITED: dict[str, tuple[str, str]] = {
     "g_limit": ("environment", "g_limit"),
     "league": ("environment", "league_scheme"),
     "mirror": ("hyperparameters", "mirror"),
+    "geometry": ("environment", "geometry"),
 }
 
 #: Settings whose recorded shape is not the flag's shape.
@@ -118,6 +120,7 @@ DEFAULTS: dict[str, Any] = {
     "g_limit": 0.0,
     "league": "paper",
     "mirror": False,
+    "geometry": "published",
 }
 
 
@@ -177,6 +180,7 @@ def inherit(args: argparse.Namespace, state: SessionState | None) -> None:
 
 def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
+    setup = dataclasses.replace(setup, geometry=args.geometry)
     pool: dict[str, Any] = {}
     if args.opponent_pool:
         from competition.league import collect_checkpoints, opponent_from_checkpoint
@@ -298,6 +302,7 @@ def train(args: argparse.Namespace) -> int:
     if existing is not None:
         session.check_compatible(existing, wanted)
         state = existing
+        refresh_growable(state, wanted)
         state.target_timesteps = args.timesteps
         state.workers = args.workers
         remaining = args.timesteps - state.timesteps_done
@@ -483,6 +488,28 @@ def train(args: argparse.Namespace) -> int:
     return 130 if interrupted else 0
 
 
+def refresh_growable(state: SessionState, wanted: SessionState) -> None:
+    """Carry a growable setting's new value into the session, with its history.
+
+    `check_compatible` lets a pool grow and a geometry change on resume; the
+    card then has to say what the session was *last* trained on, and — for
+    the geometry, which is a curriculum — when each stage began.
+    """
+    old_geometry = state.environment.get("geometry")
+    new_geometry = wanted.environment.get("geometry")
+    if new_geometry is not None and new_geometry != old_geometry:
+        history = list(state.environment.get("geometry_history") or [])
+        if not history and old_geometry is not None:
+            history.append({"from_step": 0, "geometry": old_geometry})
+        history.append({"from_step": state.timesteps_done, "geometry": new_geometry})
+        state.environment["geometry_history"] = history
+        step = f"{state.timesteps_done:,}"
+        print(f"geometry: {old_geometry} -> {new_geometry} from step {step} (curriculum stage)")
+    for key in ("opponent_pool", "geometry"):
+        if key in wanted.environment:
+            state.environment[key] = wanted.environment[key]
+
+
 def _write_card(session: Session, state: SessionState) -> None:
     """What this policy was trained against, for the registry and for a person."""
     card = state.as_dict()
@@ -665,6 +692,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "how a pool is sampled: 'paper' (PHANG-MAN's gate and window, the default) or "
             "'ema' (a moving average that weights the opponents beating us from the first round)"
+        ),
+    )
+    parser.add_argument(
+        "--geometry",
+        choices=GEOMETRIES,
+        default=None,
+        help=(
+            "how the two aircraft face each other at the start of a TRAINING round; the "
+            "published random start is the default and is always what the evaluator uses. "
+            "May change on resume: that is a curriculum, and the card keeps the history"
         ),
     )
     parser.add_argument(
