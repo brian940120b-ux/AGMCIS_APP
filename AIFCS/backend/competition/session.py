@@ -66,6 +66,9 @@ class SessionState:
     workers: int = 1
     created_at: str = ""
     updated_at: str = ""
+    #: The win rate a --stop-at-win-rate run ended on, or None for a run that
+    #: ended on its step count. An exploiter's card says why it stopped.
+    stopped_at_win_rate: float | None = None
     version: int = STATE_VERSION
 
     def as_dict(self) -> dict[str, Any]:

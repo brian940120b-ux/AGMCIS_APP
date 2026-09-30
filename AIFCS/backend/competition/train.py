@@ -397,6 +397,13 @@ def train(args: argparse.Namespace) -> int:
     remaining = args.timesteps - state.timesteps_done
     state.runs += 1
     callback = checkpoint_callback(session, state, args.checkpoint_every, args.save_buffer, args.max_hours)
+    from competition.winrate import WinRate
+
+    win_rate = WinRate(stop_at=args.stop_at_win_rate, min_rounds=args.win_window, window=args.win_window)
+    if args.stop_at_win_rate is not None:
+        print(
+            f"stop:     when the win rate over {args.win_window} rounds reaches {args.stop_at_win_rate:.0%}"
+        )
 
     started = time.perf_counter()
     interrupted = False
@@ -408,7 +415,7 @@ def train(args: argparse.Namespace) -> int:
                 total_timesteps=remaining,
                 reset_num_timesteps=True,
                 progress_bar=False,
-                callback=callback,
+                callback=[callback, win_rate],
             )
     except KeyboardInterrupt:
         interrupted = True
@@ -441,6 +448,21 @@ def train(args: argparse.Namespace) -> int:
     # A stop file ends `learn` normally, so without this the run would report
     # "Done." for a session it was asked to abandon halfway.
     interrupted = interrupted or bool(getattr(callback, "stopped", False))
+    if win_rate.reached:
+        # The rule said stop, so the target is met by that rule rather than by
+        # the step count. Recorded as such: a rerun says the target is met
+        # instead of training on, and the card says why it ended.
+        state.target_timesteps = state.timesteps_done
+        state.stopped_at_win_rate = win_rate.win_rate
+        session.write_state(state)
+    if win_rate.win_rate is not None:
+        rounds = ", ".join(
+            f"{name} {rate:.0%}" for name, rate in sorted(win_rate.rates_by_opponent().items())
+        )
+        print(
+            f"won:      {win_rate.win_rate:.0%} of the last {len(win_rate.recent)} rounds"
+            + (f" ({rounds})" if rounds else "")
+        )
 
     rate = (state.timesteps_done - callback.started_steps) / elapsed if elapsed else None
     print(f"\n{describe_progress(state, rate)}")
@@ -642,6 +664,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "how a pool is sampled: 'paper' (PHANG-MAN's gate and window, the default) or "
             "'ema' (a moving average that weights the opponents beating us from the first round)"
         ),
+    )
+    parser.add_argument(
+        "--stop-at-win-rate",
+        type=float,
+        default=None,
+        metavar="RATE",
+        help=(
+            "end the run once the win rate (表 3 verdicts) over the last --win-window rounds "
+            "reaches RATE, e.g. 0.7 for an exploiter trained against one frozen checkpoint"
+        ),
+    )
+    parser.add_argument(
+        "--win-window",
+        type=int,
+        default=50,
+        metavar="ROUNDS",
+        help="rounds the win rate is taken over, and the fewest before --stop-at-win-rate can fire",
     )
     parser.add_argument("--jsbsim-root", default=None)
     parser.add_argument("--reference-setup", action="store_true")

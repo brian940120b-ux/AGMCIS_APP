@@ -138,16 +138,19 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         if finished:
             info["score"] = self.round.score.as_dict()
             info["opponent_score"] = self.round.opponent_score.as_dict()
+            # Scored with the organiser's own table, so "won" here means what
+            # it means on the day. Always, not only with a league: the
+            # training process reads it (competition/winrate.py) to say how
+            # the run is doing in the day's units, and to stop an exploiter.
+            outcome = decide_round(
+                self.round.score,
+                self.round.opponent_score,
+                blue_crashed=reason == "CRASH",
+                red_crashed=reason == "FOE_CRASH",
+                collided=reason == "COLLISION",
+            )
+            info["verdict"] = outcome.verdict.value
             if self._league is not None and self._facing is not None:
-                outcome = decide_round(
-                    self.round.score,
-                    self.round.opponent_score,
-                    blue_crashed=reason == "CRASH",
-                    red_crashed=reason == "FOE_CRASH",
-                    collided=reason == "COLLISION",
-                )
-                # Scored with the organiser's own table, so "won" in the league
-                # means what it means on the day.
                 self._league.record(self._facing, outcome.verdict is Verdict.BLUE)
                 info["opponent_name"] = self._facing
         return state, float(reward), terminated, truncated, info

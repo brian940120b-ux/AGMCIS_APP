@@ -54,3 +54,4 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-001-official-sac-baseline` | PLANNED | PART 11.1 的 OFFICIAL_SAC_BASELINE，零旗標 |
 | `EXP-002-opponent-distribution` | PLANNED | v6 配方 + 腳本對手進池（v4 v5 break energy scissors wanderer pursuit）+ `--league ema`。H2 |
 | `EXP-003-mirror` | PLANNED | EXP-002 + `--mirror`。H1；等 EXP-002 有結果再跑 |
+| `EXP-004-exploiter` | PLANNED | v6 配方、池只有 v6、`--stop-at-win-rate 0.7`。H3；Dataset 要加 v6 |

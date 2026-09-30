@@ -78,12 +78,21 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 
 | 順序 | 假設 | 要做的事 | 為什麼排這 |
 |---|---|---|---|
-| H3 | **Exploiter**：凍結最好的模型，從零練一個專打它的，進池 | `train.py` 新旗標 `--exploit <checkpoint>`；`ladder.yaml` 一步 | 韓國冠軍每 500 輪做一次；揭露固定弱點最直接的方法 |
+| H3 | **Exploiter**：凍結最好的模型，從零練一個專打它的，進池 | **已做**：`--opponent-pool v6 --stop-at-win-rate 0.7 --win-window 50`；紀錄 `EXP-004-exploiter`（Dataset 要加 v6） | 韓國冠軍每 500 輪做一次；揭露固定弱點最直接的方法 |
 | H4 | **位能差 shaping** Φ(s′)−Φ(s) | `rewards.py` 新 `RewardMode.POTENTIAL` | 三個來源都用；但 v7p 的教訓是獎勵改動最容易白跑，所以排在對手之後 |
 | H5 | 視線系/速度系觀測 | `features.py` 新 `--observation frames` | 改觀測 = 跟舊 pool 不相容，代價最大 |
 | H6 | 課程初始分佈 | `RoundSetup` 選項 | 只影響訓練，評測仍用 3/6/9 千呎 |
 
 **不做的**：HP 模型、200 秒、放寬的錐、離散動作、任何改 OBS/CMD/計分的東西。
+
+## 4.1 H3 已做好的部分：訓練中就看得到勝率
+
+之前訓練過程只看得到 reward，看不到「贏幾成」—— 每個 worker 各自記帳，主程序不知道。現在每回合結束時
+環境把表 3 的判定放進 `info["verdict"]`，訓練主程序算滾動勝率（整體 + 每個對手），寫進 TensorBoard 的
+`league/win_rate`、`league/win_rate_vs_<對手>`，跑完也印一行 `won:  62% of the last 50 rounds (break 80%, v5 40%)`。
+
+`--stop-at-win-rate 0.7 --win-window 50`：最近 50 回合勝率到 70% 就停，card 記 `stopped_at_win_rate`，
+再跑一次會說 target already met。這就是 exploiter 的停止規則。**預設不停**（None）。
 
 ## 5. 每次跑完都要看的三個數字
 
