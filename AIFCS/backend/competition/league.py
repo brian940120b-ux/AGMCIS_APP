@@ -57,6 +57,19 @@ GATE_WIN_RATE = 0.5
 #: And their window: the last hundred matchups against each opponent.
 WINDOW = 100
 
+#: The other scheme, from the winners of the same problem in Korea
+#: (research/sources.yaml SRC-012, train.py defaults): no gate and no window.
+#: Each opponent keeps an exponential moving average of our results against
+#: it, and sampling is half uniform, half a softmax that favours whoever the
+#: average says is beating us. It starts weighting from the first round, which
+#: matters here: the paper's gate needs every opponent met a hundred times per
+#: worker, and at 2,000,000 steps over eight workers a worker sees a few dozen
+#: rounds in all — the paper's weighting never switches on in our budget.
+LEAGUE_SCHEMES = ("paper", "ema")
+EMA_ALPHA = 0.1
+EMA_TEMPERATURE = 0.3
+EMA_UNIFORM_FLOOR = 0.5
+
 
 class PolicyOpponent:
     """A saved policy flying the opposing aircraft.
@@ -315,6 +328,9 @@ class Record:
 
     name: str
     results: deque[bool] = field(default_factory=lambda: deque(maxlen=WINDOW))
+    #: Exponential moving average of our win rate against this opponent, for
+    #: the "ema" scheme. Starts at a half, like `win_rate` on no evidence.
+    ema: float = 0.5
 
     @property
     def played(self) -> int:
@@ -345,17 +361,28 @@ class League:
     min_share: float = MIN_SHARE
     max_share: float = MAX_SHARE
     seed: int = 0
+    #: "paper" is PHANG-MAN's rule above; "ema" is SRC-012's, see LEAGUE_SCHEMES.
+    scheme: str = "paper"
+    ema_alpha: float = EMA_ALPHA
+    temperature: float = EMA_TEMPERATURE
+    uniform_floor: float = EMA_UNIFORM_FLOOR
 
     def __post_init__(self) -> None:
         if not self.names:
             raise ValueError("a league needs at least one opponent")
+        if self.scheme not in LEAGUE_SCHEMES:
+            raise ValueError(f"league scheme must be one of {LEAGUE_SCHEMES}, not {self.scheme!r}")
+        if not 0.0 <= self.uniform_floor <= 1.0:
+            raise ValueError(f"uniform_floor is a share, not {self.uniform_floor}")
         self.records = {name: Record(name) for name in self.names}
         self.random = random.Random(self.seed)
 
     # ------------------------------------------------------------- outcomes
 
     def record(self, name: str, won: bool) -> None:
-        self.records[name].results.append(won)
+        record = self.records[name]
+        record.results.append(won)
+        record.ema = (1.0 - self.ema_alpha) * record.ema + self.ema_alpha * float(won)
 
     @property
     def overall_win_rate(self) -> float:
@@ -379,6 +406,8 @@ class League:
 
     def shares(self) -> dict[str, float]:
         """The sampling distribution, clipped and renormalised."""
+        if self.scheme == "ema":
+            return self._ema_shares()
         if not self.weighting:
             uniform = 1.0 / len(self.names)
             return dict.fromkeys(self.names, uniform)
@@ -400,13 +429,36 @@ class League:
         scale = sum(clipped.values())
         return {name: value / scale for name, value in clipped.items()}
 
+    def _ema_shares(self) -> dict[str, float]:
+        """p_i = f/m + (1 - f) * softmax(-ema_i / tau): SRC-012's sampler.
+
+        The uniform half is a floor nobody drops below, so an opponent that is
+        being beaten every time still comes up — the paper's MIN_SHARE by
+        another route. The softmax half sends the rest to whoever the moving
+        average says we lose to.
+        """
+        count = len(self.names)
+        logits = np.array([-self.records[name].ema / self.temperature for name in self.names])
+        logits -= logits.max()  # stable
+        soft = np.exp(logits)
+        soft /= soft.sum()
+        floor = self.uniform_floor / count
+        return {
+            name: floor + (1.0 - self.uniform_floor) * float(weight)
+            for name, weight in zip(self.names, soft, strict=True)
+        }
+
     def next_opponent(self) -> str:
         shares = self.shares()
         return self.random.choices(list(shares), weights=list(shares.values()), k=1)[0]
 
 
 __all__ = [
+    "EMA_ALPHA",
+    "EMA_TEMPERATURE",
+    "EMA_UNIFORM_FLOOR",
     "GATE_WIN_RATE",
+    "LEAGUE_SCHEMES",
     "MAX_SHARE",
     "MIN_SHARE",
     "WINDOW",

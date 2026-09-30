@@ -354,8 +354,15 @@ class EnvConfig:
     #: a config should do — and because a pool hands a different one per round.
     opponent_policy: Any | None = None
     #: A named pool for the environment to draw from, one per round. When this
-    #: is set the environment picks; `opponent_policy` is what it picked.
+    #: is set the environment picks; `opponent_policy` is what it picked. A
+    #: value is a saved policy (league.PolicyOpponent) or a plain string naming
+    #: one of `opponent_names()`, so scripted opponents and checkpoints share
+    #: one sampling distribution — the arrangement both AlphaDogfight's
+    #: winners and the Korean winners used (SRC-001, SRC-012).
     opponent_pool: dict[str, Any] = field(default_factory=dict)
+    #: How the league samples the pool: "paper" (PHANG-MAN's gate and window)
+    #: or "ema" (SRC-012's moving average). See league.LEAGUE_SCHEMES.
+    league_scheme: str = "paper"
     #: "reference" is the package's twenty inputs, which its own policies
     #: expect. "extended" adds ten more derived from the same packet — among
     #: them our own G, which the scoring penalises and the reference state does
@@ -404,6 +411,7 @@ class EnvConfig:
             if self.opponent_policy is not None
             else None,
             "opponent_pool": sorted(self.opponent_pool),
+            "league_scheme": self.league_scheme,
             "action_repeat": self.action_repeat,
             "observation": self.observation,
             "ground_avoidance": None if self.ground_avoidance is None else asdict(self.ground_avoidance),
@@ -723,21 +731,37 @@ def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float, *,
     from competition.adversaries import ADVERSARIES
     from competition.adversaries import build as build_adversary
 
-    if config.opponent_policy is not None:
+    policy = config.opponent_policy
+    if policy is not None and not isinstance(policy, str):
         # A policy outlives a round, so its per-round state is cleared here
         # rather than rebuilt — the weights are the expensive part.
-        config.opponent_policy.reset()
-        return config.opponent_policy
-    if config.opponent == "level":
+        policy.reset()
+        return policy
+    # A pool entry that is a name is a scripted opponent drawn by the league;
+    # it is rebuilt each round, which is what a script with per-round state
+    # wants anyway.
+    name = policy if isinstance(policy, str) else config.opponent
+    if name == "level":
         return level_opponent(altitude_ft)
-    if config.opponent == "pursuit":
+    if name == "pursuit":
         return pursuit_opponent(speed_kcas, aggression=config.opponent_aggression)
-    if config.opponent in ADVERSARIES:
+    if name in ADVERSARIES:
         # The scripted set: a break turn, an energy fighter, a scissors and a
         # wanderer. Imported here rather than at module scope because
         # adversaries imports StateEncoder from state, and state is imported by
         # this module — at the top it is a cycle.
         # The round's own seed, drawn from the round's own generator, so a
         # seeded evaluation replays the wanderer's choices exactly.
-        return build_adversary(config.opponent, speed_kcas=speed_kcas, seed=seed)
+        return build_adversary(name, speed_kcas=speed_kcas, seed=seed)
     return reference_opponent(altitude_ft, speed_kcas)
+
+
+#: The opponents that are code rather than checkpoints, built in here.
+BUILTIN_OPPONENTS: tuple[str, ...] = ("reference", "level", "pursuit")
+
+
+def opponent_names() -> tuple[str, ...]:
+    """Every name `_build_opponent` answers to: the built-ins, then the scripted set."""
+    from competition.adversaries import ADVERSARIES
+
+    return BUILTIN_OPPONENTS + tuple(ADVERSARIES)

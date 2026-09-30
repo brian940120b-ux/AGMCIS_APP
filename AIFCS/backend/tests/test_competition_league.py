@@ -516,6 +516,7 @@ NOT_THE_AIRCRAFT = {
     "opponent_aggression",
     "opponent_policy",
     "opponent_pool",
+    "league_scheme",
     "jsbsim_root",
     "round_seconds",
     "rudder_enabled",
@@ -574,3 +575,78 @@ def test_a_pool_opponent_carries_every_plant_setting(tmp_path, monkeypatch):
         assert getattr(opponent, attribute, None) is not None, f"{field} did not reach the opponent"
     assert opponent.g_limit == 9.0
     assert opponent.action_repeat == 6
+
+
+# ------------------------------------------------------- the "ema" scheme
+
+
+def test_the_ema_scheme_weights_from_the_first_round():
+    """The paper's gate needs a hundred matchups per opponent per worker; a
+    2,000,000-step run over eight workers never gets there. SRC-012's moving
+    average starts pulling towards whoever beats us immediately."""
+    from competition.league import EMA_ALPHA, EMA_TEMPERATURE, EMA_UNIFORM_FLOOR, League
+
+    league = League(["easy", "hard"], scheme="ema")
+    before = league.shares()
+    assert before["easy"] == pytest.approx(before["hard"])
+    league.record("easy", True)
+    league.record("hard", False)
+    after = league.shares()
+    assert after["hard"] > after["easy"]
+    assert league.ema_alpha == EMA_ALPHA and league.temperature == EMA_TEMPERATURE
+    assert league.uniform_floor == EMA_UNIFORM_FLOOR
+
+
+def test_the_ema_is_the_stated_recurrence():
+    from competition.league import League
+
+    league = League(["a"], scheme="ema", ema_alpha=0.1)
+    assert league.records["a"].ema == 0.5
+    league.record("a", True)
+    assert league.records["a"].ema == pytest.approx(0.55)
+    league.record("a", False)
+    assert league.records["a"].ema == pytest.approx(0.495)
+
+
+def test_the_uniform_floor_keeps_every_opponent_in_play():
+    """Beat one opponent forty times running: it still gets at least half of
+    its uniform share, which is the paper's MIN_SHARE by another route."""
+    from competition.league import League
+
+    league = League(["beaten", "other", "third"], scheme="ema", uniform_floor=0.5)
+    played(league, "beaten", wins=40, losses=0)
+    played(league, "other", wins=0, losses=40)
+    shares = league.shares()
+    assert shares["beaten"] >= 0.5 / 3 - 1e-9
+    assert shares["other"] > shares["third"] > shares["beaten"]
+    assert sum(shares.values()) == pytest.approx(1.0)
+
+
+def test_the_ema_shares_are_the_stated_formula():
+    import math
+
+    from competition.league import League
+
+    league = League(["a", "b"], scheme="ema", ema_alpha=0.5, temperature=0.3, uniform_floor=0.5)
+    league.record("a", True)  # ema 0.75
+    league.record("b", False)  # ema 0.25
+    ea, eb = math.exp(-0.75 / 0.3), math.exp(-0.25 / 0.3)
+    expected_a = 0.25 + 0.5 * ea / (ea + eb)
+    assert league.shares()["a"] == pytest.approx(expected_a)
+
+
+def test_an_unknown_scheme_is_refused():
+    from competition.league import League
+
+    with pytest.raises(ValueError, match="league scheme"):
+        League(["a"], scheme="elo")
+
+
+def test_the_paper_scheme_is_untouched_by_the_ema_fields():
+    """Default construction is the paper's rule exactly, as before."""
+    from competition.league import League
+
+    league = League(["a", "b"])
+    assert league.scheme == "paper"
+    league.record("a", False)
+    assert league.shares()["a"] == pytest.approx(0.5), "uniform: the gate has not opened"

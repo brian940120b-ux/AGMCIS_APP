@@ -202,13 +202,28 @@ def load_experiment() -> tuple[str, list[str], list[str]]:
     return record.session, record.train_flags(), list(record.pool)
 
 
+def split_pool(pool: list[str]) -> tuple[list[str], list[str]]:
+    """(scripted names, session names). Only the second kind has to be on disk.
+
+    A pool may name scripted opponents ("break", "scissors", ...) beside saved
+    sessions; the names ride through to train.py as themselves and the
+    environment builds them each round. Anything that is not such a name is a
+    session folder the Dataset has to hold.
+    """
+    from competition.environment import opponent_names
+
+    names = set(opponent_names())
+    return [n for n in pool if n in names], [n for n in pool if n not in names]
+
+
 def main() -> int:
     setup()
     name, flags, pool = load_experiment()
     bring_in_previous_sessions()
 
-    available = [n for n in pool if (MODELS / n / "checkpoint.zip").is_file()]
-    missing = sorted(set(pool) - set(available))
+    scripted, sessions = split_pool(pool)
+    available = [n for n in sessions if (MODELS / n / "checkpoint.zip").is_file()]
+    missing = sorted(set(sessions) - set(available))
     if missing:
         # Refused, not warned. Last time this printed a line and carried on,
         # and seven GPU hours trained against the built-in drone instead of
@@ -235,8 +250,9 @@ def main() -> int:
     train = [sys.executable, "-m", "competition.train", "--name", name]
     train += flags
     train += ["--max-hours", str(MAX_HOURS), "--device", "auto", "--output", str(MODELS)]
-    if available:
-        train += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
+    if scripted or available:
+        train += ["--opponent-pool", *scripted]
+        train += [str(MODELS / name / "checkpoint.zip") for name in available]
 
     code = run(train, cwd=AIFCS, env=environment)
 

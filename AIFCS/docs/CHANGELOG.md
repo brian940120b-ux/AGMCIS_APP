@@ -17,6 +17,14 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — 訓練模組：對手分佈、EMA 聯賽、鏡像增強（H1、H2）
+
+- **腳本對手進池**：`--opponent-pool` 接受名字（`break` `energy` `scissors` `wanderer` `pursuit` `reference` `level`）與 checkpoint 混用；環境每回合重建名字對應的腳本，和存好的策略共用一個抽樣分佈。`environment.opponent_names()` 是唯一的名單；`evaluate.OPPONENT_NAMES` 由測試鎖定與它相等。Kaggle 腳本的 `split_pool` 只對 session 名字查 Dataset。
+- **`--league ema`**（預設仍是 `paper`）：SRC-012 的抽樣器 p = 0.5·均勻 + 0.5·softmax(−EMA/0.3)。發現：PHANG-MAN 規則的閘門（每對手 100 場/worker）在 200 萬步 8 worker 內永遠不會開，之前所有有池的訓練都是均勻抽樣。
+- **`--mirror`**（預設關，SAC 限定，PPO 直接拒絕）：`competition/mirror.py` 的 `MirroredReplayBuffer` 每筆經驗存原本與左右鏡像；20/30 維觀測各有一組符號向量，由編碼器本身驗證；動作在縮放空間鏡像，固定的方向舵保持固定。**實測** JSBSim F-16 每幀不對稱 < 0.005° 滾轉（10 秒隨機滿舵後 12°，是混沌放大不是偏差），測試鎖住界線。旗標記進 card 與 session，續練自動繼承。
+- 實驗紀錄：`EXP-002-opponent-distribution`（v6 配方 + 池 + ema）、`EXP-003-mirror`（EXP-002 + `--mirror`）。`docs/TRAINING_ROADMAP.md`：逐步做法與判定規則。
+- 端到端煙霧測試：SAC + `--mirror` + `--opponent-pool break scissors --league ema` 跑 240 步、存檔、無旗標續練繼承 `mirror=True, league=ema`，buffer 類別為 `MirroredReplayBuffer`、600 筆（300 步 × 2）。
+
 ## 2026-09-30 — PART 18 補查：找不到的換路線找
 
 - **發現同題目的公開冠軍程式**：韓國航空大學 2026 AI Pilot Top Gun Challenge（9/17 決賽，290 隊），JSBSim F-16 1v1 純機砲，前段射擊錐 **2° / 500–3,000 ft 與我們相同**；冠軍隊程式已 clone 讀碼（無 LICENSE → 只讀設計不複製）。`research/sources.yaml` 新增 SRC-011～017；SRC-006（改走讀取代理）與 SRC-007（PDF 抽文）升為 verified；Shaw 讀不到，改以美國海軍 T-45 ACM 講義（SRC-016）替代。

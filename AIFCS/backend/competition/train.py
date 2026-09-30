@@ -31,8 +31,9 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from competition.action import RUDDER_LIMIT
-from competition.environment import EnvConfig, RoundSetup
+from competition.environment import EnvConfig, RoundSetup, opponent_names
 from competition.gym_env import make_vec_env
+from competition.league import LEAGUE_SCHEMES
 from competition.rewards import RewardMode
 from competition.safety import GroundAvoidance
 from competition.session import (
@@ -75,6 +76,8 @@ INHERITED: dict[str, tuple[str, str]] = {
     # precisely because the two shapes differ.
     "ground_avoidance": ("environment", "ground_avoidance"),
     "g_limit": ("environment", "g_limit"),
+    "league": ("environment", "league_scheme"),
+    "mirror": ("hyperparameters", "mirror"),
 }
 
 #: Settings whose recorded shape is not the flag's shape.
@@ -113,6 +116,8 @@ DEFAULTS: dict[str, Any] = {
     "reference_speed_order": False,
     "ground_avoidance": False,
     "g_limit": 0.0,
+    "league": "paper",
+    "mirror": False,
 }
 
 
@@ -172,18 +177,25 @@ def inherit(args: argparse.Namespace, state: SessionState | None) -> None:
 
 def build_config(args: argparse.Namespace) -> EnvConfig:
     setup = RoundSetup.reference() if args.reference_setup else RoundSetup()
-    pool = {}
+    pool: dict[str, Any] = {}
     if args.opponent_pool:
         from competition.league import collect_checkpoints, opponent_from_checkpoint
 
+        # A scripted opponent's name goes into the pool as itself; the
+        # environment builds it fresh each round. Everything else is a path.
+        scripted = [entry for entry in args.opponent_pool if entry in opponent_names()]
+        paths = [entry for entry in args.opponent_pool if entry not in scripted]
+        for name in scripted:
+            pool[name] = name
         # Loaded here, in the one process that already has torch. What reaches
         # each worker is numpy weights — see league.extract_actor.
-        for name, checkpoint in collect_checkpoints(args.opponent_pool).items():
+        for name, checkpoint in collect_checkpoints(paths).items():
             pool[name] = opponent_from_checkpoint(checkpoint, args.algorithm, device="cpu")
 
     return EnvConfig(
         setup=setup,
         opponent_pool=pool,
+        league_scheme=args.league,
         observation=args.observation,
         jsbsim_root=args.jsbsim_root,
         rudder_enabled=args.rudder,
@@ -242,6 +254,7 @@ def describe_hyperparameters(args: argparse.Namespace) -> dict[str, Any]:
         "sde": bool(args.sde),
         "hidden": list(args.hidden),
         "activation": "relu" if args.relu else "tanh",
+        "mirror": bool(args.mirror),
     }
     if args.algorithm == "sac":
         described["gradient_steps"] = args.gradient_steps
@@ -319,6 +332,18 @@ def train(args: argparse.Namespace) -> int:
     }
     if args.algorithm == "sac":
         common["gradient_steps"] = args.gradient_steps
+    if args.mirror:
+        if args.algorithm != "sac":
+            # PPO learns from the trajectory it just ran; there is no buffer
+            # to put a twin into. Refused rather than silently ignored.
+            print(
+                "--mirror stores mirrored transitions in SAC's replay buffer; PPO has none",
+                file=sys.stderr,
+            )
+            return 2
+        from competition.mirror import MirroredReplayBuffer
+
+        common["replay_buffer_class"] = MirroredReplayBuffer
     algorithm = load_algorithm(args.algorithm)
 
     model: Any
@@ -356,6 +381,10 @@ def train(args: argparse.Namespace) -> int:
     # used?" should not require reading the library's source.
     print(f"device:   {model.device}")
     print(f"workers:  {args.workers} parallel simulations")
+    if args.mirror:
+        print("mirror:   on — every transition is stored twice, once seen from the other hand")
+    if config.opponent_pool:
+        print(f"league:   {args.league} over {', '.join(sorted(config.opponent_pool))}")
     horizon = _horizon_seconds(args.gamma, args.action_repeat)
     if args.action_repeat > 1:
         rate = 60.0 / args.action_repeat
@@ -534,9 +563,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
         metavar="PATH",
         help=(
-            "saved policies to fight, as files or directories of .zip. One is "
-            "drawn per round; once every one has been met 100 times and the "
-            "agent is winning overall, the hard ones come up more (PFSP)"
+            "opponents to fight: saved policies as files or directories of .zip, "
+            "and/or scripted names (reference, pursuit, break, energy, scissors, "
+            "wanderer). One is drawn per round by the --league rule"
         ),
     )
     parser.add_argument(
@@ -596,6 +625,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--relu", action="store_true", help="ReLU instead of Tanh, as PHANG-MAN used")
+    parser.add_argument(
+        "--mirror",
+        action="store_true",
+        default=None,
+        help=(
+            "SAC only: store every transition and its left-right mirror image, doubling "
+            "the experience a round yields (SRC-012's augmentation; see competition/mirror.py)"
+        ),
+    )
+    parser.add_argument(
+        "--league",
+        choices=LEAGUE_SCHEMES,
+        default=None,
+        help=(
+            "how a pool is sampled: 'paper' (PHANG-MAN's gate and window, the default) or "
+            "'ema' (a moving average that weights the opponents beating us from the first round)"
+        ),
+    )
     parser.add_argument("--jsbsim-root", default=None)
     parser.add_argument("--reference-setup", action="store_true")
     parser.add_argument(

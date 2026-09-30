@@ -80,7 +80,7 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
         """
         if not self.config.opponent_pool:
             return None
-        return League(names=list(self.config.opponent_pool), seed=seed or 0)
+        return League(names=list(self.config.opponent_pool), seed=seed or 0, scheme=self.config.league_scheme)
 
     def _build_reward(self) -> ReferenceReward | ScoreReward | ShapedReward:
         if self.reward_mode is RewardMode.REFERENCE:

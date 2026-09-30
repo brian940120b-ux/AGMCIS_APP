@@ -1,0 +1,32 @@
+id: EXP-003-mirror
+question: Does storing every transition and its left-right mirror image (SRC-012's
+  augmentation) make the same 2,000,000 steps worth more?
+hypothesis: 'EXP-002''s exact recipe plus --mirror. The buffer holds twice the experience
+  per round at the cost of half the real frames per buffer slot; JSBSim''s per-frame
+  asymmetry is under 0.005 degrees of roll (measured, tests/test_competition_mirror.py).
+  Expect faster early learning (the learning curve at 500,000 steps ahead of EXP-002''s)
+  and a final scoreboard at or above EXP-002''s. Decision rule: keep if the scoreboard
+  is at or above EXP-002 on won and cone+; inconclusive if within noise; reject if
+  worse on 3 of 6.'
+session: v8_mirror
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
+  ema --mirror --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+reward_tier: research
+status: PLANNED
+created_at: '2026-09-30T08:50:24+00:00'
+started_at: null
+finished_at: null
+git_commit: a4ffdbb
+results: {}
+decision: null
+notes: Hypothesis H1. Run AFTER EXP-002 has a result, because it is EXP-002 plus one
+  flag and the comparison is against EXP-002, not v6.

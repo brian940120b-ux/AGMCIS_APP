@@ -44,6 +44,7 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 
 - 這裡**不做**模型晉升。結果是 registry gate 的證據，不是裁決（PART 14.2）。
 - 空的 `flags` 代表 `train.py` 預設值 = **主辦方的配方**；`reward_tier` 會自動標成 `official`。
+- `pool` 可以混：session 名字（要在 Kaggle Dataset 裡）和腳本對手名字（`reference` `pursuit` `break` `energy` `scissors` `wanderer`，不需要任何檔案）。`kaggle/aifcs_train.py` 只會去找前者。
 - 同一個 ID 不能宣告兩次；`result` 的 decision 只接受三個值。
 
 ## 目前的紀錄
@@ -51,3 +52,5 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | ID | 狀態 | 內容 |
 |---|---|---|
 | `EXP-001-official-sac-baseline` | PLANNED | PART 11.1 的 OFFICIAL_SAC_BASELINE，零旗標 |
+| `EXP-002-opponent-distribution` | PLANNED | v6 配方 + 腳本對手進池（v4 v5 break energy scissors wanderer pursuit）+ `--league ema`。H2 |
+| `EXP-003-mirror` | PLANNED | EXP-002 + `--mirror`。H1；等 EXP-002 有結果再跑 |

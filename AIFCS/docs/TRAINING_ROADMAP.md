@@ -1,0 +1,95 @@
+# 訓練路線圖 — 從研究結果到下一個模型（2026-09-30）
+
+給一個要在 38 天內把模型練到能贏的人看的。每一步都寫：**做什麼、在哪裡打、成功長什麼樣、
+失敗怎麼辦、下一步**。不做的事也寫，免得回頭又問。
+
+規則不動：OBS/CMD/計分/射擊錐是主辦方的，這裡一個字都不改。所有改動都在「怎麼練」，
+而且都是旗標 —— `train.py` 不加旗標就是主辦方原配方（EXP-001）。
+
+---
+
+## 0. 今天做好的東西（`a4ffdbb` 之後）
+
+| 東西 | 是什麼 | 來源 | 預設 |
+|---|---|---|---|
+| **腳本對手進池** | `--opponent-pool` 現在可以混：`v4 v5 break energy scissors wanderer pursuit`。名字每回合重建，checkpoint 是存好的策略，**同一個抽樣分佈** | SRC-001 PHANG-MAN、SRC-012 韓國冠軍 | 關（不給池就是內建 drone） |
+| **`--league ema`** | 對手抽樣 = 一半均勻 + 一半 softmax(−EMA 勝率 / 0.3)，**從第一回合就開始偏向打不過的對手** | SRC-012 `train.py` 預設值 | `paper`（PHANG-MAN 規則，不變） |
+| **`--mirror`** | SAC 的 replay buffer 每筆經驗存兩份：原本的 + 左右鏡像。同樣步數，兩倍幾何 | SRC-012 mirror augmentation | 關 |
+| 實驗紀錄 | `experiments/EXP-002-opponent-distribution.yaml`、`EXP-003-mirror.yaml` | PART 12 | — |
+
+**為什麼 `--league ema` 不是可有可無**：PHANG-MAN 的規則要「每個對手各打滿 100 場 + 整體勝率 > 50%」
+才開始加權。我們 200 萬步分 8 個 worker，一個 worker 整場只看到幾十回合 —— **舊規則在我們的預算內
+永遠不會啟動**，所以到今天為止所有「有池」的訓練，對手都是均勻抽的。這是讀了韓國程式才發現的。
+
+**`--mirror` 是量過的，不是假設的**：JSBSim F-16 左右**不完全**對稱 —— 隨機滿舵 10 秒後兩邊差 12° 滾轉，
+但方向盤置中時每秒只差 0.001°，所以不是固定偏差，是混沌放大。一筆經驗只跨 1 幀，
+1 幀內的不對稱 < 0.005°。測試 `test_competition_mirror.py` 鎖住這個界線。
+
+---
+
+## 1. 現在馬上做：EXP-001（主辦方原配方基準）
+
+還沒跑。它是所有研究層獎勵要跨過的地板，PART 11.1 說一定要有。
+
+**Kaggle：**
+1. 開你的 notebook → 確認 `kaggle/aifcs_train.py` 裡 `EXPERIMENT = "EXP-001-official-sac-baseline"`（目前就是）
+2. **不用**掛 Dataset（pool 是空的）
+3. Save Version → Save & Run All
+4. 成功的樣子：log 出現 `experiment EXP-001-official-sac-baseline`、`2,000,000 / 2,000,000 steps`、然後一張 evaluate 表
+5. 下載 Output → `sessions/official_sac_baseline/` 放到筆電 `models/competition/official_sac_baseline/`
+
+**筆電：**
+```
+cd %USERPROFILE%\AGMCIS_APP\AIFCS
+scripts\scoreboard.bat models\competition\official_sac_baseline --json results\exp001.json
+scripts\experiment.bat result EXP-001-official-sac-baseline --scoreboard results\exp001.json --decision keep --notes "baseline recorded"
+```
+（decision 填 `keep` 是「留下當基準」，不是「它很好」。）
+
+## 2. 接著：EXP-002（對手分佈）— 今天的主菜
+
+v6 的配方一個字不動，只換「跟誰打、怎麼抽」。
+
+**Kaggle：**
+1. `kaggle/aifcs_train.py` 第 60 行改成 `EXPERIMENT = "EXP-002-opponent-distribution"`，commit + push（在筆電 `git pull` 後改，或直接在 GitHub 網頁改）
+2. Input → Add Input → **`aifcs_pool` Dataset**（裡面要有 `v4/`、`v5/`，跟上次 v7p 一樣）
+3. Save & Run All
+4. 成功的樣子：log 有 `league:   ema over break, energy, pursuit, scissors, v4, v5, wanderer`；
+   失敗的樣子：`!! 對手池少了 v4, v5` → Dataset 沒掛到，回第 2 步
+
+**筆電（下載後）：**
+```
+scripts\scoreboard.bat models\competition\v8_pool --json results\exp002.json
+```
+判定規則（寫在紀錄裡）：6 個腳本對手，**won ≥ v6 的 4 個以上、cone+ 比 v6 的 2.22 s 進步 2 個以上 → keep**；
+won 輸給 v6 3 個以上 → reject。其他 → inconclusive。
+```
+scripts\experiment.bat result EXP-002-opponent-distribution --scoreboard results\exp002.json --decision keep --notes "..."
+```
+
+## 3. 然後：EXP-003（鏡像）
+
+EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較對象是 EXP-002，不是 v6。
+步驟同上，`EXPERIMENT = "EXP-003-mirror"`。成功的樣子：log 有 `mirror:   on`。
+
+注意：`replay_buffer.pkl` 會是原本的兩倍大（每筆存兩份），Kaggle Output 500 MB 左右，正常。
+
+## 4. 之後的順序（先不要做，等 2、3 的數字）
+
+| 順序 | 假設 | 要做的事 | 為什麼排這 |
+|---|---|---|---|
+| H3 | **Exploiter**：凍結最好的模型，從零練一個專打它的，進池 | `train.py` 新旗標 `--exploit <checkpoint>`；`ladder.yaml` 一步 | 韓國冠軍每 500 輪做一次；揭露固定弱點最直接的方法 |
+| H4 | **位能差 shaping** Φ(s′)−Φ(s) | `rewards.py` 新 `RewardMode.POTENTIAL` | 三個來源都用；但 v7p 的教訓是獎勵改動最容易白跑，所以排在對手之後 |
+| H5 | 視線系/速度系觀測 | `features.py` 新 `--observation frames` | 改觀測 = 跟舊 pool 不相容，代價最大 |
+| H6 | 課程初始分佈 | `RoundSetup` 選項 | 只影響訓練，評測仍用 3/6/9 千呎 |
+
+**不做的**：HP 模型、200 秒、放寬的錐、離散動作、任何改 OBS/CMD/計分的東西。
+
+## 5. 每次跑完都要看的三個數字
+
+`scoreboard.bat` 的 **won**（贏幾成）、**margin**（S_advantage 差）、**cone+**（最好一回合在射擊帶累積幾秒；3.00 = 擊殺）。
+v6 的：90% / +5,501 / 2.22（對 v4）。任何新模型先跟這三個比，再談別的。
+
+看單一回合為什麼沒擊殺：`scripts\evaluate.bat models\competition\v8_pool --trace results\traces` 錄下每回合，再
+`.venv\Scripts\python backend\competition\roundtrace.py results\traces\*.jsonl --html results\trace_html` 出 HTML，
+看它是「路過錐一次」還是「進出六次」。

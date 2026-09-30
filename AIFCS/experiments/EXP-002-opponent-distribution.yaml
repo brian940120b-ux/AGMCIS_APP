@@ -1,0 +1,35 @@
+id: EXP-002-opponent-distribution
+question: Does v6's recipe learn more when the pool holds the scripted set beside
+  v4/v5 and the league weights whoever is beating it from the first round (SRC-001,
+  SRC-012), instead of two learned opponents sampled uniformly?
+hypothesis: 'Same reward, observation, plant and steps as v6. Pool = v4, v5 + break,
+  energy, scissors, wanderer, pursuit; --league ema. Expect: on the fixed scoreboard,
+  won and margin against the scripted six at or above v6 (90% / +5,501 vs v4 was v6''s
+  best), and cone+ above v6''s 2.22 s against at least two scripted opponents, because
+  the policy now trains on opponents that turn. Decision rule: keep if won >= v6 on
+  4 of 6 and cone+ improves on 2; reject if won falls below v6 on 3 or more.'
+session: v8_pool
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
+  ema --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+reward_tier: research
+status: PLANNED
+created_at: '2026-09-30T08:50:23+00:00'
+started_at: null
+finished_at: null
+git_commit: a4ffdbb
+results: {}
+decision: null
+notes: 'Hypothesis H2 (docs/PRIOR_ART.md 6.6). One factor moved relative to v6: the
+  opponent distribution (who is in the pool and how it is sampled). The paper league''s
+  gate never opens in a 2,000,000-step run over eight workers, so --league ema is
+  what makes weighting real; recorded in league.py. Kaggle: attach the aifcs_pool
+  Dataset (v4, v5); the scripted names need nothing.'
