@@ -57,7 +57,7 @@ MAX_HOURS = 7.5
 #: session name, the flags and the opponent pool, so the thing that runs is the
 #: thing that was declared, and changing a run is a commit to a YAML file
 #: rather than an edit to three constants here. Set it, commit, rerun the cell.
-EXPERIMENT = "EXP-001-official-sac-baseline"
+EXPERIMENT = "EXP-002-opponent-distribution"
 
 HOME = Path("/kaggle/temp/AGMCIS_APP")
 AIFCS = HOME / "AIFCS"

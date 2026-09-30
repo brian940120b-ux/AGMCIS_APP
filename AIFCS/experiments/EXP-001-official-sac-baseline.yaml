@@ -11,13 +11,39 @@ session: official_sac_baseline
 flags: --timesteps 2000000
 pool: []
 reward_tier: official
-status: PLANNED
+status: TRAINED
 created_at: '2026-09-30T07:34:30+00:00'
 started_at: null
 finished_at: null
 git_commit: 436d372
-results: {}
+results:
+  kaggle_evaluate_2026-10-01:
+    steps: 2000000
+    opponent: reference
+    rounds: 20
+    seed: 1000
+    won: 0.15
+    killed: 0.0
+    died: 0.0
+    crashed: 0.75
+    margin: 137
+    sweet_152_500m_s: 0.2
+    under_5deg_s: 0.0
+    best_deg: 26.4
+    cone_s: 0.0
+    cone_plus_s: 0.0
+    do_nothing_row:
+      won: 0.0
+      crashed: 1.0
+      margin: 18
+      best_deg: 14.9
+    note: Kaggle evaluate --baseline output pasted 2026-10-01. The laptop scoreboard
+      (six scripted opponents) is still to be run; decision waits for it.
 decision: null
 notes: 'PART 11.1 OFFICIAL_SAC_BASELINE. No flags beyond the step count, on purpose:
   the defaults are the organiser''s recipe and any flag would make this something
-  else. Never resume or overwrite this session once trained.'
+  else. Never resume or overwrite this session once trained. RESULT (Kaggle, reference
+  opponent, 20 rounds): won 15%, killed 0%, crashed 75%, margin +137, best 26.4 deg,
+  cone 0.00. The centred stick crashes 100%; the recipe learned to survive in a quarter
+  of rounds and never came within 26 degrees of the cone. This is the floor every
+  research reward is measured against.'
