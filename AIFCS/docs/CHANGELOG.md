@@ -17,6 +17,12 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — PART 18/19 飛航資料研究
+
+- **新**：`docs/AIRCRAFT_KNOWLEDGE_BASE.md` —— 機體身分（JSBSim F-16A Block-32，源自 NASA TP-1538 1979 公開風洞資料）、幾何、兩顆引擎的差別、HOST 實測初始條件、plant-vs-HOST 10 秒差 3 ft、G 正負與升降舵整形約定、Boyd E-M 只當讀圖語言、未驗證清單。**不引入任何新數據到模型。**
+- `research/sources.yaml`：SRC-008 NASA TP-1538（verified，NTRS）、SRC-009 Boyd/Christie/Gibson APGC-TR-66-4（verified，原文 PDF 已核對 Ps 定義）、SRC-010 `f16.xml` 出處（verified）。SRC-004 的來源說法更正：Stevens & Lewis 與 `f16.xml` 同源於 TP-1538，`f16.xml` 引用的是 NASA 論文本身。
+- `docs/PRIOR_ART.md` 同一處更正。
+
 ## 2026-09-30 — AIFCS 2.0 step 1（`4097529` + `33c5be9`）
 
 - **修**：`competition/trace.py` 更名 `roundtrace.py`，消除 stdlib 遮蔽（同 `profile.py` 事件）。實測 `import trace` 解析回 `/usr/lib/python3.11/trace.py`。

@@ -114,7 +114,7 @@ PHANG-MAN 用高階選擇器(10 Hz)+ 多個專門低階策略(50 Hz),其中
 | 書 | 為什麼 |
 |---|---|
 | **Robert L. Shaw, _Fighter Combat: Tactics and Maneuvering_**(Naval Institute Press, 1985) | 空戰機動的聖經。lead / lag / pure pursuit、角力與能量戰、corner speed、槍砲追瞄的幾何。獎勵函數要編碼的「戰術知識」全在這裡,而且是**不用 GPU 就能取得的優勢** |
-| **Stevens & Lewis, _Aircraft Control and Simulation_** | JSBSim 的 F-16 氣動資料表就是從這本來的。要理解我們飛的是什麼、為什麼升降舵正負號會反,看這本 |
+| **Stevens & Lewis, _Aircraft Control and Simulation_** | 它的 F-16 模型和 JSBSim 的 `f16.xml` 同源 —— 都來自 NASA TP-1538（1979）的風洞資料;`f16.xml` 檔頭引用的是 TP-1538 本身。要理解我們飛的是什麼、為什麼升降舵正負號會反,看這本;機體的整理見 `AIRCRAFT_KNOWLEDGE_BASE.md` |
 
 ### 論文(依實用程度)
 

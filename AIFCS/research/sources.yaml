@@ -73,7 +73,7 @@
   access_date: 2026-09-28
   verification: abstract-only
   applicability: partial
-  applicability_reason: JSBSim's F-16 aerodynamic tables derive from this text; relevant to understanding the plant, not to policy design.
+  applicability_reason: Its F-16 model and JSBSim's f16.xml share a source, NASA TP-1538 (SRC-008); f16.xml cites the NASA paper directly, not this book. Relevant to understanding the plant, not to policy design.
   confidence: medium
 
 - id: SRC-005
@@ -115,3 +115,94 @@
   extracted:
     - "Population-based training reduces exploitability relative to plain self-play; AlphaStar-style leagues keep main agents plus exploiters."
   confidence: medium
+
+# ---------------------------------------------------------------- PART 19
+# Aircraft / flight-dynamics sources. These explain the plant we already fly;
+# none of their numbers is injected into the model (brief PART 19.2, 20.1).
+# The official plant is the organiser's JSBSim F-16 as shipped; see
+# docs/AIRCRAFT_KNOWLEDGE_BASE.md for what that is and how it was checked.
+
+- id: SRC-008
+  title: "Simulator Study of Stall/Post-Stall Characteristics of a Fighter Airplane With Relaxed Longitudinal Static Stability"
+  authors: Nguyen, Ogburn, Gilbert, Kibler, Brown, Deal
+  organization: NASA Langley Research Center
+  report_number: NASA TP-1538 (L-12854)
+  url: https://ntrs.nasa.gov/citations/19800005879
+  pdf: https://ntrs.nasa.gov/api/citations/19800005879/downloads/19800005879.pdf
+  type: NASA technical paper (public domain)
+  publication_date: 1979-12
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: >
+    NTRS record read 2026-09-30: title, six Langley authors, report numbers
+    NASA-TP-1538 / L-12854, date 1979-12-01, PDF publicly downloadable.
+    Abstract confirms the content: a piloted real-time simulation of a fighter
+    configuration built from F-16 wind-tunnel data, with emphasis on relaxed
+    longitudinal static stability, high angle of attack, departure and deep
+    stall. The 226-page body was not read line by line for this project.
+  applicability: provenance
+  applicability_reason: >
+    The bundled JSBSim aircraft/f16/f16.xml lists "NASA TP-1538, wind tunnel
+    data, 12/1979" in its file header as a source of its aerodynamic tables.
+    This is the primary document behind the aircraft we train against. It is
+    consulted to know what the plant is, not to change it: no coefficient
+    from this paper goes into the model, the environment or a reward.
+  extracted:
+    - "Low-speed, subscale wind-tunnel data for an F-16-like configuration; the same lineage that Stevens & Lewis (SRC-004) tabulate for their F-16 model."
+    - "Documented behaviours of that configuration: pitch departure in rapid rolls at low speed, deep stall at high alpha, both addressed by control-system limiting — consistent with why the sample client rate-limits and caps the elevator."
+  confidence: high
+
+- id: SRC-009
+  title: "Energy-Maneuverability (U)"
+  authors: John R. Boyd, Thomas P. Christie, James E. Gibson
+  organization: Air Proving Ground Center, Eglin AFB
+  report_number: APGC-TR-66-4, Volume I (Project 0350T4), DTIC AD372287
+  url: https://www.archives.gov/files/declassification/iscap/pdf/2011-052-doc1.pdf
+  alt_url: https://everyspec.com/USAF/USAF-General/RPT_0350T4_ENERGY-MANEUVERABILITY_THEORY_VOL-1_15JAN1966_BOYD_56433/
+  type: USAF technical report, declassified (ISCAP 2011-052)
+  publication_date: 1966-03
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: >
+    The archives.gov PDF (92 pages) was downloaded and its text extracted:
+    title page "ENERGY-MANEUVERABILITY (U)" by Boyd, Christie and Gibson;
+    foreword dates the effort 15 June 1965 onward, Project 0350T4, Volume I
+    = theory, sample application and mathematical model; declassification
+    stamps NASIC/ACAA; and on the page defining energy rate, specific excess
+    power written as Ps = (Ta - D)/W * V. The everyspec listing (Vol. 1,
+    15 Jan 1966) describes the same report.
+  applicability: partial
+  applicability_reason: >
+    Defines specific excess power Ps = V(T - D)/W and the G-V / H-M diagram
+    method. Relevant as the vocabulary for reading a trace (is the policy
+    bleeding energy to hold the cone?) and as a possible research-tier
+    reward term. Not used anywhere yet; if it ever is, it is a research-tier
+    experiment with a record under experiments/, never an official change.
+  extracted:
+    - "Ps = V (T - D) / W: energy rate per unit weight; positive means the aircraft can climb or accelerate, negative means it is spending altitude or speed to turn."
+    - "Instantaneous manoeuvrability is read from load factor vs velocity (G-V); sustained manoeuvrability from altitude vs Mach (H-M) with Ps contours."
+    - "The report's own sample application is F-4C vs MiG-21 at 1G/3G/5G, maximum and military power."
+  confidence: high
+
+- id: SRC-010
+  title: "JSBSim aircraft/f16/f16.xml — General Dynamics F-16A Block-32 (Basic US configuration)"
+  authors: Erik Hofman (model author)
+  organization: JSBSim project (GPL)
+  url: https://github.com/JSBSim-Team/jsbsim/blob/master/aircraft/f16/f16.xml
+  type: simulation model file, read from the installed package
+  publication_date: 2001-12-28 (created), revision 1.95 as installed
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: >
+    Read from .venv/lib/python3.11/site-packages/jsbsim/aircraft/f16/f16.xml
+    (pip jsbsim 1.3.1) on 2026-09-30. The organiser's package ships its own
+    copy whose engine differs (see docs/AIRCRAFT_KNOWLEDGE_BASE.md); its
+    airframe file was compared earlier and the engine is the only difference
+    found.
+  applicability: direct
+  applicability_reason: This is the plant. Every policy we train flies it.
+  extracted:
+    - "File header references: William Green, General Dynamics F-16 Dash-1, 1987 (ISBN 0-7232-3458-2); NASA TP-1538 wind-tunnel data, 12/1979; Richard Murray (Caltech) F-16 model page; NASA H-1999 and H-2177 ground-effect flight tests; Code One magazine July 1991."
+    - "Metrics: wing area 300 ft2, span 30 ft, chord 11.32 ft, horizontal tail 63.7 ft2 at 16.46 ft arm, vertical tail 54.75 ft2; aero reference point x = -189.5 in."
+    - "Engine as pip installs it: F100-PW-229, milthrust 17,800 lbf, maxthrust 29,000 lbf, bypass ratio 0.4, idle N2 53, augmented."
+  confidence: high
