@@ -222,3 +222,132 @@ def test_the_new_term_is_a_slope_not_a_step():
     one = _pointed_minus_shaped(1.0)
 
     assert two - three > 0.2 * (one - three), "the climb starts well outside the cone"
+
+
+# ---------------------------------------- potential-based shaping (H4)
+
+
+def _potential():
+    from competition.rewards import PotentialReward
+
+    return PotentialReward(weights=ScoringWeights(), envelope=AttackEnvelope(), scale=1.0, tick_hz=60.0)
+
+
+def _pay(reward, geometry, foe=None):
+    return reward(geometry, g_load=1.0, crashed=False, foe_crashed=False, foe_geometry=foe)
+
+
+def _base_only(reward, geometry):
+    return reward._base(geometry, g_load=1.0, crashed=False, foe_crashed=False)
+
+
+def test_potential_is_a_mode_with_a_research_tier():
+    from competition.experiments import REWARD_TIERS, reward_tier_of
+    from competition.rewards import RewardMode
+
+    assert RewardMode("potential") is RewardMode.POTENTIAL
+    assert REWARD_TIERS["potential"] == "research"
+    assert reward_tier_of("--reward potential") == "research"
+
+
+def test_the_first_frame_of_a_round_pays_no_difference():
+    reward = _potential()
+    geometry = _geometry_at(0.5)
+    assert _pay(reward, geometry) == pytest.approx(_base_only(reward, geometry))
+
+
+def test_holding_the_cone_earns_the_official_term_and_no_shaping():
+    """Sit in the cone frame after frame: the shaping difference is zero and
+    what is paid is exactly `shaped` with its tracking term switched off —
+    the official 2,000 a second, and nothing for looking good."""
+    reward = _potential()
+    geometry = _geometry_at(0.5)
+    _pay(reward, geometry)
+    second = _pay(reward, geometry)
+    base = _base_only(reward, geometry)
+    assert second == pytest.approx(base)
+    assert base > 0.0, "the attack term is in there"
+
+
+def test_improving_the_aim_is_paid_and_losing_it_is_charged_the_same():
+    reward = _potential()
+    far, near = _geometry_at(90.0), _geometry_at(1.0)
+    _pay(reward, far)
+    gained = _pay(reward, near) - _base_only(reward, near)
+    lost = _pay(reward, far) - _base_only(reward, far)
+    assert gained > 0.0
+    assert lost == pytest.approx(-gained)
+
+
+def test_the_shaping_telescopes_so_passing_through_six_times_pays_like_once():
+    """Whatever the path, the shaping sums to Phi(end) - Phi(start)."""
+    reward = _potential()
+
+    def shaping_sum(track_angles: list[float]) -> float:
+        reward.reset()
+        total = 0.0
+        for angle in track_angles:
+            geometry = _geometry_at(angle)
+            total += _pay(reward, geometry) - _base_only(reward, geometry)
+        return total
+
+    once = shaping_sum([90.0, 45.0, 10.0, 0.5])
+    six_times = shaping_sum([90.0, 0.5, 40.0, 0.5, 60.0, 0.5, 30.0, 0.5, 80.0, 0.5, 20.0, 0.5])
+    assert once == pytest.approx(six_times)
+    assert once == pytest.approx(reward.phi(_geometry_at(0.5)) - reward.phi(_geometry_at(90.0)))
+
+
+def test_the_potentials_full_scale_is_one_second_of_the_attack_term():
+    reward = _potential()
+    assert reward.phi(_geometry_at(0.0)) == pytest.approx(ScoringWeights().attack_time)
+    assert reward.phi(_geometry_at(180.0)) == pytest.approx(0.0)
+    assert reward.potential == 2000.0
+
+
+def test_the_opponents_geometry_subtracts_symmetrically():
+    reward = _potential()
+    geometry = _geometry_at(10.0)
+    assert reward.phi(geometry, geometry) == pytest.approx(0.0), "same aim both ways is no advantage"
+    assert reward.phi(_geometry_at(0.0), _geometry_at(90.0)) > 0.0
+    assert reward.phi(_geometry_at(90.0), _geometry_at(0.0)) < 0.0
+
+
+def test_reset_forgets_the_last_round():
+    reward = _potential()
+    _pay(reward, _geometry_at(0.5))
+    reward.reset()
+    far = _geometry_at(90.0)
+    assert _pay(reward, far) == pytest.approx(_base_only(reward, far))
+
+
+def test_crashes_are_the_same_as_in_shaped():
+    reward = _potential()
+    assert reward(_geometry_at(0.5), g_load=1.0, crashed=True, foe_crashed=False) == -10.0
+    assert reward(_geometry_at(0.5), g_load=1.0, crashed=False, foe_crashed=True) == 0.0
+
+
+def test_the_deck_is_still_charged_per_frame():
+    reward = _potential()
+    high = _geometry_at(90.0)
+    low = Geometry(
+        distance_m=300.0,
+        track_angle_deg=90.0,
+        azimuth_deg=90.0,
+        elevation_deg=0.0,
+        aspect_angle_deg=0.0,
+        own_alt_m=200.0,
+        enemy_alt_m=200.0,
+    )
+    reward.reset()
+    at_height = _pay(reward, high)
+    reward.reset()
+    assert _pay(reward, low) < at_height
+
+
+def test_the_gym_env_builds_it():
+    from competition.environment import EnvConfig
+    from competition.gym_env import CompetitionEnv
+    from competition.rewards import PotentialReward
+
+    env = CompetitionEnv(EnvConfig(), reward_mode="potential", seed=1)
+    assert isinstance(env._reward, PotentialReward)

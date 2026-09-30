@@ -59,6 +59,7 @@ REWARD_TIERS: dict[str, str] = {
     "margin": "official-derived",  # the score minus the opponent's
     "shaped": "research",  # margin plus tracking/range/deck shaping (v6)
     "pointed": "experimental",  # shaped plus the steep near-cone term (v7p)
+    "potential": "research",  # margin plus shaped's tracking term as a potential difference (H4)
 }
 
 

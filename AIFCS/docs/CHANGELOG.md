@@ -17,6 +17,11 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — H4：`--reward potential`（位能差 shaping）
+
+- `rewards.py` 新 `RewardMode.POTENTIAL` / `PotentialReward`：margin + deck 不變，`shaped` 的追蹤項改付 γΦ(s′)−Φ(s)，Φ = 2000 × aim × range_factor（我方減敵方）。測試證明 telescoping（路過六次 = 一次）、待在錐裡 shaping 為零、首幀不付差。tier = research。
+- 紀錄 `EXP-005-potential-shaping`：EXP-002 配方只換獎勵；判定看 cone+ 與錐內比例，不看 won。
+
 ## 2026-09-30 — H3：訓練中的勝率與 exploiter 停止規則
 
 - `gym_env`：每回合結束 `info["verdict"]` = 表 3 判定（有沒有池都給）。`competition/winrate.py`：`WinRate` 回呼，滾動勝率（整體、每對手）寫進 logger `league/*`；`--stop-at-win-rate RATE --win-window ROUNDS` 到達就停，`SessionState.stopped_at_win_rate` 記下原因、target 設為已達成。預設 None，不影響任何既有訓練。

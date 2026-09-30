@@ -49,6 +49,11 @@ class RewardMode(StrEnum):
     #: name rather than a changed `shaped`, so v6 stays reproducible and the
     #: two are one measured difference apart. See `PointedReward`.
     POINTED = "pointed"
+    #: The margin plus a *potential-based* version of `shaped`'s tracking
+    #: term: paid for improving the geometry, not for sitting in it. Holding
+    #: the cone is paid by the official attack term alone. See
+    #: `PotentialReward`.
+    POTENTIAL = "potential"
 
 
 def sigmoid(x: float, rate: float, midpoint: float) -> float:
@@ -320,6 +325,119 @@ class ShapedReward:
         altitude_ft = geometry.own_alt_m * FT_PER_M
         reward -= self.deck * (1.0 - sigmoid(altitude_ft, 1 / 20, 1300))
 
+        return reward / self.scale
+
+
+@dataclass
+class PotentialReward:
+    """The margin, plus shaping that cannot be farmed by looking good.
+
+    `shaped` pays its tracking term every frame the nose is near the target,
+    so a policy that drifts through the cone six times collects six times —
+    and the measurement on v6 (docs/TUNING.md) says that is what it learned:
+    time inside one degree no better than the solid angle gives by chance.
+
+    Potential-based shaping (Ng, Harada & Russell 1999) pays only the *change*
+    in a potential, `gamma * Phi(s') - Phi(s)`, which telescopes over a round
+    to `Phi(end) - Phi(start)`: the sum a policy can collect is bounded by
+    how much better the geometry is at the end than at the start, however
+    many times it passes through the middle. Staying in the cone earns
+    nothing from the shaping — and 2,000 a second from the official attack
+    term, which is the money that should be doing the teaching. Both teams
+    that published a working recipe on this geometry shaped this way
+    (SRC-012's `_shaping_potential` over range and both track angles, SRC-013's
+    `gamma*Phi(s') - Phi(s)`), and LAG (SRC-015) marks its posture reward
+    `potential: true`.
+
+    Phi is `shaped`'s own tracking bonus turned into a state value —
+    `potential * aim * range_factor`, ours minus the opponent's — so the two
+    modes differ by exactly one thing: whether the bonus is paid per frame
+    or as a difference. The deck term is kept as it is in `shaped`, per
+    frame, because it is a safety cost rather than a goal.
+
+    `gamma` should be the agent's discount for the invariance result to hold
+    exactly; 1.0 is the plain difference and is close enough at 0.995 that
+    the mismatch is the size of the term itself, one frame in two hundred.
+    """
+
+    weights: ScoringWeights
+    envelope: AttackEnvelope
+    tick_hz: float = 60.0
+    scale: float = 10.0
+    crash_penalty: float = -10.0
+    #: Phi's full-scale value, in score units. 2,000 is one second of the
+    #: official attack term: the whole shaping a round can yield, far and
+    #: unaimed to in-cone and in-range, is worth about one second of holding
+    #: the cone. SRC-012 sized theirs the same way ("about one hit").
+    potential: float = 2000.0
+    gamma: float = 1.0
+    deck: float = 5.0
+
+    def __post_init__(self) -> None:
+        # Everything but the tracking term, which `shaped` pays per frame and
+        # this pays as a difference. tracking=0 leaves margin + deck.
+        self._base = ShapedReward(
+            weights=self.weights,
+            envelope=self.envelope,
+            tick_hz=self.tick_hz,
+            scale=1.0,
+            crash_penalty=self.crash_penalty,
+            tracking=0.0,
+            fine_tracking=0.0,
+            too_close=0.0,
+            deck=self.deck,
+        )
+        self._previous: float | None = None
+
+    def reset(self) -> None:
+        self._base.reset()
+        self._previous = None
+
+    def phi(self, geometry: Geometry, foe_geometry: Geometry | None = None) -> float:
+        """The state's value under the shaping: aim times range worth, ours minus theirs."""
+        own = max(0.0, 1.0 - geometry.track_angle_deg / 180.0) * self._base.range_factor(geometry.distance_ft)
+        value = own
+        if foe_geometry is not None:
+            foe = max(0.0, 1.0 - foe_geometry.track_angle_deg / 180.0) * self._base.range_factor(
+                foe_geometry.distance_ft
+            )
+            value -= foe
+        return self.potential * value
+
+    def __call__(
+        self,
+        geometry: Geometry,
+        *,
+        g_load: float,
+        crashed: bool,
+        foe_crashed: bool,
+        killed_at_s: float | None = None,
+        foe_geometry: Geometry | None = None,
+        foe_g_load: float = 0.0,
+        foe_killed_at_s: float | None = None,
+    ) -> float:
+        if crashed:
+            return self.crash_penalty
+        if foe_crashed:
+            return 0.0
+
+        reward = self._base(
+            geometry,
+            g_load=g_load,
+            crashed=False,
+            foe_crashed=False,
+            killed_at_s=killed_at_s,
+            foe_geometry=foe_geometry,
+            foe_g_load=foe_g_load,
+            foe_killed_at_s=foe_killed_at_s,
+        )
+
+        current = self.phi(geometry, foe_geometry)
+        # First frame of a round: nothing to differ from, and no invented
+        # difference against the last round's final geometry.
+        if self._previous is not None:
+            reward += self.gamma * current - self._previous
+        self._previous = current
         return reward / self.scale
 
 

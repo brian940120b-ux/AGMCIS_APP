@@ -1,0 +1,37 @@
+id: EXP-005-potential-shaping
+question: 'Does paying the tracking bonus as a potential difference (gamma*Phi(s'')
+  - Phi(s)) instead of per frame stop the policy from farming near-misses, so that
+  time inside one degree rises above what the solid angle gives by chance (v6: 3.8%
+  of close time, cone+ 2.22 s)?'
+hypothesis: 'EXP-002''s recipe with --reward potential in place of --reward shaped;
+  everything else identical. Potential shaping telescopes, so the only frame-by-frame
+  money for being in the cone is the official 2,000 a second — the policy is paid
+  to stay, not to pass. Expect cone+ above 2.22 s on at least three scripted opponents
+  and the ratio of in-cone time to <5-degree time well above 4%; accept a lower won
+  if cone+ rises, because kills are what the day pays 1,000+ for. Decision: keep if
+  cone+ >= 2.5 on 3 of 6; reject if cone+ falls below v6 on 3 of 6; else inconclusive.'
+session: v8_potential
+flags: --reward potential --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
+  ema --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+reward_tier: research
+status: PLANNED
+created_at: '2026-09-30T14:21:38+00:00'
+started_at: null
+finished_at: null
+git_commit: 39f5d0d
+results: {}
+decision: null
+notes: 'Hypothesis H4 (docs/PRIOR_ART.md 6.6; SRC-012, SRC-013, SRC-015 all shape
+  this way; Ng, Harada & Russell 1999 for why it is policy-invariant). Compared against
+  EXP-002, which it differs from by the reward mode alone. v7p is the cautionary tale:
+  a reward change that looked right on paper cut cone+ from 2.22 to 0.33 — so this
+  one is judged on cone+ and the in-cone ratio, not on won.'

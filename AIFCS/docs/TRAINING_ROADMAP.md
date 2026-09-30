@@ -79,7 +79,7 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 | 順序 | 假設 | 要做的事 | 為什麼排這 |
 |---|---|---|---|
 | H3 | **Exploiter**：凍結最好的模型，從零練一個專打它的，進池 | **已做**：`--opponent-pool v6 --stop-at-win-rate 0.7 --win-window 50`；紀錄 `EXP-004-exploiter`（Dataset 要加 v6） | 韓國冠軍每 500 輪做一次；揭露固定弱點最直接的方法 |
-| H4 | **位能差 shaping** Φ(s′)−Φ(s) | `rewards.py` 新 `RewardMode.POTENTIAL` | 三個來源都用；但 v7p 的教訓是獎勵改動最容易白跑，所以排在對手之後 |
+| H4 | **位能差 shaping** Φ(s′)−Φ(s) | **已做**：`--reward potential`；紀錄 `EXP-005-potential-shaping`（= EXP-002 只換獎勵） | 三個來源都用；但 v7p 的教訓是獎勵改動最容易白跑，所以排在對手之後 |
 | H5 | 視線系/速度系觀測 | `features.py` 新 `--observation frames` | 改觀測 = 跟舊 pool 不相容，代價最大 |
 | H6 | 課程初始分佈 | `RoundSetup` 選項 | 只影響訓練，評測仍用 3/6/9 千呎 |
 
@@ -93,6 +93,14 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 
 `--stop-at-win-rate 0.7 --win-window 50`：最近 50 回合勝率到 70% 就停，card 記 `stopped_at_win_rate`，
 再跑一次會說 target already met。這就是 exploiter 的停止規則。**預設不停**（None）。
+
+## 4.2 H4 已做好的部分：`--reward potential`
+
+`shaped` 的追蹤項是**每幀**付：機頭靠近目標的每一幀都給錢，所以「路過錐六次」領六次 ——
+v6 量出來就是這樣（1° 內的時間只有立體角的機率值）。`potential` 把同一個追蹤項改成
+**位能差** Φ(s′) − Φ(s)：一整回合加總只等於 Φ(終) − Φ(始)，路過幾次都一樣，**待在錐裡的錢只剩官方
+的 2000/秒** —— 讓官方分數自己當老師。Φ 滿刻度 = 2000 = 一秒攻擊時間（韓國冠軍也是這樣定尺度：
+「整場 shaping 約等於一次命中」）。兩個模式只差這一件事，deck 罰則、margin、擊殺都一樣。
 
 ## 5. 每次跑完都要看的三個數字
 

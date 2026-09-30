@@ -28,6 +28,7 @@ from competition.environment import (
 from competition.league import League
 from competition.rewards import (
     PointedReward,
+    PotentialReward,
     ReferenceReward,
     RewardMode,
     ScoreReward,
@@ -82,9 +83,15 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
             return None
         return League(names=list(self.config.opponent_pool), seed=seed or 0, scheme=self.config.league_scheme)
 
-    def _build_reward(self) -> ReferenceReward | ScoreReward | ShapedReward:
+    def _build_reward(self) -> ReferenceReward | ScoreReward | ShapedReward | PotentialReward:
         if self.reward_mode is RewardMode.REFERENCE:
             return ReferenceReward()
+        if self.reward_mode is RewardMode.POTENTIAL:
+            return PotentialReward(
+                weights=self.config.weights,
+                envelope=self.config.envelope,
+                tick_hz=float(SIM_HZ),
+            )
         if self.reward_mode in (RewardMode.SHAPED, RewardMode.POINTED):
             build = PointedReward if self.reward_mode is RewardMode.POINTED else ShapedReward
             return build(
