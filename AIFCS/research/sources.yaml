@@ -62,7 +62,11 @@
   extracted:
     - "Lead / lag / pure pursuit; break turn as gun defence; scissors to force overshoot; energy fighting."
   confidence: medium
-  note: Consulted through summaries and secondary sources; the book itself has not been read for this project.
+  note: >
+    Consulted through summaries and secondary sources. 2026-09-30: archive.org holds a
+    scan (fightercombattac0000shaw) but it is lending-only, the OCR text is not served;
+    Google Books gives the abstract only. For BFM doctrine with numbers, SRC-016 (a
+    public US Navy T-45 ACM lecture guide) is used instead.
 
 - id: SRC-004
   title: "Aircraft Control and Simulation"
@@ -97,24 +101,44 @@
   url: https://doi.org/10.3390/drones9050384
   publication_date: 2025-05
   access_date: 2026-09-30
-  verification: unreachable
-  applicability: unknown
+  verification: verified
+  verification_note: >
+    MDPI, the DOI redirect, ADS and the OA PDF all return 403 from this
+    environment (Unpaywall confirms it is CC-BY gold OA). Reached 2026-09-30
+    through the r.jina.ai reader proxy, full text. Semantic Scholar record
+    matches (CorpusId 278837871).
+  applicability: partial
   applicability_reason: >
-    Title and search summary suggest WVR + hierarchical + WGAN-generated
-    curriculum with an ablation. Full text returned 403/405 from three routes
-    (MDPI, DOI redirect, ADS). Not to be cited for any number until read.
-  confidence: none
+    WVR 1v1 on a JSBSim 1.1.6 F-16 at 50 Hz with a conical gun zone
+    (150-1000 m), so the geometry vocabulary transfers; the hierarchical
+    option framework and WGAN curriculum are beyond what 38 days allow.
+  extracted:
+    - "Observation: 8 normalised states (range, closure, AA, ATA, VIAS, altitude, alpha, beta). Action: continuous (aileron, rudder, elevator, throttle)."
+    - "Three low-level tactics with rewards R = R_goal + R_shaping + R_regularisation: angle = c0*Phi_ATA*Phi_AA*Phi_range + c1*Phi_energy; snapshot = c0*Phi_ATA*Phi_range + Phi_AA + c1*Phi_energy; energy = c0*Phi_ATA*Phi_range*Phi_energy + c1*Phi_AA. All plus a proximity term."
+    - "Regularisation: altitude violation -1.0, stall alpha violation -1.0, sideslip penalty, action cost -0.1*action^2."
+    - "Opponent: one rule-based expert built from doctrine. Final win rate ~0.8 vs it; single tactics 0.4-0.6; DAC+PPO 0.6."
+    - "WGAN-generated initial conditions of intermediate difficulty raised tactic win rate by 0.2-0.4 versus random sampling and shortened convergence."
+  confidence: high
 
 - id: SRC-007
   title: Self-Play PSRO — Toward Optimal Populations in Two-Player Zero-Sum Games
   url: https://arxiv.org/abs/2207.06541
   type: preprint (arXiv)
-  access_date: 2026-09-28
-  verification: abstract-only
+  authors: McAleer, Lanier, Wang, Baldi, Fox, Sandholm
+  organization: CMU / UC Irvine
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: arXiv PDF (v1, 13 Jul 2022, 15 pages) downloaded and text-extracted 2026-09-30.
   applicability: partial
+  applicability_reason: >
+    Two-player zero-sum theory; the useful part is the shape of a population
+    (best responses plus a time-averaged stochastic policy), not the
+    tabular games it is evaluated on (Liar's Dice, Battleship, Leduc).
   extracted:
-    - "Population-based training reduces exploitability relative to plain self-play; AlphaStar-style leagues keep main agents plus exploiters."
-  confidence: medium
+    - "PSRO adds a deterministic best response to the opponent's least-exploitable population mixture each iteration; it may need every pure strategy before the mixture supports a Nash equilibrium."
+    - "SP-PSRO adds two policies per iteration: the time-average of a new stochastic policy trained off-policy against the opponent's best response, and the best response itself. Converges in a few iterations where APSRO needs many."
+    - "Practical reading for us: a pool of frozen snapshots plus scripted opponents, sampled by recent win rate, is the cheap approximation the AlphaDogfight winners used (SRC-001); exploiters trained against the current main are the next step (SRC-012 did this)."
+  confidence: high
 
 # ---------------------------------------------------------------- PART 19
 # Aircraft / flight-dynamics sources. These explain the plant we already fly;
@@ -206,3 +230,145 @@
     - "Metrics: wing area 300 ft2, span 30 ft, chord 11.32 ft, horizontal tail 63.7 ft2 at 16.46 ft arm, vertical tail 54.75 ft2; aero reference point x = -189.5 in."
     - "Engine as pip installs it: F100-PW-229, milthrust 17,800 lbf, maxthrust 29,000 lbf, bypass ratio 0.4, idle N2 53, augmented."
   confidence: high
+
+# ------------------------------------------------ same problem, elsewhere
+# Found 2026-09-30 by searching for open JSBSim F-16 1v1 gun-dogfight RL
+# environments. A Korean university competition ran the same problem two
+# months before ours, and its winners published their code.
+
+- id: SRC-011
+  title: "2026 AI Pilot Top Gun Challenge — competition rules"
+  organization: Korea Aerospace University (SW-centred university programme)
+  url: https://aipilot2026.kau.ac.kr/
+  also: https://view.asiae.co.kr/article/2026091611483229259
+  type: competition website + press coverage
+  publication_date: 2026 (preliminaries 2026-08-27/28, finals 2026-09-17)
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: Rules page read; asiae.co.kr article read. 290 teams / 873 people from ~80 universities, 16 finalists.
+  applicability: direct
+  applicability_reason: >
+    Same aircraft (JSBSim F-16), same 1v1 gun-only problem, and phase 1 of
+    their firing envelope is our envelope exactly: 2 degrees, 500-3,000 ft.
+    Differences that matter: 200 s not 300 s; their envelope widens at 100 s
+    (4 deg, 3,500 ft) and 150 s (6 deg, 4,000 ft); their kill is an HP model
+    integrated at a range-dependent rate (1.0/s at 500 ft falling linearly
+    to 0 at the max range; 0.3 and 0.1 in the later tiers), not an
+    accumulated 3 s; the loser on HP at timeout loses. Nothing of theirs
+    changes anything of ours; it is the closest public evidence of what
+    works on this exact geometry.
+  extracted:
+    - "Firing envelope: 0-100 s 2 deg / 500-3,000 ft; 100-150 s 4 deg / 500-3,500 ft; 150-200 s 6 deg / 500-4,000 ft."
+    - "Win by shoot-down, else by remaining HP. Widening envelope exists explicitly to stop pure evasion from being a winning policy."
+  confidence: high
+
+- id: SRC-012
+  title: "2026 AI Pilot Challenge — 1st place solution (DogFightEnv, team 추락도락이다)"
+  url: https://github.com/idearendil/2026_AI_Pilot_Challenge-1st_Solution
+  type: source code (public repository, NO LICENSE FILE)
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: >
+    Cloned (commit e677b4b) and read: README, src/dogfight/config.py,
+    claude_code/my_reward.py, claude_code/my_observation.py (header and
+    damage rule), claude_code/train.py (argument defaults),
+    cuda_fdm/obs_reward.py, cuda_fdm/rl_env.py. No LICENSE file: code is
+    not to be copied into this repository; designs may be cited and
+    re-implemented from the description with attribution.
+  applicability: direct
+  applicability_reason: Winner of SRC-011 on the same aircraft and envelope; the fullest public record of a winning recipe for this geometry.
+  extracted:
+    - "Algorithm: PPO, MLP 512x512x512 tanh, factorised categorical head with 21 bins per axis; lr 1e-4, gamma 0.98, GAE 0.95, clip 0.2, 5 epochs, minibatch 512, entropy 1e-4, target KL 0.05, 80,000 rollout steps per iteration, observation normalisation on, left-right mirror augmentation on by default."
+    - "Observation (claude164r, 214 wide): 50 frame-invariant scalars (speed, HP, energy-height difference, slant range, closure, sin/cos of ATA/AA/LOS az-el, aim and range margins, time, both attitudes, both velocity-frame bank angles, fuel, instantaneous damage rate dealt and taken, pursuit score, absolute altitudes) plus 7 direction vectors (gravity, LOS, own/target/relative velocity, own/target angular rate) expressed in 6 frames (world, own body, target body, own velocity, target velocity, LOS). Angular rates are reconstructed from successive attitudes via SO(3) log because the server does not send them."
+    - "Reward (my_reward.py): per-step (target HP loss - own HP loss * own_damage_weight) * damage_scale with damage_scale 10 and own_damage_weight scheduled 0.5 -> 1.0; plus a potential-difference shaping term (x_cur - x_prev) * 5e-5 where x combines range in ft and both aircraft's ATA, sized so a whole episode of shaping is worth about one hit; win/loss terminal 0; falling below the altitude floor costs the remaining HP * damage_scale. All altitude shaping was removed."
+    - "Opponent pool (train.py defaults): 7 slots; behaviour-tree DLL baselines never evicted; team MPC agent and the organiser's cut-off exe as fixed opponents; learning snapshots promoted when the minimum EMA win rate over candidates exceeds 0.6 (EMA alpha 0.1); sampling p_i = 0.5 * uniform + 0.5 * softmax(-ema_i / 0.3), so the opponents it loses to are sampled more."
+    - "Exploiters: every 500 main iterations, freeze main, train a fresh exploiter against it alone until 70% win rate or 500 iterations, add it to the pool as never-evict."
+    - "Initial-state distribution: 3-9 line (abreast, opposite headings) : head-on = 4 : 1, head-on separation 5,539 m. Submission trained on the 3-9 scenario."
+    - "GPU pipeline: the JSBSim F-16 FDM re-implemented as a CUDA kernel (cuda_fdm/gen) with golden-trajectory regression tests against JSBSim (tests/val_fulltraj.py, golden_ref.bin), running thousands of environments in parallel."
+    - "Evaluation: power_test (two agents, N games, significance), final_power_test (one model vs all 8 BT/MPC baselines), league (round-robin heatmap); 10 Hz or 60 Hz control and argmax or stochastic chosen per slot; Tacview CSV logging and a replay viewer."
+  confidence: high
+
+- id: SRC-013
+  title: "AI-Pilot-Top-Gun-Challenge-2026 (portfolio, team junomanversion99)"
+  url: https://github.com/junomanversion99/AI-Pilot-Top-Gun-Challenge-2026
+  type: portfolio README (training code kept private)
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: README read; no code published.
+  applicability: partial
+  applicability_reason: Another SRC-011 entrant; a different architecture with a stated internal result, unverifiable.
+  extracted:
+    - "Three levels: discrete SAC at 1 Hz picks one of 10 manoeuvres; a deterministic virtual-point layer; a 60 Hz pointing controller."
+    - "Potential-based shaping r = gamma*Phi(s') - Phi(s) + damage bonus + terminal, with Phi combining ATA/AA geometry, WEZ occupancy, energy advantage and an altitude barrier."
+    - "Rule-based opponents M1-M9 across curriculum stages A-C2. Reported stage C2: 97.3% wins, of which 91.6% on HP at timeout and only 2.3% gun kills — evidence that on this rule set winning on HP dominates and gun kills are rare even for a strong agent."
+  confidence: medium
+
+- id: SRC-014
+  title: "TopGun-BT — behaviour-tree entrant, 2026 AI Pilot Top Gun Challenge"
+  url: https://github.com/MInn778/TopGun-BT
+  type: source code (C++ behaviour tree DLL)
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: README read.
+  applicability: partial
+  applicability_reason: A hand-written opponent design with concrete range thresholds; useful as a scripted-adversary reference and as a check on our own scripted set.
+  extracted:
+    - "Priority order: altitude emergency below 1,500 m; gunnery inside 914 m; defensive manoeuvring when threatened inside 1,100 m; stern-conversion pursuit to 6,000 m; predictive intercept beyond 6,000 m; hold pattern otherwise."
+  confidence: medium
+
+- id: SRC-015
+  title: "LAG — Light Aircraft Game: JSBSim-based competitive aircraft RL environment"
+  url: https://github.com/liuqh16/LAG
+  type: source code (GPL-3.0)
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: Cloned (commit ebd3a38) and read the reward functions, the 1v1 NoWeapon self-play config and the self-play runner.
+  applicability: partial
+  applicability_reason: >
+    Same aircraft, 1v1 gun-free "posture" task; the reward shapes and the
+    Elo-weighted self-play runner are a second, independent design to
+    compare against. GPL-3.0: cite and re-derive, do not vendor.
+  extracted:
+    - "1v1 NoWeapon self-play: 60 Hz sim, agent acts every 12 frames (0.2 s), 200 s episodes, altitude limit 2,500 m, both F-16 at 20,000 ft / 800 fps head-on 0.05 deg latitude apart."
+    - "PostureReward = orientation(AO, TA) * range(R), potential-based, scale 100; orientation v2 = 1/(50*AO/pi + 2) + 1/2 + min(arctanh(1 - max(2*TA/pi, 1e-4))/(2*pi), 0) + 0.5; range v3 = 1 for R < 5 km, then a clipped quadratic in R, plus a small exp(-0.16 R) tail."
+    - "AltitudeReward: safe 4.0 km, danger 3.5 km, Kv 0.2. EventDrivenReward: +-200 for shoot-down / crash."
+    - "Self-play runner keeps a policy pool with Elo (K-factor update, expected score 1/(1+10^((opp-ego)/400))) and a pluggable opponent-choice algorithm (n_choose_opponents)."
+  confidence: high
+
+- id: SRC-016
+  title: "T-45A UJPT/ADV/IUT Air Combat Maneuvering Flight Procedures — Flight Support Lecture Guide (CNATRA P-1230, Rev 10-98)"
+  organization: US Naval Air Training Command, NAS Corpus Christi
+  url: https://server.3rd-wing.net/public/Photun/Manual%20combat%20aerien_acm.pdf
+  type: US Navy training publication (public), 235 pages, mirrored copy
+  publication_date: 1998-10
+  access_date: 2026-09-30
+  verification: verified
+  verification_note: >
+    PDF downloaded and text-extracted (pypdf). Title page is font-encoded but
+    the change-summary and every lesson page identify it as the T-45A ACMFP
+    FSLG, 10-98 Original. Stands in for Shaw (SRC-003), which could not be
+    read: same doctrine, a primary public source, with numbers.
+  applicability: direct
+  applicability_reason: Doctrine for exactly the 1v1 guns problem, written to be taught; the source for our scripted adversaries' vocabulary and for reading traces.
+  extracted:
+    - "One-circle: both fight for the same turn circle, advantage to the smaller circle (radius). Two-circle: each in its own circle, advantage to the better turn rate. Out-of-plane: nose high collapses the circle / stops closure; nose low increases rate and cuts radius."
+    - "High yo-yo = lag pursuit to stop a 3/9-line overshoot: quarter-roll out of the bandit's plane, pull nose up to collapse the circle. Low yo-yo = lead pursuit to raise turn rate: overbank, nose low, pull inside the bandit's turn, fire in the envelope, expect overshoot."
+    - "T-45 numbers, for scale only: cornering speed about 410 kt, manoeuvring band 300-350 KIAS; sustained turn at 15-16 units AOA; training rule minimum guns range 1,000 ft, head-on guns prohibited; 2,500 ft above the hard deck needed for a nose-low reversal."
+    - "Bubble = the aircraft's maximum-performance turn circle in the current plane of motion; post = its centre, one turn radius from the aircraft. Holding lead pursuit ahead of the bandit's post produces a 3/9 overshoot."
+  confidence: high
+
+- id: SRC-017
+  title: "Deep reinforcement learning-based air combat maneuver decision-making: literature review, implementation tutorial and future direction"
+  authors: Wang, Wang, Su, Wang, Lu, Peng, Liu
+  organization: Artificial Intelligence Review 57(1), 2024
+  url: https://link.springer.com/article/10.1007/s10462-023-10620-2
+  code: https://gitee.com/wangyyhhh/air-combat
+  access_date: 2026-09-30
+  verification: abstract-only
+  verification_note: >
+    Springer full text is paywalled from here; the ResearchGate accepted
+    manuscript returns 403. The authors' code repository on gitee is public
+    (Python, "DRL") but was not read. Semantic Scholar record 1dff2b0.
+  applicability: partial
+  applicability_reason: A survey whose stated centre is reward design for 1v1 dogfights; would be the map of the reward literature if its text were reachable.
+  confidence: low

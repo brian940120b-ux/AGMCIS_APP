@@ -17,6 +17,12 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — PART 18 補查：找不到的換路線找
+
+- **發現同題目的公開冠軍程式**：韓國航空大學 2026 AI Pilot Top Gun Challenge（9/17 決賽，290 隊），JSBSim F-16 1v1 純機砲，前段射擊錐 **2° / 500–3,000 ft 與我們相同**；冠軍隊程式已 clone 讀碼（無 LICENSE → 只讀設計不複製）。`research/sources.yaml` 新增 SRC-011～017；SRC-006（改走讀取代理）與 SRC-007（PDF 抽文）升為 verified；Shaw 讀不到，改以美國海軍 T-45 ACM 講義（SRC-016）替代。
+- `docs/PRIOR_ART.md` 第五節：規則對照表、冠軍作法對照表、六個可驗證假設（H1 鏡像增強、H2 輸誰多打誰、H3 exploiter、H4 位能差 shaping、H5 座標系觀測、H6 課程初始分佈），全部走 `experiments/`，官方層不動。
+- 旁證：冠軍程式把「2 度」寫成 `TIER1_CONE_DEG = 1.0`（半角 1°），與 CONFORMANCE D.1 一致。
+
 ## 2026-09-30 — PART 18/19 飛航資料研究
 
 - **新**：`docs/AIRCRAFT_KNOWLEDGE_BASE.md` —— 機體身分（JSBSim F-16A Block-32，源自 NASA TP-1538 1979 公開風洞資料）、幾何、兩顆引擎的差別、HOST 實測初始條件、plant-vs-HOST 10 秒差 3 ft、G 正負與升降舵整形約定、Boyd E-M 只當讀圖語言、未驗證清單。**不引入任何新數據到模型。**
