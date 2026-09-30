@@ -599,22 +599,47 @@ def _offset(lat_deg: float, lon_deg: float, bearing_deg: float, distance_m: floa
     return new_lat, new_lon
 
 
+#: The encodings a session can be trained on. "reference" is the package's
+#: twenty; "extended" adds ten; "frames" adds the extended thirty and 75
+#: frame-expressed vector components (competition/frames.py).
+OBSERVATIONS: tuple[str, ...] = ("reference", "extended", "frames")
+
+
 def build_encoder(config: EnvConfig) -> Any:
     """The encoder both paths use, chosen once so they cannot disagree."""
     if config.observation == "extended":
         from competition.features import ExtendedEncoder
 
         return ExtendedEncoder(round_seconds=config.round_seconds)
+    if config.observation == "frames":
+        from competition.frames import FramesEncoder
+
+        return FramesEncoder(round_seconds=config.round_seconds)
+    if config.observation != "reference":
+        raise ValueError(f"observation must be one of {OBSERVATIONS}, not {config.observation!r}")
     return StateEncoder()
+
+
+def observation_width(observation: str = "reference") -> int:
+    """How many numbers an encoding produces; the one place that knows."""
+    if observation == "extended":
+        from competition.features import EXTENDED_STATE_SIZE
+
+        return EXTENDED_STATE_SIZE
+    if observation == "frames":
+        from competition.frames import FRAMES_STATE_SIZE
+
+        return FRAMES_STATE_SIZE
+    if observation != "reference":
+        raise ValueError(f"observation must be one of {OBSERVATIONS}, not {observation!r}")
+    return STATE_SIZE
 
 
 def observation_space(observation: str = "reference") -> Any:
     """The reference's bounds, so its policies load into this env unchanged."""
     from gymnasium.spaces import Box
 
-    from competition.features import EXTENDED_STATE_SIZE
-
-    size = EXTENDED_STATE_SIZE if observation == "extended" else STATE_SIZE
+    size = observation_width(observation)
     return Box(
         low=-OBSERVATION_BOUND,
         high=OBSERVATION_BOUND,

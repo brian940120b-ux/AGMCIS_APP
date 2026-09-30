@@ -17,6 +17,11 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — H5：`--observation frames`（多座標系觀測）
+
+- `competition/frames.py`：`FramesEncoder` = extended + 25 組 (向量, 座標系) × 3 = 75，共 105 維；速度系/視線系以重力固定滾轉，垂直退化用北。`environment.OBSERVATIONS` 與 `observation_width()` 成為唯一的名單與寬度來源（evaluate 改用它）。`mirror.observation_signs` 涵蓋 105 維。
+- 紀錄 `EXP-006-frames-observation`：EXP-002 配方只換觀測。煙霧測試 frames + `--mirror` + `--reward potential` 一起跑 120 步、存 card。
+
 ## 2026-09-30 — H4：`--reward potential`（位能差 shaping）
 
 - `rewards.py` 新 `RewardMode.POTENTIAL` / `PotentialReward`：margin + deck 不變，`shaped` 的追蹤項改付 γΦ(s′)−Φ(s)，Φ = 2000 × aim × range_factor（我方減敵方）。測試證明 telescoping（路過六次 = 一次）、待在錐裡 shaping 為零、首幀不付差。tier = research。

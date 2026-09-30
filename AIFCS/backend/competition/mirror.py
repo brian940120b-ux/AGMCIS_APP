@@ -81,6 +81,22 @@ EXTENDED_SIGNS = np.concatenate(
 )
 assert EXTENDED_SIGNS.shape == (EXTENDED_STATE_SIZE,)
 
+#: Every frame here has x forward, y to the right and z down (world: north,
+#: east, down), so a mirror negates the y component of every ordinary vector
+#: in every frame. Angular rate is an axial vector and goes the other way: x
+#: and z negate, y holds — the same rule that makes p and r flip and q stay.
+_ORDINARY = np.array([+1, -1, +1], dtype=np.float32)
+_AXIAL = np.array([-1, +1, -1], dtype=np.float32)
+
+
+def _frames_signs() -> np.ndarray:
+    from competition.frames import PAIRS
+
+    return np.concatenate(
+        [EXTENDED_SIGNS] + [_AXIAL if vector == "own_omega" else _ORDINARY for vector, _ in PAIRS]
+    )
+
+
 #: The four channels: aileron, elevator, rudder, throttle.
 ACTION_SIGNS = np.array([-1.0, 1.0, -1.0, 1.0], dtype=np.float64)
 
@@ -95,9 +111,14 @@ def observation_signs(width: int) -> np.ndarray:
         return REFERENCE_SIGNS
     if width == EXTENDED_STATE_SIZE:
         return EXTENDED_SIGNS
+    from competition.frames import FRAMES_STATE_SIZE
+
+    if width == FRAMES_STATE_SIZE:
+        return _frames_signs()
     raise ValueError(
         f"no mirror map for a {width}-wide observation; only the reference "
-        f"({STATE_SIZE}) and extended ({EXTENDED_STATE_SIZE}) encodings have one"
+        f"({STATE_SIZE}), extended ({EXTENDED_STATE_SIZE}) and frames "
+        f"({FRAMES_STATE_SIZE}) encodings have one"
     )
 
 

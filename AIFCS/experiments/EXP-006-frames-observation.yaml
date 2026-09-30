@@ -1,0 +1,37 @@
+id: EXP-006-frames-observation
+question: Does handing the policy the geometry already rotated — the line of sight,
+  both velocities and our angular rate expressed in the world, body, velocity and
+  line-of-sight frames (SRC-012's observation idea on the 26 numbers 表 1 sends) —
+  make the same steps learn more than the extended thirty?
+hypothesis: 'EXP-002''s recipe with --observation frames (105 wide) in place of extended
+  (30). Expect a steeper learning curve (league/win_rate at 500,000 steps ahead of
+  EXP-002''s) and a scoreboard at or above EXP-002 on won and cone+, because the network
+  no longer has to learn rotations from Euler angles. Cost: a new width, so no compatibility
+  with any earlier pool member as a *policy* (they still fly as opponents, on their
+  own encoders). Decision: keep if won >= EXP-002 on 4 of 6 and cone+ >= EXP-002 on
+  3 of 6; reject if won falls on 3 of 6.'
+session: v8_frames
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation frames --batch-size 512 --league
+  ema --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+reward_tier: research
+status: PLANNED
+created_at: '2026-09-30T14:25:16+00:00'
+started_at: null
+finished_at: null
+git_commit: '3040563'
+results: {}
+decision: null
+notes: Hypothesis H5 (docs/PRIOR_ART.md 6.6). Differs from EXP-002 by the observation
+  alone. What the packet does not carry — the target's attitude and rates — is left
+  out, not reconstructed; SRC-012 reconstructed theirs from a state schema that included
+  the target's attitude, which 表 1 does not send. The mirror map covers the new width,
+  so --mirror can be combined later.

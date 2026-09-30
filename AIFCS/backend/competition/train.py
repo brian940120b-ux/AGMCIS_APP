@@ -31,7 +31,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from competition.action import RUDDER_LIMIT
-from competition.environment import EnvConfig, RoundSetup, opponent_names
+from competition.environment import OBSERVATIONS, EnvConfig, RoundSetup, opponent_names
 from competition.gym_env import make_vec_env
 from competition.league import LEAGUE_SCHEMES
 from competition.rewards import RewardMode
@@ -571,12 +571,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--opponent", choices=OPPONENT_NAMES, default=None)
     parser.add_argument(
         "--observation",
-        choices=["reference", "extended"],
+        choices=list(OBSERVATIONS),
         default=None,
         help=(
             '"extended" adds ten inputs from the same packet, among them our '
             "own G — which the scoring penalises and the reference state omits. "
-            "Ends compatibility with the organiser's own policies"
+            '"frames" adds 75 more: the geometry\'s vectors expressed in the world, '
+            "body, velocity and line-of-sight frames (SRC-012). Either ends "
+            "compatibility with the organiser's own policies"
         ),
     )
     parser.add_argument(

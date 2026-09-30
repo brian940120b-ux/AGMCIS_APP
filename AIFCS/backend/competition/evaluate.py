@@ -33,8 +33,7 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from competition.action import INITIAL_THROTTLE  # noqa: E402
-from competition.environment import CompetitionRound, EnvConfig  # noqa: E402
-from competition.features import EXTENDED_STATE_SIZE, STATE_SIZE  # noqa: E402
+from competition.environment import CompetitionRound, EnvConfig, observation_width  # noqa: E402
 from competition.runtime import StackUnavailable  # noqa: E402
 from competition.scoring import (  # noqa: E402
     AttackEnvelope,
@@ -709,7 +708,7 @@ def main(argv: list[str] | None = None) -> int:
             print()
             return 1
         config = config_from_card(card, args.opponent, args.opponent_aggression, args.ground_avoidance)
-        expected = EXTENDED_STATE_SIZE if config.observation == "extended" else STATE_SIZE
+        expected = observation_width(config.observation)
         width = getattr(policy, "observation_width", expected)
         if width != expected:
             # Almost always a missing card.json: the plant falls back to the
