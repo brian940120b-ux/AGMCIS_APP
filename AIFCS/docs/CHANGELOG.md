@@ -17,6 +17,12 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-09-30 — 官方資料全面 Audit（`docs/official/`）
+
+- 讀完主辦方全部檔案（公告 0918 十四頁、附件2、指引 01–06、八個 Python、bat、Setting.txt、readme、模型 metadata、機體/引擎 XML 與 pip diff、表 3／表 4／圖 3／圖 4）。產出九份純官方文件：索引、檔案清單（55）、規格總表、資料字典（OBS 26 欄／CMD 6 欄逐欄附來源）、程式地圖、需求分類、八個流程、Traceability（T01–T58）、總報告（A–T、U01–U18 未知、C1–C10 衝突、34 題）、AIFCS 對照矩陣。
+- 有實質影響的衝突：C1 client 升降舵 Mach>0.8 限 0.4 vs 訓練環境 1.0；C2 訓練環境不實作擊殺且常數寫 5 秒；C4 指引寫 50 英尺、公告與程式為 50 公尺。最大風險：U08（比賽 Host 的機體/引擎/初始化順序）+ C1。
+- 主辦方檔案本身不進 repo；`official_audit/`、`official/` 已在 .gitignore。
+
 ## 2026-09-30 — H6：`--geometry`（訓練用起始幾何，可當課程）
 
 - `environment.GEOMETRIES`、`RoundSetup.geometry`、`initial_geometry()`：published 的三個亂數順序不變（同 seed 同回合）；abreast / headon / offensive / defensive / mix（4:1）。距離、高度、速度不動。card 記 `geometry`；`evaluate.config_from_card` 不讀（測試鎖住）。
