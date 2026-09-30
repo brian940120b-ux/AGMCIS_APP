@@ -91,5 +91,5 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 v6 的：90% / +5,501 / 2.22（對 v4）。任何新模型先跟這三個比，再談別的。
 
 看單一回合為什麼沒擊殺：`scripts\evaluate.bat models\competition\v8_pool --trace results\traces` 錄下每回合，再
-`.venv\Scripts\python backend\competition\roundtrace.py results\traces\*.jsonl --html results\trace_html` 出 HTML，
+`.venv\Scripts\python backend\competition\roundtrace.py results\traces\*.jsonl.gz --html results\trace_html` 出 HTML，
 看它是「路過錐一次」還是「進出六次」。
