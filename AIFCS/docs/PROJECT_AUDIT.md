@@ -39,9 +39,9 @@ ModuleNotFoundError: No module named 'competition'
 | | |
 |---|---|
 | 嚴重度 | **P0** — 可能重演一次訓練整個掛掉 |
-| 修法 | 更名（建議 `roundtrace.py`），連同 `trace_html.py` 的 import |
+| 修法 | 更名為 `roundtrace.py`，連同 `evaluate.py`、`trace_html.py` 與測試的 import |
 | 成本 | 10 分鐘 |
-| 狀態 | **尚未修**（本階段不改程式） |
+| 狀態 | **已修（2026-09-30，使用者確認進入實作後）**。實際重現驗證：`import trace` 現在解析到 `/usr/lib/python3.11/trace.py` |
 
 ### 2. 🟠 8 個 mypy 錯誤，同樣是我引入且沒發現
 
@@ -53,6 +53,8 @@ backend/tests/test_competition_trace.py:37         (1)
 `**kwargs` 展開進有型別的 dataclass，以及一個鴨子型別的 `_Geometry` 替身。
 全在我最近兩次 commit 新增的測試裡，原因一樣：**我跑了 `ruff` 和針對性的
 pytest，沒跑 `mypy` 和完整套件。**
+
+**已修（2026-09-30）**：改為明確引數與真正的 `Geometry`，mypy 全綠。
 
 ### 3. 🔴 官方稽核（PHASE 1）在這台機器上做不到
 
@@ -275,8 +277,8 @@ master prompt PART 30 列的 14 頁，目前是**一頁 command center**。
 
 | # | 項目 | 嚴重度 |
 |---|---|---|
-| 1 | `competition/trace.py` 遮蔽 stdlib | **P0** |
-| 2 | 8 個 mypy 錯誤（新測試） | P1 |
+| 1 | ~~`competition/trace.py` 遮蔽 stdlib~~ 已更名 `roundtrace.py` | ~~P0~~ 已修 |
+| 2 | ~~8 個 mypy 錯誤（新測試）~~ | ~~P1~~ 已修 |
 | 3 | 依賴無 pin，三個 Python 版本並存 | P1 |
 | 4 | 無 git 標籤 / 回滾點 | P1 |
 | 5 | 比賽模型不在 model registry 裡 | P2 |

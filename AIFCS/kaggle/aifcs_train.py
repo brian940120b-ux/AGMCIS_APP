@@ -15,9 +15,9 @@ Before running, in the notebook's right-hand panel:
 
   * Settings -> Accelerator -> GPU P100   (or T4)
   * Settings -> Internet -> On            (needed to clone and pip install)
-  * Input -> Add Input -> the Dataset holding the opponents in POOL
+  * Input -> Add Input -> the Dataset holding the experiment's opponent pool
 
-The opponents are not optional. A POOL member that is not attached stops the
+The opponents are not optional. A pool member that is not attached stops the
 run before it starts: last time it printed a warning and carried on, and seven
 GPU hours trained against the built-in drone under the name of the run that
 was supposed to train against v4 and v5. Two different experiments, one name,
@@ -53,21 +53,12 @@ INTERRUPTED = 130
 #: accelerator; leaving an hour covers the evaluation that follows training.
 MAX_HOURS = 7.5
 
-#: One step of the ladder per session, because a session is not long enough for
-#: three. The name is what to change between runs: v6, then v7, then v8.
-NAME = "v7p"
-POOL = ["v4", "v5"]
-FLAGS = (
-    "--reward pointed --rudder-limit 0.6 --ground-avoidance --g-limit 9 "
-    "--action-repeat 6 --gamma 0.995 --gradient-steps -1 "
-    "--observation extended --batch-size 512 --timesteps 2000000"
-)
+#: Which experiment this session runs. The record under experiments/ holds the
+#: session name, the flags and the opponent pool, so the thing that runs is the
+#: thing that was declared, and changing a run is a commit to a YAML file
+#: rather than an edit to three constants here. Set it, commit, rerun the cell.
+EXPERIMENT = "EXP-001-official-sac-baseline"
 
-#: The clone goes in scratch, not in the output. /kaggle/working is what the
-#: Output tab shows and what a Dataset is published from, and a repository
-#: dropped in there buries the thing you came for: last time the sessions were
-#: in the output the whole while, under a card listing several hundred files
-#: of trading system, and finding them took longer than the download.
 HOME = Path("/kaggle/temp/AGMCIS_APP")
 AIFCS = HOME / "AIFCS"
 
@@ -190,16 +181,34 @@ def describe_inputs() -> str:
             for entry in sorted(dataset.iterdir())[:10]:
                 lines.append(f"       {entry.name}{'/' if entry.is_dir() else ''}")
             lines.append("       ^ no checkpoint here, unpacked or otherwise")
-    lines.append("   對手是用資料夾名字比對的,上面的名字要跟 POOL 一樣。")
+    lines.append("   對手是用資料夾名字比對的,上面的名字要跟實驗紀錄裡的 pool 一樣。")
     return "\n".join(lines)
+
+
+def load_experiment() -> tuple[str, list[str], list[str]]:
+    """(session name, train flags, opponent pool) from the declared record.
+
+    Imported from the clone rather than duplicated here, so the record's
+    format has one owner. Marked RUNNING on the way past, which is the only
+    write this script makes to the record: the result is written on the laptop,
+    from the scoreboard, by a person.
+    """
+    sys.path.insert(0, str(AIFCS / "backend"))
+    from competition.experiments import Experiment, mark_running
+
+    record: Experiment = mark_running(EXPERIMENT)
+    print(f"experiment {record.id}: {record.question}", flush=True)
+    print(f"  session {record.session}  reward tier {record.reward_tier}", flush=True)
+    return record.session, record.train_flags(), list(record.pool)
 
 
 def main() -> int:
     setup()
+    name, flags, pool = load_experiment()
     bring_in_previous_sessions()
 
-    available = [name for name in POOL if (MODELS / name / "checkpoint.zip").is_file()]
-    missing = sorted(set(POOL) - set(available))
+    available = [n for n in pool if (MODELS / n / "checkpoint.zip").is_file()]
+    missing = sorted(set(pool) - set(available))
     if missing:
         # Refused, not warned. Last time this printed a line and carried on,
         # and seven GPU hours trained against the built-in drone instead of
@@ -208,21 +217,23 @@ def main() -> int:
         # scored side by side. A run that cannot be what it says it is should
         # not start.
         print(
-            f"\n!! POOL asks for {', '.join(POOL)} and these are not here: {', '.join(missing)}", flush=True
+            f"\n!! the experiment's pool asks for {', '.join(pool)} and these are not here: "
+            f"{', '.join(missing)}",
+            flush=True,
         )
         # What IS mounted, because "it is not there" and "it is there under a
         # name you did not expect" need different fixes and the message above
         # cannot tell them apart.
         print(describe_inputs(), flush=True)
         print("   Attach them: Input -> Add Input -> your Dataset of sessions.", flush=True)
-        print("   Or set POOL = [] above if training against the built-in", flush=True)
+        print(f"   Or empty the pool in experiments/{EXPERIMENT}.yaml if training", flush=True)
         print("   opponent is really what you want.", flush=True)
         print(f"\n!! 對手池少了 {', '.join(missing)},沒有開始訓練。", flush=True)
         return 2
 
     environment = dict(os.environ, PYTHONPATH=str(AIFCS / "backend"))
-    train = [sys.executable, "-m", "competition.train", "--name", NAME]
-    train += FLAGS.split()
+    train = [sys.executable, "-m", "competition.train", "--name", name]
+    train += flags
     train += ["--max-hours", str(MAX_HOURS), "--device", "auto", "--output", str(MODELS)]
     if available:
         train += ["--opponent-pool", *[str(MODELS / name / "checkpoint.zip") for name in available]]
@@ -240,8 +251,8 @@ def main() -> int:
         print(f"\ntraining exited {code} — scoring is skipped, but whatever saved is kept", flush=True)
 
     if code in (0, INTERRUPTED):
-        score = [sys.executable, "-m", "competition.evaluate", str(MODELS / NAME), "--baseline"]
-        if "--ground-avoidance" in FLAGS.split():
+        score = [sys.executable, "-m", "competition.evaluate", str(MODELS / name), "--baseline"]
+        if "--ground-avoidance" in flags:
             # Without this the baseline row is a centred stick with no floor,
             # which crashes every round and reports 0% as the bar a trained
             # policy has to clear. The real bar, with the floor, is 65%.

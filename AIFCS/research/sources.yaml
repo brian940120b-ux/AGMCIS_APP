@@ -1,0 +1,117 @@
+# Research source registry (brief PART 18.3).
+#
+# One entry per source actually consulted, with what it yielded and how far it
+# was verified. "verified" means the primary text was read; "abstract-only"
+# means only a summary was reachable; "unreachable" means the source was found
+# but its text could not be fetched from the environment that tried, and its
+# claims are therefore NOT to be used until someone reads it.
+#
+# Nothing in here modifies official code, official specifications or the
+# competition rules. A source feeds a hypothesis, a hypothesis feeds an
+# experiment record under experiments/, and only an experiment result can
+# change a model.
+
+- id: SRC-001
+  title: Hierarchical Reinforcement Learning for Air Combat at DARPA's AlphaDogfight Trials
+  authors: Pope, Ide, Micovic, Diaz, Rosenbluth, Ritholtz, Twedt, Walker, Alcedo, Javorsek
+  organization: Lockheed Martin (PHANG-MAN), DARPA ACE
+  url: https://arxiv.org/abs/2105.00990
+  type: peer-reviewed preprint (arXiv), later IEEE
+  publication_date: 2021-05
+  access_date: 2026-09-28
+  verification: verified
+  applicability: direct
+  applicability_reason: >
+    The organiser's firing condition is this paper's WEZ verbatim: 500-3000 ft,
+    2 degree aperture. The organiser added an accumulated 3 s. Same aircraft
+    (F-16 in JSBSim), same 1v1 gun-only problem.
+  extracted:
+    - "Two tracking rewards: a global linear track-angle penalty and a logistic gun-snap term of steepness 1e5 centred on the 1-degree cone. We had only the linear one."
+    - "Curriculum: scripted 'easy' opponents only until win rate > 50%, then learned opponents added; sampling weighted by last-100-matchup win rate, clipped to 0.2%-11.7%."
+    - "Health x10 for shooter policies specifically to raise the ratio of WEZ to non-WEZ samples in the replay buffer."
+    - "Low-level policies at 50 Hz; policy selector at 10 Hz."
+    - "30 opponents in total."
+  related_experiments: [EXP-002-planned]
+  confidence: high
+
+- id: SRC-002
+  title: "BVR Sim: An Open and High-Throughput Environment for Heterogeneous Air-Combat Reinforcement Learning"
+  url: https://arxiv.org/abs/2608.25419
+  type: preprint (arXiv)
+  publication_date: 2026-08
+  access_date: 2026-09-28
+  verification: verified
+  applicability: partial
+  applicability_reason: Beyond-visual-range, not gun-only; the opponent-set design transfers, the missile parts do not.
+  extracted:
+    - "Six scripted baselines: straight-line, random, aggressive, tactical, standoff, MAD."
+    - "Three jobs for scripted opponents: curriculum, reproducible evaluation reference, expert actions."
+    - "Multi-rate: tactical decisions 0.4 s, integration <= 0.02 s."
+  confidence: high
+
+- id: SRC-003
+  title: "Fighter Combat: Tactics and Maneuvering"
+  authors: Robert L. Shaw
+  organization: Naval Institute Press
+  publication_date: 1985
+  type: book
+  url: https://books.google.com/books/about/Fighter_Combat.html?id=hBxBdKr0beYC
+  access_date: 2026-09-28
+  verification: abstract-only
+  applicability: direct (tactical priors for scripted opponents and reward shaping)
+  extracted:
+    - "Lead / lag / pure pursuit; break turn as gun defence; scissors to force overshoot; energy fighting."
+  confidence: medium
+  note: Consulted through summaries and secondary sources; the book itself has not been read for this project.
+
+- id: SRC-004
+  title: "Aircraft Control and Simulation"
+  authors: Stevens, Lewis, Johnson
+  organization: Wiley
+  type: book
+  url: https://www.semanticscholar.org/paper/c03ecc07b6ae40e0a0b5ec27bb7a65b4da1d5ebc
+  access_date: 2026-09-28
+  verification: abstract-only
+  applicability: partial
+  applicability_reason: JSBSim's F-16 aerodynamic tables derive from this text; relevant to understanding the plant, not to policy design.
+  confidence: medium
+
+- id: SRC-005
+  title: "ACE Program's AI Agents Transition from Simulation to Live Flight"
+  organization: DARPA (press release)
+  url: https://www.darpa.mil/news/2023/ace-program-transition
+  publication_date: 2023-02-13
+  access_date: 2026-09-30
+  verification: verified
+  applicability: low
+  applicability_reason: >
+    Press release. Confirms simulation-first development and a safety pilot as
+    the validation layer; discloses no training method, reward, curriculum or
+    control interface. Named performers: EpiSci, PhysicsAI, Shield AI, JHU APL.
+  confidence: low
+
+- id: SRC-006
+  title: "Hierarchical Reinforcement Learning with Automatic Curriculum Generation for UCAV Tactical Decision-Making in Autonomous Air Combat"
+  authors: Li, Dong, Zhang, Zhai, Li
+  organization: MDPI Drones 9(5):384
+  url: https://doi.org/10.3390/drones9050384
+  publication_date: 2025-05
+  access_date: 2026-09-30
+  verification: unreachable
+  applicability: unknown
+  applicability_reason: >
+    Title and search summary suggest WVR + hierarchical + WGAN-generated
+    curriculum with an ablation. Full text returned 403/405 from three routes
+    (MDPI, DOI redirect, ADS). Not to be cited for any number until read.
+  confidence: none
+
+- id: SRC-007
+  title: Self-Play PSRO — Toward Optimal Populations in Two-Player Zero-Sum Games
+  url: https://arxiv.org/abs/2207.06541
+  type: preprint (arXiv)
+  access_date: 2026-09-28
+  verification: abstract-only
+  applicability: partial
+  extracted:
+    - "Population-based training reduces exploitability relative to plain self-play; AlphaStar-style leagues keep main agents plus exploiters."
+  confidence: medium
