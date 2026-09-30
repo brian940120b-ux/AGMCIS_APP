@@ -105,3 +105,65 @@ def test_a_round_that_never_got_in_says_how_close_it_came(tmp_path: Path):
     text = summarise(path)
     assert "never got in" in text
     assert "12.0 degrees" in text
+
+
+# ------------------------------------------------------------- the page
+
+
+def test_the_page_puts_the_cone_on_the_chart_even_when_nothing_goes_near_it():
+    """The first render fitted the aim axis to the data, so a round whose nose
+    never got closer than 91 degrees dropped the one-degree line off the bottom
+    — the chart hid the only thing it exists to show. The domain is fixed now,
+    which also makes two rounds comparable at a glance."""
+    from competition.trace_html import _PAGE
+
+    assert "lo: 0.2, hi: 180" in _PAGE
+    assert "ticks: [0.2, 1, 10, 100]" in _PAGE
+
+
+def test_the_page_carries_no_network_calls(tmp_path: Path):
+    """It has to open from a file:// path on a laptop with nothing running."""
+    from competition.trace_html import render
+
+    page = render(_write(tmp_path, [40.0, 0.5, 0.5]))
+
+    # The SVG namespace is a constant identifier passed to createElementNS, not
+    # an address anything is fetched from. Removed before the check rather than
+    # dropped from the list, so a real http:// still fails it.
+    body = page.replace("http://www.w3.org/2000/svg", "")
+
+    for forbidden in ("http://", "https://", "<script src", "<link ", "@import", "fetch("):
+        assert forbidden not in body, f"the page reaches out: {forbidden}"
+
+
+def test_downsampling_keeps_the_closest_approach(tmp_path: Path):
+    """A pass through the cone lasts about 0.6 s — 36 frames. Sampling every
+    Nth frame would drop most passes and flatten the rest, which is the one
+    thing this page must not do."""
+    from competition.trace_html import _downsample
+
+    frames = [
+        {
+            "t": i / 60.0,
+            "track_angle_deg": 0.4 if i == 50 else 40.0,
+            "distance_m": 300.0,
+            "in_envelope": i == 50,
+            "g_load": 1.0,
+        }
+        for i in range(600)
+    ]
+
+    points = _downsample(frames, buckets=10)
+    assert min(p["angle"] for p in points) == pytest.approx(0.4), "the closest frame survived"
+    assert any(p["inside"] for p in points), "and so did the fact that it was in the cone"
+
+
+def test_a_round_with_no_passes_does_not_read_as_a_near_miss(tmp_path: Path):
+    """ "3.00 s short on its best pass" for a round with no passes at all is
+    true and reads as though there was nearly one."""
+    from competition.trace_html import render
+
+    page = render(_write(tmp_path, [40.0, 40.0]))
+
+    assert "Never inside the cone" in page
+    assert "short of a kill on its best pass" not in page

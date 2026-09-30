@@ -236,10 +236,27 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Read a recorded round back.")
     parser.add_argument("traces", nargs="+", type=Path, help="files written by evaluate --trace")
+    parser.add_argument(
+        "--html",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "also write each round as a standalone page in DIR. No network calls, "
+            "so it opens from a file:// path with no server running"
+        ),
+    )
     args = parser.parse_args(argv)
     for path in args.traces:
         print()
         print(summarise(path))
+        if args.html is not None:
+            from competition.trace_html import render
+
+            args.html.mkdir(parents=True, exist_ok=True)
+            out = args.html / (path.name.split(".")[0] + ".html")
+            out.write_text(render(path), encoding="utf-8")
+            print(f"  page: {out}")
     print()
     return 0
 
