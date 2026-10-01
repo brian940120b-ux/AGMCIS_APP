@@ -11,10 +11,12 @@ if exist ".venv\Scripts\python.exe" (
 ) else (
   set PY=python
 )
-cd backend
-"..\%PY%" -m competition.official_audit %* --out "..\official_audit"
+REM Run from the AIFCS root, as a file, so that paths typed on the command
+REM line (models\competition\v6, results\exp002.json) mean what they say.
+REM An earlier version changed into backend\ first and looked for every
+REM session under backend\models\, which does not exist.
+"%PY%" backend\competition\official_audit.py %* --out "official_audit"
 set EXITCODE=%ERRORLEVEL%
-cd ..
 
 if not "%EXITCODE%"=="0" (
   echo.

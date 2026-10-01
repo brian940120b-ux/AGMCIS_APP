@@ -9,10 +9,12 @@ if exist ".venv\Scripts\python.exe" (
 ) else (
   set PY=python
 )
-cd backend
-"..\%PY%" -m competition.scoreboard %*
+REM Run from the AIFCS root, as a file, so that paths typed on the command
+REM line (models\competition\v6, results\exp002.json) mean what they say.
+REM An earlier version changed into backend\ first and looked for every
+REM session under backend\models\, which does not exist.
+"%PY%" backend\competition\scoreboard.py %*
 set EXITCODE=%ERRORLEVEL%
-cd ..
 
 if not "%EXITCODE%"=="0" (
   echo.

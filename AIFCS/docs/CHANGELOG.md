@@ -25,6 +25,11 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — 三個 .bat 從錯的目錄跑（scoreboard／experiment／official_audit）
+
+- 筆電首跑 `scripts\scoreboard.bat models\competition\v8_pool …` 回 `FileNotFoundError: models\competition\v8_pool\checkpoint.zip.zip`：bat 先 `cd backend` 再 `python -m competition.scoreboard`，命令列上的相對路徑全部變成 `backend\models\…`。`experiment.bat`（`--scoreboard results\…` 會存錯路徑）和 `official_audit.bat` 同病。
+- 三個 bat 改成和 `evaluate.bat`／`play.bat` 一樣：在 AIFCS 根目錄把模組當檔案跑（三個模組本來就有 `sys.path` 自舉）。`official_audit.bat` 的 `--out` 跟著改為 `official_audit`。
+
 ## 2026-10-01 — 比賽用程式 `play.py`／`scripts/play.bat`，以及 client 漏接 G 限制
 
 - **新**：`backend/competition/play.py` + `scripts/play.bat <session> [--listen-ip --listen-port --host-ip --host-port --record --selftest]`。載入 `card.json` + `checkpoint.zip`，用 `evaluate.config_from_card` 還原訓練時的飛機（觀測編碼、action repeat、方向舵／升降舵上限、地面防護、G 限制），套進 `CompetitionClient` + `serve`，飛到 Ctrl+C。網路位址以外沒有旗標能改飛機。先做一次 warm-up 決策（第一次 forward pass 最慢）。checkpoint 寬度和 card 的觀測不合就拒飛；少 card 拒飛並列出資料夾內容。報告寫 `data/play/play-<時間>.json`，`--record` 另存每幀 `.jsonl`（和探針同格式，可 `--compare`）。`--selftest` 在本機送 120 幀合成封包，檢查全部回覆且最慢決策 < 16.7 ms。
