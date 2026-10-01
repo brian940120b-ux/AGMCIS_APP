@@ -17,6 +17,14 @@ git push origin --tags
 | `AIFCS_V1_STABLE` | `436d372` | 2026-09-30 | 2.0 動工前的最後狀態。程式碼與 `016432c` 相同（該 commit 只加了稽核報告）。已知：`competition/trace.py` 遮蔽 stdlib（潛在，當時未觸發）。**回滾點。** |
 | `AIFCS_V2_AUDIT_COMPLETE` | `33c5be9` | 2026-09-30 | 稽核被接受；P0 已修（`trace.py` → `roundtrace.py`）；Experiment Manager、來源登錄、`EXP-001` 就位。完整套件 1,107 通過 / 0 失敗。 |
 
+## 2026-10-01 — EXP-001 / EXP-002 結案（筆電配對比較）
+
+- 筆電仍在 `6a32038`（無 `scoreboard.py`），改用當時的 `evaluate.py` 跑同一批 20 回合（seed 1000，對手 v4／v5，`results/exp002_old.json`）。`features.py`、`scoring.py`、`safety.py` 自該 commit 起未改，所以分數與新 code 相同；只差六個腳本對手那張表。
+- **EXP-001 → keep**：主辦方原配方 vs v4 5%／墜毀 75%／−721，vs v5 10%／90%／+96，最佳瞄準 11.1°／25.8°，cone 0；置中搖桿同一批回合 100% 墜毀。是地板，永不晉升。
+- **EXP-002 → reject**（作為 v6 的替代）：v8_pool vs v4 60%／+585／cone+ 0.62，v6 同一批 90%／+5,501／2.22；vs v5 75%／+246／0.00，v6 75%／+1,001／1.10。假設的核心（cone+ 超過 v6）不成立。保留為池成員與 EXP-003/005/006/007 的比較基準。
+- 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
+- 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
+
 ## 2026-09-30 — 官方資料全面 Audit（`docs/official/`）
 
 - 讀完主辦方全部檔案（公告 0918 十四頁、附件2、指引 01–06、八個 Python、bat、Setting.txt、readme、模型 metadata、機體/引擎 XML 與 pip diff、表 3／表 4／圖 3／圖 4）。產出九份純官方文件：索引、檔案清單（55）、規格總表、資料字典（OBS 26 欄／CMD 6 欄逐欄附來源）、程式地圖、需求分類、八個流程、Traceability（T01–T58）、總報告（A–T、U01–U18 未知、C1–C10 衝突、34 題）、AIFCS 對照矩陣。

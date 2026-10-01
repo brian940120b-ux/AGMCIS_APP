@@ -51,10 +51,10 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 
 | ID | 狀態 | 內容 |
 |---|---|---|
-| `EXP-001-official-sac-baseline` | PLANNED | PART 11.1 的 OFFICIAL_SAC_BASELINE，零旗標 |
-| `EXP-002-opponent-distribution` | PLANNED | v6 配方 + 腳本對手進池（v4 v5 break energy scissors wanderer pursuit）+ `--league ema`。H2 |
+| `EXP-001-official-sac-baseline` | DONE / keep | PART 11.1 的 OFFICIAL_SAC_BASELINE，零旗標。筆電配對比較：vs v4 5%／墜毀 75%／−721，vs v5 10%／90%／+96，cone 0。地板，永不晉升 |
+| `EXP-002-opponent-distribution` | DONE / reject | v6 配方 + 腳本對手進池 + `--league ema`。H2。筆電配對：vs v4 60%／+585／cone+ 0.62（v6 90%／+5,501／2.22），vs v5 75%／+246／0.00（v6 75%／+1,001／1.10）。不取代 v6；仍是 EXP-003/005/006/007 的比較基準 |
 | `EXP-003-mirror` | PLANNED | EXP-002 + `--mirror`。H1；等 EXP-002 有結果再跑 |
 | `EXP-004-exploiter` | PLANNED | v6 配方、池只有 v6、`--stop-at-win-rate 0.7`。H3；Dataset 要加 v6 |
-| `EXP-005-potential-shaping` | PLANNED | EXP-002 配方，`--reward potential`。H4；看 cone+ |
+| `EXP-005-potential-shaping` | RUNNING（Kaggle V8） | EXP-002 配方，`--reward potential`。H4；看 cone+ |
 | `EXP-006-frames-observation` | PLANNED | EXP-002 配方，`--observation frames`。H5 |
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
