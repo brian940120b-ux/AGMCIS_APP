@@ -248,6 +248,15 @@ Python 的循環垃圾回收（`--record` 一回合累積 19,146 個 dict，整�
 **最慢 13.6 ms**，進預算了。兩回合一比（24.6 → 13.6）方向對，但樣本只有兩回合，每次預演都記
 `worst_decision_ms`，超過 16.7 再追。
 
+### 預演完：把 HOST 的 CSV 拿來對分數
+
+```
+scripts\hostcsv.bat "C:\AirCombat_Train_Test\D.比賽用主辦方連線程式_驗證是否符合能正確連線\飛行競賽Host端Record_<時間>.csv"
+```
+
+印出 HOST 三個分數欄位用哪個算法重建得出來（`announcement` 或 `host`）、起始幾何、最近距離、錐內秒數、
+HOST 的最終分與勝負。2026-10-01 的結果在 `CONFORMANCE.md` F：HOST 算的不是公告寫的那條公式。
+
 ### 在筆電上用主辦方的 HOST 預演（賽前一定要做一次）
 
 `C:\AirCombat_Train_Test\D.比賽用主辦方連線程式_驗證是否符合能正確連線\JSB_host_GUI_publish.exe`

@@ -25,6 +25,14 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — HOST 的計分公式實測：不是公告寫的那條（C11）
+
+- 用 HOST 的 CSV（18,002 幀）逐幀重建它的 AttackAdvantage／PositionAdvantage／FinalAdvantage：`DF×(180−角)/180`、≥90° 為 0、Final 每幀累加 Att+Pos（含 START 前保持幀）。36,000 個值最大差 0.0000。公告的 `(90−角)/90` 每幀每欄平均差 0.07。細節 `CONFORMANCE.md` F；衝突登記 C11；U01／U05 加註。
+- **新**：`scoring.Normalisation`（`announcement` 預設不變、`host` 實測），`position_advantage(geometry, normalisation)`、`SideScore(normalisation=…)`。預設沒改：比賽日 HOST 版本未知，要改是人的決定。
+- **新**：`backend/competition/hostcsv.py` + `scripts/hostcsv.bat <CSV>`：讀 HOST CSV，兩種算法各重建一次、報最大差、印起始幾何／距離／錐內秒數／HOST 最終分。固定樣本 `backend/tests/data/host_round_2026-10-01_sample.csv`（6 列，我們自己跑出來的資料）。
+- 同一份 CSV 看到的：公開版起始幾何是相反航向並排 1,702 m（不是 3/6/9 千呎）；內建對手平飛 PID；v6 先逃 10.5 km 再追回 464 m，機頭最近 4.87°，沒進錐；HOST 判 v6 贏 16,998 對 404。W_time、W_G 仍未知（這回合沒進錐沒超 G）。
+- 測試：`test_competition_hostcsv.py` 13 個、`test_competition_scoring.py` +2。
+
 ## 2026-10-01 — v6 第一次對真實 HOST 飛完整回合；一幀決策超時的兩個對策
 
 - `play.bat models/competition/v6 --record` 對 `JSB_host_GUI_publish.exe`：19,146 幀、0 錯誤、state 2、3,191 次決策、平均 0.37 ms、最慢 24.6 ms（預算 16.7）。報告與逐幀 `.jsonl` 在筆電 `data/play/`。

@@ -28,6 +28,23 @@ and each is a named parameter with the reasoning written down:
   a figure.
 * **T_G counts seconds above 9G**, read from the pilot Z-axis load the OBS
   packet already carries.
+
+A fourth item is not a reading of the rules but a measurement of the host.
+On 2026-10-01 the organiser's public host program (`JSB_host_GUI_publish.exe`)
+scored a round and wrote its per-frame columns to CSV, and those columns
+reproduce exactly (36,000 values, largest difference 0.0000) with
+
+    TA_norm = (180 - TA) / 180 if TA < 90 else 0        # not (90 - TA) / 90
+    AA_norm = (180 - AA) / 180 if AA < 90 else 0
+    Final   = sum over every frame, the pre-START hold included, of
+              TA_norm * DF + AA_norm * DF
+
+The announcement (p.9) writes (90 - |TA|) / 90. The host gates at 90 as the
+announcement says but pays half credit right up to the gate, and it weights
+sum(P_t) at 1 per frame with no separate position weight visible. Which of
+the two the competition host runs is unknown; `Normalisation` carries both,
+the announcement's stays the default until someone decides otherwise, and
+`hostcsv.py` re-checks any new host recording against both.
 """
 
 from __future__ import annotations
@@ -96,22 +113,38 @@ class AttackEnvelope:
         )
 
 
-def position_advantage(geometry: Geometry) -> float:
+class Normalisation(StrEnum):
+    """How an angle becomes a number between 0 and 1.
+
+    ANNOUNCEMENT is the published formula. HOST is what the organiser's public
+    host program was measured to compute (module docstring); the two agree on
+    the 90-degree gate and disagree on the slope inside it.
+    """
+
+    ANNOUNCEMENT = "announcement"
+    HOST = "host"
+
+
+def position_advantage(
+    geometry: Geometry, normalisation: Normalisation = Normalisation.ANNOUNCEMENT
+) -> float:
     """P(t): how good this instant's geometry is, from 0 to 2.4.
 
     Two halves. Track angle asks whether our nose is on them; aspect angle asks
     whether we are behind them. Both are worth nothing beyond 90 degrees, so a
     head-on merge scores on neither and an overshoot scores on neither.
     """
-    track = _normalised(geometry.track_angle_deg)
-    aspect = _normalised(geometry.aspect_angle_deg)
+    track = _normalised(geometry.track_angle_deg, normalisation)
+    aspect = _normalised(geometry.aspect_angle_deg, normalisation)
     return (track + aspect) * distance_factor(geometry.distance_m)
 
 
-def _normalised(angle_deg: float) -> float:
+def _normalised(angle_deg: float, normalisation: Normalisation = Normalisation.ANNOUNCEMENT) -> float:
     magnitude = abs(angle_deg)
     if magnitude >= 90.0:
         return 0.0
+    if normalisation is Normalisation.HOST:
+        return (180.0 - magnitude) / 180.0
     return (90.0 - magnitude) / 90.0
 
 
@@ -126,6 +159,7 @@ class SideScore:
     weights: ScoringWeights = field(default_factory=ScoringWeights)
     envelope: AttackEnvelope = field(default_factory=AttackEnvelope)
     tick_hz: float = 60.0
+    normalisation: Normalisation = Normalisation.ANNOUNCEMENT
 
     attack_seconds: float = 0.0
     high_g_seconds: float = 0.0
@@ -140,7 +174,7 @@ class SideScore:
     def observe(self, geometry: Geometry, g_load: float) -> None:
         """One frame of the round."""
         self.elapsed_s += self._dt
-        self.position_sum += position_advantage(geometry)
+        self.position_sum += position_advantage(geometry, self.normalisation)
         if abs(g_load) > G_LIMIT:
             self.high_g_seconds += self._dt
         if self.envelope.contains(geometry):

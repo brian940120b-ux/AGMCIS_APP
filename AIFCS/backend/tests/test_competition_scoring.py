@@ -15,6 +15,7 @@ from competition.scoring import (
     G_LIMIT,
     AttackEnvelope,
     EndReason,
+    Normalisation,
     ScoringWeights,
     SideScore,
     Verdict,
@@ -265,3 +266,39 @@ def test_the_reference_reward_pays_for_aim_the_scoring_does_not_count():
     assert aimed_from_near.killed_at_s == pytest.approx(3.0)
     assert aimed_from_near.position_sum / aimed_from_far.position_sum == pytest.approx(1.2 / 0.5)
     assert aimed_from_near.total > aimed_from_far.total
+
+
+# ------------------------------------------------- the host's normalisation
+
+
+def test_the_host_normalisation_pays_half_credit_at_the_gate():
+    """Measured from the organiser's public host on 2026-10-01: its columns
+    are (180 - angle) / 180 inside 90 degrees, zero beyond, times the distance
+    factor. The announcement's (90 - angle) / 90 is kept as the default."""
+    announced = position_advantage(geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=45.0))
+    host = position_advantage(geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=45.0), Normalisation.HOST)
+
+    assert announced == pytest.approx(1.0)
+    assert host == pytest.approx(1.5)
+    # Both gate at ninety.
+    for normalisation in Normalisation:
+        assert (
+            position_advantage(geometry(range_ft=2000.0, track_deg=90.0, aspect_deg=90.0), normalisation)
+            == 0.0
+        )
+    # And agree when the nose is dead on.
+    for normalisation in Normalisation:
+        assert (
+            position_advantage(geometry(range_ft=2000.0, track_deg=0.0, aspect_deg=0.0), normalisation) == 2.0
+        )
+
+
+def test_a_side_score_can_be_asked_to_count_the_hosts_way():
+    announced, host = SideScore(), SideScore(normalisation=Normalisation.HOST)
+    g = geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=45.0)
+    for _ in range(60):
+        announced.observe(g, 1.0)
+        host.observe(g, 1.0)
+
+    assert announced.position_sum == pytest.approx(60.0)
+    assert host.position_sum == pytest.approx(90.0)
