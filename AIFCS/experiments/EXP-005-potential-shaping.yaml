@@ -23,15 +23,71 @@ pool:
 - wanderer
 - pursuit
 reward_tier: research
-status: PLANNED
+status: DONE
 created_at: '2026-09-30T14:21:38+00:00'
 started_at: null
-finished_at: null
+finished_at: '2026-10-01T13:26:40+00:00'
 git_commit: 39f5d0d
-results: {}
-decision: null
+results:
+  kaggle_2026-10-01:
+    commit: 'fda84e3 (before the aspect-term fix: margins carry the inverted position
+      term; won/cone/best do not)'
+    steps: 2000000
+    hours: 7.05
+    evaluate_20_rounds_seed_1000_floor:
+      vs_v4:
+        won: 0.65
+        killed: 0.0
+        crashed: 0.0
+        margin: -321
+        sweet_152_500m_s: 2.6
+        under_5deg_s: 0.0
+        best_deg: 12.0
+        cone_s: 0.0
+        cone_plus_s: 0.0
+        deg_per_s: 0.0
+      vs_v5:
+        won: 0.6
+        killed: 0.0
+        crashed: 0.0
+        margin: -66
+        sweet_152_500m_s: 0.2
+        under_5deg_s: 0.1
+        best_deg: 0.2
+        cone_s: 0.01
+        cone_plus_s: 0.23
+        deg_per_s: 7.0
+      do_nothing_floor_vs_v4:
+        won: 0.8
+        margin: -149
+      do_nothing_floor_vs_v5:
+        won: 0.8
+        margin: 15
+    v8_pool_same_board:
+      vs_v4:
+        won: 0.55
+        margin: 426
+        cone_plus_s: 0.22
+        best_deg: 0.3
+      vs_v5:
+        won: 0.6
+        margin: 197
+        cone_plus_s: 0.0
+        best_deg: 2.8
+decision: reject
 notes: 'Hypothesis H4 (docs/PRIOR_ART.md 6.6; SRC-012, SRC-013, SRC-015 all shape
   this way; Ng, Harada & Russell 1999 for why it is policy-invariant). Compared against
   EXP-002, which it differs from by the reward mode alone. v7p is the cautionary tale:
   a reward change that looked right on paper cut cone+ from 2.22 to 0.33 — so this
-  one is judged on cone+ and the in-cone ratio, not on won.'
+  one is judged on cone+ and the in-cone ratio, not on won.
+
+  RESULT (Kaggle V8, 7.05 h): vs v4 65%/-321/cone+ 0.00/best 12.0 deg; vs v5 60%/-66/cone+
+  0.23/best 0.2 deg. Against v8_pool on the same board (55%/+426/0.22 and 60%/+197/0.00):
+  the potential term did not move the cone (0.00 vs 0.22, 0.23 vs 0.00: noise either
+  way) and the policy never aimed at v4 at all (best 12 deg, 2.6 s in the sweet band).
+  Won is at the centred-stick floor''s level (80%). REJECT: H4 as implemented (phi
+  = 2000 x aim x range factor on the shaped base) does not buy cone time. Caveat:
+  this run trained and was scored at fda84e3, before the position term was fixed,
+  so its margins are not comparable with anything after 401c927; the cone and best-aim
+  columns are. Not re-run: the doctrine-pool line (EXP-008 onwards) supersedes it
+  as the base.'

@@ -25,6 +25,11 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — EXP-005（位能 shaping）結案：reject
+
+- Kaggle V8（7.05 h，commit fda84e3）：v8_potential vs v4 65%／−321／cone+ 0.00／best 12.0°；vs v5 60%／−66／0.23／best 0.2°。同板 v8_pool：55%／+426／0.22；60%／+197／0.00。錐沒動（兩邊都是雜訊等級），對 v4 完全沒瞄到（最近 12°）。won 在置中搖桿地板（80%）之下。H4 以這個實作（Φ = 2000·aim·range_factor 疊在 shaped 上）不買到錐內時間。
+- 注意：這一跑在位置項修正前，margin 不可比；cone／best 可比。不重跑，EXP-008 起的線取代它當基準。
+
 ## 2026-10-01 — Kaggle 的實驗改由 notebook cell 選（`AIFCS_EXPERIMENT`）
 
 - `kaggle/aifcs_train.py` 的 `EXPERIMENT` 改讀環境變數 `AIFCS_EXPERIMENT`，沒設就用預設（現在是 `EXP-008-doctrine-pool`）。筆電連不上 GitHub，改第 60 行再 push 這條路走不通；在 cell 第一行設變數，三個實驗 = 三個 version，不用三個 commit。`bootstrap.py` 說明同步。測試一個。
