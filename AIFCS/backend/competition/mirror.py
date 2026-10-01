@@ -115,11 +115,25 @@ def observation_signs(width: int) -> np.ndarray:
 
     if width == FRAMES_STATE_SIZE:
         return _frames_signs()
+    from competition.lookahead import LOOKAHEAD_STATE_SIZE
+
+    if width == LOOKAHEAD_STATE_SIZE:
+        return _lookahead_signs()
     raise ValueError(
         f"no mirror map for a {width}-wide observation; only the reference "
-        f"({STATE_SIZE}), extended ({EXTENDED_STATE_SIZE}) and frames "
-        f"({FRAMES_STATE_SIZE}) encodings have one"
+        f"({STATE_SIZE}), extended ({EXTENDED_STATE_SIZE}), frames "
+        f"({FRAMES_STATE_SIZE}) and lookahead ({LOOKAHEAD_STATE_SIZE}) encodings have one"
     )
+
+
+def _lookahead_signs() -> np.ndarray:
+    """Extended, then per horizon: azimuth flips, elevation, range, track and
+    closure do not. A mirrored world puts the predicted target on the other
+    side and leaves how far and how soon alone."""
+    from competition.lookahead import HORIZONS_S, LOOKAHEAD_FIELDS
+
+    per_horizon = [-1.0 if field == "predicted_azimuth" else 1.0 for field in LOOKAHEAD_FIELDS]
+    return np.concatenate([EXTENDED_SIGNS, np.array(per_horizon * len(HORIZONS_S), dtype=np.float64)])
 
 
 def mirror_observation(observation: np.ndarray) -> np.ndarray:

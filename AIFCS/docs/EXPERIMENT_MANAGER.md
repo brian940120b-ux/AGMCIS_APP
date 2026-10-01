@@ -64,3 +64,4 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
 | `EXP-008-doctrine-pool` | PLANNED | EXP-002 配方 + 手冊對手 flare／jinker／reversal／leadturn 進池；計分位置項已修。H12 |
 | `EXP-009-wez-start` | PLANNED | EXP-008 + `--geometry wez`（從錐內開始）。H8 |
+| `EXP-010-lookahead-observation` | PLANNED | EXP-008 配方，`--observation lookahead`（預測 1 s／3 s 幾何）。H16 |

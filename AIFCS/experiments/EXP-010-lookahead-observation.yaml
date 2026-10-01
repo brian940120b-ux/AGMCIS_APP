@@ -1,0 +1,38 @@
+id: EXP-010-lookahead-observation
+question: Does handing the policy the geometry one and three seconds ahead (dead reckoning
+  along both velocity vectors, in its own body frame) shorten the path from 'close'
+  to 'in the cone' that v6 and v8_pool never finish?
+hypothesis: 'EXP-008''s recipe with --observation lookahead (40 wide: extended plus
+  predicted azimuth, elevation, range, track and closure at 1 s and 3 s). Heron''s
+  agent at 10 Hz had to know its trajectory 3 s ahead to hold the 1-degree cone (SRC-020);
+  the handbook says to aim where the target will be, not where it is (SRC-022 4.3.9.7.2.2.2).
+  Expect: cone vs reference and vs break above EXP-008''s, and a lower aim rate (deg/s)
+  inside five degrees. Decision rule: keep if cone improves on 2 of 6 bench opponents
+  over EXP-008 without losing won on more than one; reject if cone is unchanged. Changes
+  the observation, so the saved pool is still usable (the evaluator rebuilds each
+  policy''s own plant) but this policy cannot be mirrored into another width.'
+session: v9_lookahead
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation lookahead --batch-size 512 --league
+  ema --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+- flare
+- jinker
+- reversal
+- leadturn
+reward_tier: research
+status: PLANNED
+created_at: '2026-10-01T12:34:38+00:00'
+started_at: null
+finished_at: null
+git_commit: 401c927
+results: {}
+decision: null
+notes: ''

@@ -691,7 +691,7 @@ def _offset(lat_deg: float, lon_deg: float, bearing_deg: float, distance_m: floa
 #: The encodings a session can be trained on. "reference" is the package's
 #: twenty; "extended" adds ten; "frames" adds the extended thirty and 75
 #: frame-expressed vector components (competition/frames.py).
-OBSERVATIONS: tuple[str, ...] = ("reference", "extended", "frames")
+OBSERVATIONS: tuple[str, ...] = ("reference", "extended", "frames", "lookahead")
 
 
 def build_encoder(config: EnvConfig) -> Any:
@@ -704,6 +704,10 @@ def build_encoder(config: EnvConfig) -> Any:
         from competition.frames import FramesEncoder
 
         return FramesEncoder(round_seconds=config.round_seconds)
+    if config.observation == "lookahead":
+        from competition.lookahead import LookaheadEncoder
+
+        return LookaheadEncoder(round_seconds=config.round_seconds)
     if config.observation != "reference":
         raise ValueError(f"observation must be one of {OBSERVATIONS}, not {config.observation!r}")
     return StateEncoder()
@@ -719,6 +723,10 @@ def observation_width(observation: str = "reference") -> int:
         from competition.frames import FRAMES_STATE_SIZE
 
         return FRAMES_STATE_SIZE
+    if observation == "lookahead":
+        from competition.lookahead import LOOKAHEAD_STATE_SIZE
+
+        return LOOKAHEAD_STATE_SIZE
     if observation != "reference":
         raise ValueError(f"observation must be one of {OBSERVATIONS}, not {observation!r}")
     return STATE_SIZE

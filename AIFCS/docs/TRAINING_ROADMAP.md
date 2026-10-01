@@ -91,6 +91,7 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 | H13 | **固定起始集**：攻／守／中立／高角度各 N seed，加 `cz` 幾何（2,500–4,500 ft、25–45°） | 一半：`--geometry cz` 已做；evaluate 的固定集未做 | ADT 的 benchmark 做法 |
 | H14 | 閉合率不超過距離 5% 的平滑懲罰 | 未做：研究層獎勵 | 手冊 ROT；先量 v6 的 overshoot |
 | H15 | 出平面防守對手（3,000–4,000 ft 且對方拉 lead 才 jink） | **已做**：= `jinker`（觸發 1,200 m、對方機頭 10° 內） | 比 `break` 像真的 |
+| H16 | **預測未來軌跡**：1 s／3 s 等速推算的幾何進觀測（lead computing） | **已做**：`--observation lookahead`（40 維）；紀錄 `EXP-010-lookahead-observation` | Heron 3 秒、手冊「先放 lead」、韓國冠軍 margin 特徵 |
 
 **不做的**：HP 模型、200 秒、放寬的錐、離散動作、任何改 OBS/CMD/計分的東西。
 

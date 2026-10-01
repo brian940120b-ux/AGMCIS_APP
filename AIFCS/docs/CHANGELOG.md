@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — `--observation lookahead`：把「預測未來軌跡」做進觀測（H16）
+
+- 出處三個：Heron 說 10 Hz 下 agent「要知道未來 3 秒的軌跡才留得住 1° 錐」（SRC-020）；手冊 4.3.9.7.2.2.2「預判他出 jink 的位置，先把砲口放到 lead」（SRC-022）；韓國冠軍餵的是瞄準／距離的 margin 不是現值（SRC-012）。三者都是 lead computing：射擊解是預測，不是量測。
+- **新**：`backend/competition/lookahead.py`，`LookaheadEncoder(ExtendedEncoder)`：extended 30 維之後，對 1 s 與 3 s 兩個視野，把兩機沿各自速度向量推算（等速推算，轉彎時會錯，這是刻意的：便宜的預測給它，修正留給它學），在**當下**機體座標報預測方位角／仰角／距離／track／閉合率，共 10 維，寬度 40。只用 OBS 封包裡有的，不送 HOST（R1）。
+- `environment.OBSERVATIONS` 加 `lookahead`，`build_encoder`／`observation_width` 認得；`mirror.observation_signs(40)`：只翻預測方位角。評測照 card 重建，舊 pool 可用。
+- 紀錄 `EXP-010-lookahead-observation`（v9_lookahead = EXP-008 配方只換觀測）。測試 8 個。
+
 ## 2026-10-01 — **P0：計分的位置項反了**；手冊對手進池；WEZ／CZ 起始；實測轉彎表
 
 - **P0**：`Geometry.aspect_angle_deg` 是範例環境的角（目標正飛離 = 180、正對我 = 0），`scoring.position_advantage` 直接當公告的 AA（機尾起算）用，所以位置項反向：對頭給滿分、咬尾給零。影響：所有 `margin` 數字（evaluate／scoreboard／Kaggle）與 v6、v8_pool 的 `shaped` 獎勵（W_pos=10 的項）；`won`／`cone`／`killed` 不受影響。發現途徑：寫 HOST 對手時用 encoder 探針（目標在前方飛離 → P(t)=1.0，正對我 → 2.0）。修法：`position_advantage` 用 `180 − |aspect|`，`Geometry` 文件改寫；三個回歸測試（合成幾何、真 encoder、HOST 六列樣本）。`CONFORMANCE.md` C 表 AA 列改成「已修」；`EXPERIMENT_MANAGER.md` 加分差注意事項。
