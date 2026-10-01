@@ -25,6 +25,14 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — 六對手 scoreboard 補進 EXP-001／EXP-002；`play.bat --selftest` 在筆電 PASS
+
+- 筆電 `scripts/scoreboard.bat v8_pool official_sac_baseline v6`（6 回合×6 對手，seed 1000）。置中搖桿＋地面防護對六個腳本對手贏 67–83%，所以這張板的 won 幾乎是地板在贏；看分差和 cone。全板無擊殺。
+- EXP-002 決定規則自算：won ≥ v6 3/6、cone 贏 1/6 → reject 不變。但 v8_pool 是全板唯一有 cone 時間的（vs reference 0.72 s，分差 +3,812 也是最大）；v6 贏在 pursuit（+7,263）和 wanderer（+1,514）。
+- EXP-001：cone 全 0，分差除 pursuit 外與置中搖桿同級。keep 不變。
+- `experiments.record_result` 原本整個蓋掉 `results`，會把 Kaggle／配對結果丟掉；改成合併，加測試。這次的列是手動從貼上的表寫進 YAML（`laptop_scoreboard_2026-10-01`），`results/exp002.json` 留在筆電。
+- `play.bat models/competition/v6 --selftest` 在筆電：`G-limit 9, ground floor on`、120/120 回覆、最慢決策 1.44 ms（預算 16.7）、PASS。
+
 ## 2026-10-01 — 三個 .bat 從錯的目錄跑（scoreboard／experiment／official_audit）
 
 - 筆電首跑 `scripts\scoreboard.bat models\competition\v8_pool …` 回 `FileNotFoundError: models\competition\v8_pool\checkpoint.zip.zip`：bat 先 `cd backend` 再 `python -m competition.scoreboard`，命令列上的相對路徑全部變成 `backend\models\…`。`experiment.bat`（`--scoreboard results\…` 會存錯路徑）和 `official_audit.bat` 同病。

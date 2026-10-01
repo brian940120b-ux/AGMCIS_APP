@@ -106,6 +106,36 @@ def test_a_result_carries_the_scoreboard_headline_not_the_detail(sandbox: Path):
     assert "detail" not in json.dumps(record.results)
 
 
+def test_a_scoreboard_result_keeps_the_results_already_on_the_record(sandbox: Path):
+    """EXP-002 carried Kaggle and paired-evaluate numbers before its scoreboard
+    row arrived; writing the row must not erase them."""
+    experiments.new("EXP-T4b", question="q", hypothesis="h", session="s")
+    record = experiments.Experiment.load("EXP-T4b")
+    record.results["kaggle"] = {"won": 0.6}
+    record.save()
+    board = sandbox / "board.json"
+    board.write_text(
+        json.dumps(
+            {
+                "s": {
+                    "break": {
+                        "win_rate": 0.5,
+                        "mean_margin": 1.0,
+                        "best_attack_seconds": 0.0,
+                        "kill_rate": 0.0,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    record = experiments.record_result("EXP-T4b", scoreboard=board, decision="keep")
+
+    assert record.results["kaggle"] == {"won": 0.6}
+    assert record.results["summary"]["s"]["break"]["won"] == 0.5
+
+
 def test_marking_running_keeps_the_first_start_time(sandbox: Path):
     experiments.new("EXP-T5", question="q", hypothesis="h", session="s")
     first = experiments.mark_running("EXP-T5").started_at

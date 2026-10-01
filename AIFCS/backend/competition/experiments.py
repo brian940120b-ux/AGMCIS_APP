@@ -186,10 +186,12 @@ def record_result(
     if scoreboard is not None:
         data = json.loads(Path(scoreboard).read_text(encoding="utf-8"))
         # Keep the headline rows, not the per-round detail: the JSON file stays
-        # where it is and the record points at it.
-        record.results = {
-            "scoreboard": str(scoreboard),
-            "summary": {
+        # where it is and the record points at it. Merged, not assigned: a
+        # record that already carries Kaggle or paired-evaluate results keeps
+        # them, and the first version of this line threw them away.
+        record.results.update(
+            scoreboard=str(scoreboard),
+            summary={
                 name: {
                     opponent: {
                         "won": rows.get("win_rate"),
@@ -201,7 +203,7 @@ def record_result(
                 }
                 for name, board in data.items()
             },
-        }
+        )
     record.status = "DONE"
     record.decision = decision
     record.finished_at = datetime.now(UTC).isoformat(timespec="seconds")

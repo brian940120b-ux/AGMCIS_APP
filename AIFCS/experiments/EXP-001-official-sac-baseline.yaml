@@ -1,12 +1,12 @@
 id: EXP-001-official-sac-baseline
-question: What does the organiser's own recipe reach at 2,000,000 steps, unchanged?
-  Every custom reward and observation so far was compared against v4/v5 and a centred
-  stick, never against the baseline the brief (PART 11.1) says must exist.
+question: What does the organiser's own recipe reach at 2,000,000 steps, unchanged? Every
+  custom reward and observation so far was compared against v4/v5 and a centred stick, never
+  against the baseline the brief (PART 11.1) says must exist.
 hypothesis: Trained with train.py defaults only (reward=reference, observation=reference,
-  action_repeat=1, gamma 0.99, batch 256, built-in reference opponent, no floor, no
-  G-limit), the policy beats the centred stick on the fixed scoreboard but scores
-  no kills against any scripted opponent. It is the floor the research rewards must
-  clear, and its cone+ is the number shaped and pointed are measured against.
+  action_repeat=1, gamma 0.99, batch 256, built-in reference opponent, no floor, no G-limit),
+  the policy beats the centred stick on the fixed scoreboard but scores no kills against any
+  scripted opponent. It is the floor the research rewards must clear, and its cone+ is the
+  number shaped and pointed are measured against.
 session: official_sac_baseline
 flags: --timesteps 2000000
 pool: []
@@ -37,11 +37,11 @@ results:
       crashed: 1.0
       margin: 18
       best_deg: 14.9
-    note: Kaggle evaluate --baseline output pasted 2026-10-01. The laptop scoreboard
-      (six scripted opponents) is still to be run; decision waits for it.
+    note: Kaggle evaluate --baseline output pasted 2026-10-01. The laptop scoreboard (six
+      scripted opponents) is still to be run; decision waits for it.
   laptop_paired_2026-10-01:
-    tool: evaluate.py at laptop commit 6a32038 (features/scoring/safety unchanged
-      since), JSBSim 1.3.1 GitHub build, CPU
+    tool: evaluate.py at laptop commit 6a32038 (features/scoring/safety unchanged since),
+      JSBSim 1.3.1 GitHub build, CPU
     rounds: 20
     seed: 1000
     vs_v4:
@@ -75,18 +75,121 @@ results:
         margin: 1001
         cone_plus_s: 1.1
     detail: results/exp002_old.json (laptop)
+  laptop_scoreboard_2026-10-01:
+    tool: scripts/scoreboard.bat at 68aca50, laptop, JSBSim 1.3.1, 6 rounds per opponent,
+      seed 1000, floor on
+    detail: results/exp002.json (laptop)
+    official_sac_baseline:
+      reference:
+        won: 0.67
+        margin: 423
+        cone_best_s: 0
+        killed: 0.0
+      pursuit:
+        won: 1.0
+        margin: 1854
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 0.67
+        margin: 92
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.83
+        margin: 145
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.67
+        margin: 51
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.17
+        margin: 214
+        cone_best_s: 0
+        killed: 0.0
+    do_nothing_with_floor:
+      reference:
+        won: 0.83
+        margin: 121
+        cone_best_s: 0
+        killed: 0.0
+      pursuit:
+        won: 0.83
+        margin: 117
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 0.83
+        margin: 86
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.67
+        margin: 149
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.67
+        margin: 23
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.83
+        margin: 156
+        cone_best_s: 0
+        killed: 0.0
+    v6:
+      reference:
+        won: 1.0
+        margin: 1436
+        cone_best_s: 0
+        killed: 0.0
+      pursuit:
+        won: 1.0
+        margin: 7263
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 1.0
+        margin: 413
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.5
+        margin: 83
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.67
+        margin: 371
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.67
+        margin: 1514
+        cone_best_s: 0
+        killed: 0.0
+    note: Six rounds per cell, so one round is 17 points of 'won'. The centred stick with
+      the floor wins 67-83% against every scripted opponent, so 'won' on this board is mostly
+      the floor; margin and cone carry the signal. No kills by anyone.
 decision: keep
-notes: 'PART 11.1 OFFICIAL_SAC_BASELINE. No flags beyond the step count, on purpose:
-  the defaults are the organiser''s recipe and any flag would make this something
-  else. Never resume or overwrite this session once trained. RESULT (Kaggle, reference
-  opponent, 20 rounds): won 15%, killed 0%, crashed 75%, margin +137, best 26.4 deg,
-  cone 0.00. The centred stick crashes 100%; the recipe learned to survive in a quarter
-  of rounds and never came within 26 degrees of the cone. This is the floor every
-  research reward is measured against.
+notes: 'PART 11.1 OFFICIAL_SAC_BASELINE. No flags beyond the step count, on purpose: the defaults
+  are the organiser''s recipe and any flag would make this something else. Never resume or
+  overwrite this session once trained. RESULT (Kaggle, reference opponent, 20 rounds): won
+  15%, killed 0%, crashed 75%, margin +137, best 26.4 deg, cone 0.00. The centred stick crashes
+  100%; the recipe learned to survive in a quarter of rounds and never came within 26 degrees
+  of the cone. This is the floor every research reward is measured against.
 
-  DECISION: KEEP as the floor (PART 11.1), never promoted. Laptop paired comparison
-  (seed 1000, 20 rounds): vs v4 5% won / 75% crashed / -721; vs v5 10% / 90% / +96;
-  best aim 11.1 and 25.8 deg; cone 0. The centred stick crashes 100% on the same engagements,
-  so the recipe learned a little survival and nothing of the cone. Hypothesis confirmed:
-  beats the centred stick, no kills. The six-opponent scoreboard row is owed once
-  the laptop has scripts/scoreboard.bat; it changes nothing above.'
+  DECISION: KEEP as the floor (PART 11.1), never promoted. Laptop paired comparison (seed
+  1000, 20 rounds): vs v4 5% won / 75% crashed / -721; vs v5 10% / 90% / +96; best aim 11.1
+  and 25.8 deg; cone 0. The centred stick crashes 100% on the same engagements, so the recipe
+  learned a little survival and nothing of the cone. Hypothesis confirmed: beats the centred
+  stick, no kills. The six-opponent scoreboard row is owed once the laptop has scripts/scoreboard.bat;
+  it changes nothing above.
+
+  SCOREBOARD (laptop, six scripted opponents, 6 rounds each): won 17-100%, margins +51 to
+  +1,854, cone 0.00 everywhere, no kills. Indistinguishable from the centred stick on margin
+  except vs pursuit (+1,854 vs +117). KEEP as the floor stands.'

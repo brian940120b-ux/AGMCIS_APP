@@ -1,17 +1,17 @@
 id: EXP-002-opponent-distribution
-question: Does v6's recipe learn more when the pool holds the scripted set beside
-  v4/v5 and the league weights whoever is beating it from the first round (SRC-001,
-  SRC-012), instead of two learned opponents sampled uniformly?
-hypothesis: 'Same reward, observation, plant and steps as v6. Pool = v4, v5 + break,
-  energy, scissors, wanderer, pursuit; --league ema. Expect: on the fixed scoreboard,
-  won and margin against the scripted six at or above v6 (90% / +5,501 vs v4 was v6''s
-  best), and cone+ above v6''s 2.22 s against at least two scripted opponents, because
-  the policy now trains on opponents that turn. Decision rule: keep if won >= v6 on
-  4 of 6 and cone+ improves on 2; reject if won falls below v6 on 3 or more.'
+question: Does v6's recipe learn more when the pool holds the scripted set beside v4/v5 and
+  the league weights whoever is beating it from the first round (SRC-001, SRC-012), instead
+  of two learned opponents sampled uniformly?
+hypothesis: 'Same reward, observation, plant and steps as v6. Pool = v4, v5 + break, energy,
+  scissors, wanderer, pursuit; --league ema. Expect: on the fixed scoreboard, won and margin
+  against the scripted six at or above v6 (90% / +5,501 vs v4 was v6''s best), and cone+ above
+  v6''s 2.22 s against at least two scripted opponents, because the policy now trains on opponents
+  that turn. Decision rule: keep if won >= v6 on 4 of 6 and cone+ improves on 2; reject if
+  won falls below v6 on 3 or more.'
 session: v8_pool
-flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
-  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
-  ema --timesteps 2000000
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat 6
+  --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league ema --timesteps
+  2000000
 pool:
 - v4
 - v5
@@ -74,11 +74,11 @@ results:
       margin: 5501
       cone_plus_s: 2.22
       source: docs/TUNING.md, laptop scoreboard
-    note: Kaggle only scores the learned pool members; the six-opponent scoreboard
-      on the laptop is what the decision rule uses.
+    note: Kaggle only scores the learned pool members; the six-opponent scoreboard on the
+      laptop is what the decision rule uses.
   laptop_paired_2026-10-01:
-    tool: evaluate.py at laptop commit 6a32038 (features/scoring/safety unchanged
-      since), JSBSim 1.3.1 GitHub build, CPU
+    tool: evaluate.py at laptop commit 6a32038 (features/scoring/safety unchanged since),
+      JSBSim 1.3.1 GitHub build, CPU
     rounds: 20
     seed: 1000
     pool:
@@ -151,32 +151,169 @@ results:
         crashed: 1.0
         margin: 10
     detail: results/exp002_old.json (laptop)
-    note: 'Laptop numbers differ a little from Kaggle''s (v8_pool vs v4: 60%/+585/cone+
-      0.62 here, 55%/+426/0.22 there) on the same seed: different JSBSim build and
-      CPU vs GPU inference. Same ordering, same conclusion. The six-opponent scoreboard
-      still needs the new code on the laptop (6a32038 has no scoreboard.py).'
+    note: 'Laptop numbers differ a little from Kaggle''s (v8_pool vs v4: 60%/+585/cone+ 0.62
+      here, 55%/+426/0.22 there) on the same seed: different JSBSim build and CPU vs GPU inference.
+      Same ordering, same conclusion. The six-opponent scoreboard still needs the new code
+      on the laptop (6a32038 has no scoreboard.py).'
+  laptop_scoreboard_2026-10-01:
+    tool: scripts/scoreboard.bat at 68aca50, laptop, JSBSim 1.3.1, 6 rounds per opponent,
+      seed 1000, floor on
+    detail: results/exp002.json (laptop)
+    v8_pool:
+      reference:
+        won: 0.67
+        margin: 3812
+        cone_best_s: 0.72
+        killed: 0.0
+      pursuit:
+        won: 0.83
+        margin: 1974
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 0.5
+        margin: 365
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.83
+        margin: 201
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.83
+        margin: 398
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.67
+        margin: 381
+        cone_best_s: 0
+        killed: 0.0
+    official_sac_baseline:
+      reference:
+        won: 0.67
+        margin: 423
+        cone_best_s: 0
+        killed: 0.0
+      pursuit:
+        won: 1.0
+        margin: 1854
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 0.67
+        margin: 92
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.83
+        margin: 145
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.67
+        margin: 51
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.17
+        margin: 214
+        cone_best_s: 0
+        killed: 0.0
+    v6:
+      reference:
+        won: 1.0
+        margin: 1436
+        cone_best_s: 0
+        killed: 0.0
+      pursuit:
+        won: 1.0
+        margin: 7263
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 1.0
+        margin: 413
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.5
+        margin: 83
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.67
+        margin: 371
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.67
+        margin: 1514
+        cone_best_s: 0
+        killed: 0.0
+    do_nothing_with_floor:
+      reference:
+        won: 0.83
+        margin: 121
+        cone_best_s: 0
+        killed: 0.0
+      pursuit:
+        won: 0.83
+        margin: 117
+        cone_best_s: 0
+        killed: 0.0
+      break:
+        won: 0.83
+        margin: 86
+        cone_best_s: 0
+        killed: 0.0
+      energy:
+        won: 0.67
+        margin: 149
+        cone_best_s: 0
+        killed: 0.0
+      scissors:
+        won: 0.67
+        margin: 23
+        cone_best_s: 0
+        killed: 0.0
+      wanderer:
+        won: 0.83
+        margin: 156
+        cone_best_s: 0
+        killed: 0.0
+    note: Six rounds per cell, so one round is 17 points of 'won'. The centred stick with
+      the floor wins 67-83% against every scripted opponent, so 'won' on this board is mostly
+      the floor; margin and cone carry the signal. No kills by anyone.
 decision: reject
-notes: 'Hypothesis H2 (docs/PRIOR_ART.md 6.6). One factor moved relative to v6: the
-  opponent distribution (who is in the pool and how it is sampled). The paper league''s
-  gate never opens in a 2,000,000-step run over eight workers, so --league ema is
-  what makes weighting real; recorded in league.py. Kaggle: attach the aifcs_pool
-  Dataset (v4, v5); the scripted names need nothing. INTERIM (Kaggle): against v4
-  this is well below v6 (55%/+426/cone+ 0.22 vs 90%/+5,501/2.22); against v5 60%/+197.
-  In training it beat the scripted set (pursuit 98%, scissors 84%, wanderer 74%, break
-  62%, energy 40%) but met v4/v5 only ~2 rounds in 7, and the aim reached 0.3 deg
-  without holding the cone. The scripted opponents are learnable; the cone is still
-  the problem. Also: a centred stick with the floor wins 80% of rounds against v4
-  and v5, so ''won'' against the learned pool measures little; margin and cone+ carry
-  the signal.
+notes: 'Hypothesis H2 (docs/PRIOR_ART.md 6.6). One factor moved relative to v6: the opponent
+  distribution (who is in the pool and how it is sampled). The paper league''s gate never
+  opens in a 2,000,000-step run over eight workers, so --league ema is what makes weighting
+  real; recorded in league.py. Kaggle: attach the aifcs_pool Dataset (v4, v5); the scripted
+  names need nothing. INTERIM (Kaggle): against v4 this is well below v6 (55%/+426/cone+ 0.22
+  vs 90%/+5,501/2.22); against v5 60%/+197. In training it beat the scripted set (pursuit
+  98%, scissors 84%, wanderer 74%, break 62%, energy 40%) but met v4/v5 only ~2 rounds in
+  7, and the aim reached 0.3 deg without holding the cone. The scripted opponents are learnable;
+  the cone is still the problem. Also: a centred stick with the floor wins 80% of rounds against
+  v4 and v5, so ''won'' against the learned pool measures little; margin and cone+ carry the
+  signal.
 
-  DECISION (laptop paired comparison, same 20 engagements, seed 1000): v6 beats v8_pool
-  on every column against both learned opponents: vs v4 90%/+5,501/cone+ 2.22 against
-  60%/+585/0.62; vs v5 75%/+1,001/1.10 against 75%/+246/0.00. The hypothesis'' core
-  claim, cone+ above v6, failed, so the scripted-six rows (which need the new code
-  on the laptop) cannot rescue it: the decision rule''s ''reject if won falls below
-  v6'' is already met on the learned pool. REJECT as a replacement for v6. Kept as
-  a pool member and as the comparison base for EXP-003/005/006/007, which each change
-  one thing relative to this recipe. What it did show: scripted opponents are learnable
-  (training win-rate 98% pursuit, 84% scissors), and the EMA league works; what it
-  did not: hold the cone. The six-opponent scoreboard row is owed for the record once
-  scripts/scoreboard.bat reaches the laptop.'
+  DECISION (laptop paired comparison, same 20 engagements, seed 1000): v6 beats v8_pool on
+  every column against both learned opponents: vs v4 90%/+5,501/cone+ 2.22 against 60%/+585/0.62;
+  vs v5 75%/+1,001/1.10 against 75%/+246/0.00. The hypothesis'' core claim, cone+ above v6,
+  failed, so the scripted-six rows (which need the new code on the laptop) cannot rescue it:
+  the decision rule''s ''reject if won falls below v6'' is already met on the learned pool.
+  REJECT as a replacement for v6. Kept as a pool member and as the comparison base for EXP-003/005/006/007,
+  which each change one thing relative to this recipe. What it did show: scripted opponents
+  are learnable (training win-rate 98% pursuit, 84% scissors), and the EMA league works; what
+  it did not: hold the cone. The six-opponent scoreboard row is owed for the record once scripts/scoreboard.bat
+  reaches the laptop.
+
+  SCOREBOARD (laptop, six scripted opponents, 6 rounds each): the decision rule''s own count:
+  won >= v6 on 3 of 6 (energy 83 vs 50, scissors 83 vs 67, wanderer 67 vs 67; below on reference,
+  pursuit, break), cone improves on 1 (reference 0.72 vs 0.00). Neither threshold met; REJECT
+  stands. Of note: v8_pool is the only session on the whole board with any cone time (0.72
+  s vs the reference opponent) and its margin vs reference (+3,812) is the largest; v6 wins
+  on pursuit (+7,263) and wanderer (+1,514). The scripted pool taught it the level-flight
+  opponent and nothing that turns.'
