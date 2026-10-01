@@ -25,6 +25,14 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — 筆電：主辦方環境裝好、範例跑通（指引02 步驟逐一驗證）
+
+- Anaconda 全機版（`C:\ProgramData\anaconda3`，conda 24.11.3）。libmamba 解算器外掛壞（`libmambapy` 無 `QueryFormat`），`conda config --set solver classic` 後正常；每次仍印兩行 entry point 錯誤，無害。
+- `conda create -n f16_ai python=3.10` → Python 3.10.21；bat 用的 `F16_ai` 在 Windows 視為同一環境（C5 確認無影響）。
+- 驗收一行：`torch 2.11.0+cu128`、`cuda True`、`jsbsim 1.3.1`、`gymnasium 1.0.0`、`stable-baselines3 2.4.0`。與範例模型 metadata（SB3 2.4.0、gymnasium 1.0.0、cu128）及指引06 截圖的 jsbsim 1.3.1 一致。
+- `AirCombat_Train_Test` 以 xcopy 放到 `C:\`（44 檔）。`B.一鍵啟動test.bat` 載入 `model/jsbsim_sac_314400000_steps.zip` 跑通，Ctrl+C 停；`JSBSimRecording.txt.acmi` 11.6 MB 重寫。Tacview 未裝（建議項，非規則）。
+- 桌面工作副本比 zip 多一個 `D.比賽用主辦方連線程式…` 資料夾內 9/26 的 Host 端 CSV／acmi／`player2_runtime.log`：使用者當天跑過 Host 程式。未比對 hash。
+
 ## 2026-09-30 — 官方資料全面 Audit（`docs/official/`）
 
 - 讀完主辦方全部檔案（公告 0918 十四頁、附件2、指引 01–06、八個 Python、bat、Setting.txt、readme、模型 metadata、機體/引擎 XML 與 pip diff、表 3／表 4／圖 3／圖 4）。產出九份純官方文件：索引、檔案清單（55）、規格總表、資料字典（OBS 26 欄／CMD 6 欄逐欄附來源）、程式地圖、需求分類、八個流程、Traceability（T01–T58）、總報告（A–T、U01–U18 未知、C1–C10 衝突、34 題）、AIFCS 對照矩陣。
