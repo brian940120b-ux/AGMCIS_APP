@@ -21,15 +21,71 @@ pool:
 - wanderer
 - pursuit
 reward_tier: research
-status: PLANNED
+status: TRAINED
 created_at: '2026-09-30T08:50:23+00:00'
 started_at: null
 finished_at: null
 git_commit: a4ffdbb
-results: {}
+results:
+  kaggle_2026-10-01:
+    steps: 2000000
+    steps_per_s: 87
+    hours: 6.4
+    training_win_rate_last_50:
+      overall: 0.6
+      break: 0.62
+      energy: 0.4
+      pursuit: 0.98
+      scissors: 0.84
+      v4: 0.66
+      v5: 0.52
+      wanderer: 0.74
+    evaluate_20_rounds_seed_1000_floor:
+      vs_v4:
+        won: 0.55
+        killed: 0.0
+        crashed: 0.0
+        margin: 426
+        sweet_152_500m_s: 6.7
+        under_5deg_s: 0.8
+        best_deg: 0.3
+        cone_s: 0.02
+        cone_plus_s: 0.22
+        deg_per_s: 4.9
+      vs_v5:
+        won: 0.6
+        killed: 0.0
+        crashed: 0.05
+        margin: 197
+        sweet_152_500m_s: 1.8
+        under_5deg_s: 0.0
+        best_deg: 2.8
+        cone_s: 0.0
+        cone_plus_s: 0.0
+        deg_per_s: 8.0
+      do_nothing_floor_vs_v4:
+        won: 0.8
+        margin: -149
+      do_nothing_floor_vs_v5:
+        won: 0.8
+        margin: 15
+    v6_for_comparison_vs_v4:
+      won: 0.9
+      margin: 5501
+      cone_plus_s: 2.22
+      source: docs/TUNING.md, laptop scoreboard
+    note: Kaggle only scores the learned pool members; the six-opponent scoreboard
+      on the laptop is what the decision rule uses.
 decision: null
 notes: 'Hypothesis H2 (docs/PRIOR_ART.md 6.6). One factor moved relative to v6: the
   opponent distribution (who is in the pool and how it is sampled). The paper league''s
   gate never opens in a 2,000,000-step run over eight workers, so --league ema is
   what makes weighting real; recorded in league.py. Kaggle: attach the aifcs_pool
-  Dataset (v4, v5); the scripted names need nothing.'
+  Dataset (v4, v5); the scripted names need nothing. INTERIM (Kaggle): against v4
+  this is well below v6 (55%/+426/cone+ 0.22 vs 90%/+5,501/2.22); against v5 60%/+197.
+  In training it beat the scripted set (pursuit 98%, scissors 84%, wanderer 74%, break
+  62%, energy 40%) but met v4/v5 only ~2 rounds in 7, and the aim reached 0.3 deg
+  without holding the cone. The scripted opponents are learnable; the cone is still
+  the problem. Also: a centred stick with the floor wins 80% of rounds against v4
+  and v5, so ''won'' against the learned pool measures little; margin and cone+ carry
+  the signal.'
