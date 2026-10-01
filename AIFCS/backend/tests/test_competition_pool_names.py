@@ -150,3 +150,41 @@ def test_the_kaggle_trainer_passes_scripted_names_through_and_looks_for_the_rest
 def test_every_scripted_name_is_accepted_in_a_pool(name: str):
     config = EnvConfig(opponent_policy=name)
     assert type(_build_opponent(config, 15_000.0, 340.0, seed=3)) is ADVERSARIES[name]
+
+
+def test_the_kaggle_trainer_leaves_a_git_bundle_and_never_fails_on_it(tmp_path, monkeypatch, capsys):
+    """Kaggle is the courier for a laptop that cannot reach GitHub: the run
+    writes a bundle beside sessions/. A bundle that cannot be made is a line
+    of output, not a failed run."""
+    import subprocess
+
+    script = Path(__file__).resolve().parents[2] / "kaggle" / "aifcs_train.py"
+    spec = importlib.util.spec_from_file_location("aifcs_train_bundle_test", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    # A real repository, so the real git makes a real bundle.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    (repo / "f").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "f"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "one"],
+        cwd=repo,
+        check=True,
+    )
+    target = tmp_path / "out.bundle"
+    assert module.export_bundle(home=repo, target=target) is True
+    assert target.is_file() and target.stat().st_size > 0
+    assert (
+        subprocess.run(["git", "bundle", "verify", str(target)], cwd=repo, capture_output=True).returncode
+        == 0
+    )
+    assert "repository bundle for the laptop" in capsys.readouterr().out
+
+    # Not a repository at all: reported, not raised.
+    assert module.export_bundle(home=tmp_path / "nowhere", target=tmp_path / "no.bundle") is False
+    assert "bundle skipped" in capsys.readouterr().out

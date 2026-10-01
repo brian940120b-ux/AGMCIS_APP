@@ -81,6 +81,38 @@ def setup() -> None:
         run([sys.executable, "-m", "pip", "install", "-q", "-r", str(AIFCS / requirements)])
 
 
+#: Where the repository itself is left for download, beside sessions/.
+BUNDLE = Path("/kaggle/working/AGMCIS_APP.bundle")
+
+
+def export_bundle(home: Path = HOME, target: Path = BUNDLE) -> bool:
+    """Leave the repository in the Output tab as a git bundle.
+
+    The laptop cannot reach github.com (two days of "Connection was reset")
+    and Kaggle can, so Kaggle becomes the courier: a bundle is a single file
+    git can pull from exactly as it would from the remote, history and all:
+
+        git pull /c/Users/user/Downloads/AGMCIS_APP.bundle claude/aifcs-flight-simulation-u32h56
+
+    The clone above is shallow and git will not bundle a shallow repository,
+    so the history is fetched first. Never fatal: a run that cannot make the
+    bundle still trains.
+    """
+    try:
+        run(["git", "fetch", "--unshallow", "--quiet"], cwd=home)
+        code = run(["git", "bundle", "create", str(target), "--all"], cwd=home)
+    except OSError as error:
+        print(f"bundle skipped: {error}", flush=True)
+        return False
+    if code != 0 or not target.is_file():
+        print("bundle skipped: git could not create it (training carries on)", flush=True)
+        return False
+    print(
+        f"repository bundle for the laptop: {target.name} ({target.stat().st_size / 1e6:.1f} MB)", flush=True
+    )
+    return True
+
+
 #: What an extracted Stable-Baselines3 model looks like from the outside, used
 #: to recognise one Kaggle has unpacked rather than trusting a folder's name.
 SB3_MARKER = "policy.pth"
@@ -218,6 +250,7 @@ def split_pool(pool: list[str]) -> tuple[list[str], list[str]]:
 
 def main() -> int:
     setup()
+    export_bundle()
     name, flags, pool = load_experiment()
     bring_in_previous_sessions()
 
@@ -280,6 +313,11 @@ def main() -> int:
     # Nothing to copy: MODELS is already inside /kaggle/working. Said out loud
     # anyway, because "where did it go" has cost more time on this than any
     # bug in it.
+    if BUNDLE.is_file():
+        print(
+            f"\nin the Output tab: {BUNDLE.name} — the repository, for a laptop that cannot reach GitHub",
+            flush=True,
+        )
     print("\nin the Output tab, under sessions/:", flush=True)
     for session in sorted(MODELS.iterdir()):
         if (session / "checkpoint.zip").is_file():
