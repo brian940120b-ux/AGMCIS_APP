@@ -372,3 +372,95 @@
   applicability: partial
   applicability_reason: A survey whose stated centre is reward design for 1v1 dogfights; would be the map of the reward literature if its text were reachable.
   confidence: low
+
+- id: SRC-018
+  title: "Hierarchical Reinforcement Learning for Air Combat at DARPA's AlphaDogfight Trials (PHANG-MAN, 2nd place)"
+  authors: Pope, Ide, Micovic, Diaz, Twedt, Alcedo, Walker, Rosenbluth, Ritholtz, Javorsek
+  organization: Lockheed Martin AI Center / DARPA; IEEE Transactions on Artificial Intelligence (accepted); arXiv 2105.00990v3
+  url: https://arxiv.org/abs/2105.00990
+  access_date: 2026-10-01
+  verification: verified
+  verification_note: >
+    PDF downloaded (8.2 MB, sha256 f34edd3a6b7cd26b...) and text-extracted
+    with pypdf; sections IV (environment), V (agent), VI (training) and VII
+    (results) read in full. The observation list is in supplemental material
+    not retrieved. US government work sponsored by DARPA; the paper is public
+    (arXiv). Designs cited and re-implemented only; no code was published.
+  applicability: direct
+  applicability_reason: >
+    The ADT weapon engagement zone is the organiser's rule verbatim: 500-3000 ft
+    and a 2-degree cone off the nose, 300-second engagements, F-16 in JSBSim,
+    continuous aileron/elevator/rudder/throttle. The organiser (and the Korean
+    challenge, SRC-011) adopted DARPA's definition, so this is the primary
+    literature for exactly our geometry.
+  extracted:
+    - "Environment (JHU-APL gym-jsbsim extension): 50 Hz interaction; perfect state, no sensor noise; damage per second inside the WEZ D = (3000-d)/2500 for 500 ft <= d <= 3000 ft, else 0; win when the opponent's health reaches zero, loss when the 1000 ft hard deck is breached, draw at 300 s."
+    - "Angles: track angle theta_t in [0,180] between own nose and the opponent's centre; adverse angle phi_a in [0,180] between the opponent's tail and own centre; both used normalised by 180 (not 90). Closure rate v_c in ft/s. Logistic S(x, alpha, x0) = 1/(1+exp(-alpha (x-x0)))."
+    - "Reward components (Table I): r_phi = -phi_bar; r_theta = -theta_bar^lambda; r_relpos = (theta_bar-2) S(phi_bar,18,1/2) - theta_bar + 1; r_closure = (v_c/500) [1-S(phi_bar,18,1/2)] S(d,1/500,2900); r_gunsnap(blue) = Gamma_B(d) [1-S(theta_bar,1e5,1/180)]; r_gunsnap(red) = -Gamma_R(d) S(phi_bar,800,178/180); r_deck = -4 [1-S(h,1/20,1300)]; r_tooclose = -2 [1-S(phi_bar,18,1/2)] S(d,1/50,800)."
+    - "Gun-snap range factors: Gamma_B(d) = beta_B S(d,1/50,1000) for d<1950 ft, beta_B [1-S(d,1/50,2900)] for d>=1950; Gamma_R(d) = beta_R S(d,1/35,400) for d<2250, beta_R [1-S(d,1/200,4100)] otherwise. Aggressive shooter: beta_B = 2((2900-d)/1900 + 1) on 1000-2900 ft else 2; beta_R = -2((4100-d)/3700 + 1) on 400-4100 ft else -2. Conservative shooter and control-zone: beta_B = 3, beta_R = -3. Policy selector: beta 5/-5, lambda 1."
+    - "Three low-level policies: Control Zone (r_relpos + r_closure + gun snaps + deck + too-close; 50% random / 50% offensive starts), Aggressive Shooter and Conservative Shooter (r_theta with lambda 4/9 + gun snaps + deck; started inside the WEZ either way; health x10 during training so WEZ memories dominate the buffer). A discrete policy selector picks one every 0.1 s (every 5th low-level action)."
+    - "Algorithm: SAC, single hidden layer of 12288 (policies, Q) and 7168 (selector) neurons, ReLU, Adam, lr 2e-4, buffer 5e6, batch 256, gamma 0.99, tau 1e-3, entropy target -3 (selector) / -4 (policies); Ape-X-style distributed actors with prioritised replay; stochastic n-step returns uniformly sampled up to 25 (low-level) or 5 (selector) steps = 0.5 s; 21 actors on one P3.16xlarge, up to a month per low-level policy."
+    - "Opponent curriculum: scripted easy opponents first; once win/loss > 50%, add previous PHANG-MAN iterations, single low-level policies and imitations of other teams; after 100 matches against each, sample opponents proportional to the win/loss ratio of the last 100 matchups, probability clipped to [0.2%, 11.7%]; thirty opponents plus self-play."
+    - "Determinism: the same network on a different GPU architecture differed at 1e-6 and, compounded 50 times a second through the FDM, flipped wins to losses; they trained with state truncated to six decimals and actions to two."
+    - "Initial conditions: classified from highly defensive to highly offensive; CZ trained on a balanced offensive/defensive/neutral mixture, shooters mostly on WEZ starts. In-house benchmark: five APL opponents x 25 matches on fixed ADT-like initial conditions. Validation: 50 scenarios flown as both blue and red."
+    - "Results: 2nd overall; beat an F-16 Weapons Instructor Course graduate 5-0 in their own match; the policy selector was never worse than its best member against any opponent."
+    - "Their own observation experiments: egocentric and allocentric polar coordinates, airspeed, and state deltas over varying time gaps were tried; removal and normalisation of raw states too."
+  confidence: high
+
+- id: SRC-019
+  title: "AlphaDogfight Trials: Bringing Autonomy to Air Combat"
+  authors: DeMay, White, Dunham, Pino
+  organization: Johns Hopkins APL Technical Digest 36(2), 2022, pp. 154-163 (Distribution Statement A)
+  url: https://www.jhuapl.edu/sites/default/files/2024-09/36-02-DeMay.pdf
+  access_date: 2026-10-01
+  verification: verified
+  verification_note: >
+    PDF downloaded (1.1 MB, sha256 bf7a9834b6e2a66f...) and text-extracted
+    with pypdf; all ten pages read. It cites the DARPA final report
+    FPS-R-20-0698 (FOUO, not public) for details it does not print.
+  applicability: direct
+  applicability_reason: The trials organiser's own account of the environment, the adversary agents and the tournament; the model the Taiwanese and Korean competitions copied.
+  extracted:
+    - "Coliseum: faster-than-real-time 1v1 JSBSim arena behind an OpenAI-Gym-style interface; perfect state information to agents (called out as unrealistic)."
+    - "APL adversaries, in order of complexity: rudimentary (no reaction), basic (three-loop PID on heading/altitude/speed set points with a handful of hand-tuned range-and-angle cases, e.g. >10 miles and <60 deg: full speed straight at the target), scripted finite-state machines that pick a strategy from the fight state (e.g. flare to force an overshoot when the opponent closes from behind), and self-play RL. Named: Zombie (straight and level, fixed speed), Rosie (timed small altitude/speed deviations), BUD FSM, AlphaMav0 (self-play RL)."
+    - "Self-play league: a repository of frozen historical agents, the trainee promoted into it when its win ratio reaches a threshold; opponents sampled by Elo-estimated skill with stronger ones more likely; curriculum pushed one step closer to the real game at each promotion; the authors prefer curriculum to reward shaping because shaping fixes part of the solution and invites unintended behaviour."
+    - "Tournament: ADT1/ADT2 against APL agents, ADT2.5 round robin between teams, ADT3 (Aug 2020) day 1 vs APL agents, day 2 round robin, day 3 single elimination. Semifinals: Lockheed 13-2 over PhysicsAI (20 engagements), Heron 17-2 over Aurora; final Heron 16-4 over Lockheed. Key to Heron: aggressive and highly accurate forward gun attacks."
+    - "Human match: five engagements from neutral starts at varying altitudes; Heron 5-0 with quick kills at the merge; the pilot (callsign Banger, F-16 Weapons Instructor Course graduate) survived the early merges only in the last engagement by aggressive out-of-plane manoeuvring."
+    - "By ADT2 (4 months in) leading teams resembled BFM; by ADT3 most could fly offensive, neutral and defensive BFM."
+  confidence: high
+
+- id: SRC-020
+  title: "DARPA: AI's Dogfighting Win Shows Potential For Teaming With Humans (Heron Systems interview)"
+  authors: Warwick (Aviation Week)
+  organization: Aviation Week, 2020 (trade press; statements by Heron's Ben Bell and the pilot)
+  url: https://aviationweek.com/aerospace/emerging-technologies/darpa-ais-dogfighting-win-shows-potential-teaming-humans
+  access_date: 2026-10-01
+  verification: verified
+  verification_note: >
+    Article fetched and read. Secondary source quoting the winning team;
+    Heron published no paper and its own project page returned HTTP 503
+    twice on 2026-10-01. Shield AI acquired Heron in 2021.
+  applicability: direct
+  applicability_reason: The only public account of the winner's recipe, and it contradicts the runner-up on control rate.
+  extracted:
+    - "Falco controlled the aircraft at about 10 Hz while competitors used 50 Hz; smoothness was the stated control strategy, and at 10 Hz the agent had to commit to a trajectory about 3 s ahead to keep the opponent inside the 1-degree cone."
+    - "Trained over about five weeks and billions of engagements against a league of 102 unique agents with different reward structures, controllers and network architectures; at least 4 billion training samples; model-free RL throughout, no planning."
+    - "Winning tactic against the human: manoeuvre hard from the outset for high-aspect (head-on and side) gun shots; the pilot said he was trained to avoid exactly those because of real-world collision risk and the AI exploited it; fine pointing inside the cone decided most engagements."
+  confidence: medium
+
+- id: SRC-021
+  title: "Air Combat Evolution (ACE) program page (archived)"
+  authors: DARPA Tactical Technology Office
+  organization: DARPA
+  url: https://www.darpa.mil/research/programs/air-combat-evolution
+  access_date: 2026-10-01
+  verification: verified
+  verification_note: Page fetched; marked complete and no longer maintained. Context only; no technical content beyond the four objectives.
+  applicability: background
+  applicability_reason: >
+    The programme that followed ADT and flew the agents on the X-62A VISTA
+    (Sept 2023); its results were not published (win/loss withheld), so it
+    gives the lineage, not numbers.
+  extracted:
+    - "Objectives: local air-combat autonomy performance, pilot trust calibration, scaling to heterogeneous multi-aircraft, and air-combat test infrastructure."
+  confidence: high

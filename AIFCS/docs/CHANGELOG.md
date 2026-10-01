@@ -25,6 +25,12 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — 美軍 DARPA AlphaDogfight Trials 文獻（SRC-018～021）
+
+- 主辦方的 WEZ（2°、500–3000 ft、300 s）逐字等於 DARPA ADT 的定義；ADT 文獻因此是同一幾何的第一手資料。來源登錄：Lockheed 亞軍論文 arXiv 2105.00990（PDF 讀完，獎勵八項公式、SAC 超參、對手課程、GPU 決定性截斷）、JHU APL 技術文摘 36(2)（環境、四層對手、Elo 自我對弈、賽果 16–4／5–0）、Aviation Week 的 Heron 訪談（10 Hz 平順、102 agent league、40 億樣本）、DARPA ACE 頁。Heron 官網兩次 503。
+- `docs/PRIOR_ART.md` 七：規則對照、對手集對照、兩隊配方、與我們的逐項對照（10 Hz 與 /180 正規化已一致）、新假設 H7–H11（錐邊階躍獎勵、WEZ 起始、寬淺網路、截斷決定性、對手門）。路線圖加五列，全部「未做」。
+- 不能用的：ADT 程式碼未公開、DARPA 最終報告 FOUO、X-62A 勝負未公布。設計層重做，不抄。
+
 ## 2026-10-01 — HOST 的計分公式實測：不是公告寫的那條（C11）
 
 - 用 HOST 的 CSV（18,002 幀）逐幀重建它的 AttackAdvantage／PositionAdvantage／FinalAdvantage：`DF×(180−角)/180`、≥90° 為 0、Final 每幀累加 Att+Pos（含 START 前保持幀）。36,000 個值最大差 0.0000。公告的 `(90−角)/90` 每幀每欄平均差 0.07。細節 `CONFORMANCE.md` F；衝突登記 C11；U01／U05 加註。
