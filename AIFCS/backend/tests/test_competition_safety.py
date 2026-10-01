@@ -114,9 +114,13 @@ def test_the_floor_turns_every_crash_into_a_full_round():
     """The measurement that decides whether it earns its place.
 
     A centred stick, which crashes in every round without it. With it, every
-    round runs the full five minutes — and against the reference opponent that
-    is enough to win most of them, because the opponent flies straight and a
-    round that reaches time is decided on advantage score.
+    round runs the full five minutes. That is the whole claim: a crash is a
+    loss under the rules' first test, and the floor removes it. It does *not*
+    claim a better margin. With the aspect term the right way round (scoring,
+    2026-10-01) a straight-flying opponent that ends up behind a wandering
+    stick collects position advantage for five minutes, so the surviving
+    round's margin can be worse than the crashed one's; an earlier version
+    asserted the opposite and only passed because the term was inverted.
     """
     without = evaluate(neutral_policy(), EnvConfig(), rounds=3, seed=100)
     with_floor = evaluate(neutral_policy(), EnvConfig(ground_avoidance=GroundAvoidance()), rounds=3, seed=100)
@@ -124,7 +128,7 @@ def test_the_floor_turns_every_crash_into_a_full_round():
     assert without.crash_rate == 1.0
     assert with_floor.crash_rate == 0.0
     assert all(r.frames == 18_000 for r in with_floor.rounds), "every round reaches five minutes"
-    assert with_floor.mean_margin > without.mean_margin
+    assert all(not r.blue_crashed for r in with_floor.rounds)
 
 
 # ------------------------------------------- what actually reaches the surface

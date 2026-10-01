@@ -33,7 +33,12 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from competition.action import INITIAL_THROTTLE  # noqa: E402
-from competition.environment import CompetitionRound, EnvConfig, observation_width  # noqa: E402
+from competition.environment import (  # noqa: E402
+    CompetitionRound,
+    EnvConfig,
+    observation_width,
+    opponent_names,
+)
 from competition.runtime import StackUnavailable  # noqa: E402
 from competition.scoring import (  # noqa: E402
     AttackEnvelope,
@@ -49,17 +54,10 @@ FT_PER_M = 1.0 / 0.3048
 #: ends. Arithmetic, not judgement — see `docs/COMPETITION.md`.
 SWEET_SPOT_M = (AttackEnvelope().min_range_ft * 0.3048, 500.0)
 
-OPPONENT_NAMES = [
-    "reference",
-    "level",
-    "pursuit",
-    # The scripted set from competition/adversaries.py, roughly in order of how
-    # hard they are to score against.
-    "wanderer",
-    "scissors",
-    "energy",
-    "break",
-]
+#: What `--opponent` accepts: exactly what the environment can build, in its
+#: order. One owner (environment.opponent_names), so a new scripted opponent
+#: cannot be reachable from training and missing from evaluation.
+OPPONENT_NAMES = list(opponent_names())
 
 
 Policy = Callable[[np.ndarray], np.ndarray]

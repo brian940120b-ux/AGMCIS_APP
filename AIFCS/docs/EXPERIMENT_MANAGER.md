@@ -49,6 +49,10 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 
 ## 目前的紀錄
 
+> **2026-10-01 的分差注意事項**：這一天之前所有 `margin` 欄（evaluate／scoreboard／Kaggle）都是用位置項反向的計分引擎算的
+> （`CONFORMANCE.md` C 表 AA 列）。`won`、`cone`、`killed` 不受影響。EXP-001／002 的 margin 數字留著當歷史，不要和之後的比。
+> v6 與 v8_pool 的 `shaped` 獎勵也含同一個反向項；EXP-008 起修正。
+
 | ID | 狀態 | 內容 |
 |---|---|---|
 | `EXP-001-official-sac-baseline` | DONE / keep | PART 11.1 的 OFFICIAL_SAC_BASELINE，零旗標。筆電配對比較：vs v4 5%／墜毀 75%／−721，vs v5 10%／90%／+96，cone 0。六對手板 cone 全 0、分差與置中搖桿幾乎相同。地板，永不晉升 |
@@ -58,3 +62,5 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-005-potential-shaping` | RUNNING（Kaggle V8） | EXP-002 配方，`--reward potential`。H4；看 cone+ |
 | `EXP-006-frames-observation` | PLANNED | EXP-002 配方，`--observation frames`。H5 |
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
+| `EXP-008-doctrine-pool` | PLANNED | EXP-002 配方 + 手冊對手 flare／jinker／reversal／leadturn 進池；計分位置項已修。H12 |
+| `EXP-009-wez-start` | PLANNED | EXP-008 + `--geometry wez`（從錐內開始）。H8 |

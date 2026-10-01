@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from competition.adversaries import ADVERSARIES, BreakTurn, Scissors
+from competition.adversaries import ADVERSARIES, SCRIPTED, BreakTurn, Scissors
 from competition.environment import (
     BUILTIN_OPPONENTS,
     CompetitionRound,
@@ -26,7 +26,7 @@ from competition.safety import GroundAvoidance
 
 def test_the_names_are_the_built_ins_then_the_scripted_set():
     assert opponent_names()[: len(BUILTIN_OPPONENTS)] == BUILTIN_OPPONENTS
-    assert set(opponent_names()) == set(BUILTIN_OPPONENTS) | set(ADVERSARIES)
+    assert set(opponent_names()) == set(BUILTIN_OPPONENTS) | set(SCRIPTED)
 
 
 def test_evaluate_offers_the_same_names_and_no_others():

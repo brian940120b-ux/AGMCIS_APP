@@ -1,0 +1,35 @@
+id: EXP-009-wez-start
+question: Does starting inside the attack envelope (the AlphaDogfight shooters' recipe,
+  SRC-018) teach holding the cone, which no start from 3-9 thousand feet has?
+hypothesis: 'EXP-008''s recipe with --geometry wez: every round begins 700-2800 ft
+  behind a target flying away, nose inside the half-angle. The replay buffer fills
+  with cone memories instead of approach memories. Expect: cone vs reference above
+  1.5 s on the scoreboard (v6: 0.00, v8_pool: 0.72) at the cost of worse margins from
+  the rules'' own starts, which a follow-on resume under --geometry published should
+  recover. Decision rule: keep as a curriculum stage if cone vs reference or break
+  exceeds 1.5 s; reject if it does not beat EXP-008 on cone anywhere.'
+session: v9_wez
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
+  ema --geometry wez --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+- flare
+- jinker
+- reversal
+- leadturn
+reward_tier: research
+status: PLANNED
+created_at: '2026-10-01T12:20:58+00:00'
+started_at: null
+finished_at: null
+git_commit: 4156c86
+results: {}
+decision: null
+notes: ''

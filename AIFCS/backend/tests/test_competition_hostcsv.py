@@ -8,6 +8,7 @@ Our data, from our run; the host program itself is not in the repository.
 from __future__ import annotations
 
 import csv
+import functools
 from pathlib import Path
 
 import numpy as np
@@ -126,3 +127,61 @@ def test_main_describes_a_recording_and_names_the_normalisation(capsys):
 def test_main_refuses_a_missing_file(tmp_path, capsys):
     assert main([str(tmp_path / "nope.csv")]) == 2
     assert "no such file" in capsys.readouterr().err
+
+
+def test_the_scoring_engine_itself_reproduces_the_hosts_columns_on_the_sample():
+    """Through `StateEncoder` and `position_advantage`, not hostcsv's own angles:
+    this is the path evaluate, scoreboard and the shaped reward take. Before
+    2026-10-01 it read the aspect angle backwards and this would have failed by
+    about 0.9 on the frames where we sit on the target's tail."""
+    import numpy as np
+
+    from competition.scoring import position_advantage
+    from competition.state import StateEncoder, Telemetry
+
+    hr = read_host_csv(SAMPLE)
+    encoder = StateEncoder()
+
+    def column(player: str, name: str, frame: int) -> float:
+        return float(hr.col(player, name)[frame])
+
+    for i in range(hr.frames):
+        g = functools.partial(column, "player1", frame=i)
+        e = functools.partial(column, "player2", frame=i)
+        vn, ve, vd = g("vn_fps"), g("ve_fps"), g("vd_fps")
+        vt = (vn * vn + ve * ve + vd * vd) ** 0.5
+        values = np.array(
+            [
+                g("lat_deg"),
+                g("lon_deg"),
+                g("alt_ft"),
+                g("roll_deg"),
+                g("pitch_deg"),
+                g("yaw_deg"),
+                vn,
+                ve,
+                vd,
+                g("p_radps"),
+                g("q_radps"),
+                g("r_radps"),
+                g("ias_kts") * 1.68781,
+                vt,
+                g("g_acc"),
+                vt,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                e("lat_deg"),
+                e("lon_deg"),
+                e("alt_ft"),
+                e("vn_fps"),
+                e("ve_fps"),
+                e("vd_fps"),
+            ]
+        )
+        ours = position_advantage(encoder.geometry(Telemetry.from_observation(values)), Normalisation.HOST)
+        host = g("Score_AttackAdvantage") + g("Score_PositionAdvantage")
+        # The host reads the target's nose; the encoder reads its velocity. For
+        # a level PID target they differ by its angle of attack, a degree or two.
+        assert ours == pytest.approx(host, abs=0.05), f"frame {i}: ours {ours:.3f} host {host:.3f}"

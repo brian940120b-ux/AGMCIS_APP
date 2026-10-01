@@ -127,8 +127,8 @@ def test_a_policy_optimal_for_one_reward_is_not_for_the_other():
     competition prefers the second, because the first is out of range and it
     counts none of it. There is no wording that resolves this — only a run.
     """
-    far_and_perfect = geometry(range_ft=8000.0, track_deg=0.0, aspect_deg=10.0)
-    near_and_rough = geometry(range_ft=1200.0, track_deg=0.8, aspect_deg=10.0)
+    far_and_perfect = geometry(range_ft=8000.0, track_deg=0.0, aspect_deg=170.0)
+    near_and_rough = geometry(range_ft=1200.0, track_deg=0.8, aspect_deg=170.0)
 
     reference = ReferenceReward()
     reference_far = reference(far_and_perfect, crashed=False, foe_crashed=False)

@@ -1,0 +1,36 @@
+id: EXP-008-doctrine-pool
+question: Does v6's recipe learn to hold the cone when the pool also holds opponents
+  that react to the attacker (flare, jinker, reversal, leadturn) rather than fly patterns?
+hypothesis: 'EXP-002''s recipe and pool, plus the four doctrine opponents from AFTTP
+  3-3 Vol 5 / APL (docs/TACTICS.md). The scoring engine''s aspect term is fixed in
+  this run (it was inverted for v6 and v8_pool), so the shaped reward now pays for
+  the tail position it previously charged for. Expect: on the fixed scoreboard, cone
+  vs reference and vs break above v8_pool''s 0.72 / 0.00, and won vs the doctrine
+  four above 50% each in training. Decision rule: keep if cone improves on 2 of 6
+  bench opponents and no bench opponent falls below v8_pool by more than one round;
+  reject if cone stays at zero against everything that turns.'
+session: v9_doctrine
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
+  ema --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+- flare
+- jinker
+- reversal
+- leadturn
+reward_tier: research
+status: PLANNED
+created_at: '2026-10-01T12:20:58+00:00'
+started_at: null
+finished_at: null
+git_commit: 4156c86
+results: {}
+decision: null
+notes: ''

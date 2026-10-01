@@ -12,7 +12,14 @@ import random
 import numpy as np
 import pytest
 
-from competition.environment import GEOMETRIES, CompetitionRound, EnvConfig, RoundSetup, initial_geometry
+from competition.environment import (
+    GEOMETRIES,
+    RANGED_GEOMETRIES,
+    CompetitionRound,
+    EnvConfig,
+    RoundSetup,
+    initial_geometry,
+)
 
 HOLD = np.array([0.0, 0.0, 0.0, 0.8])
 
@@ -80,7 +87,38 @@ def test_separation_altitude_and_speed_stay_the_rules_own_under_every_geometry()
         assert setup.altitude_range_ft == (10_000.0, 20_000.0)
         assert setup.speed_kcas == 340.0
         g = start(geometry, 1)
-        assert 2900.0 <= g.distance_ft <= 9200.0
+        if geometry in RANGED_GEOMETRIES:
+            low, high = RANGED_GEOMETRIES[geometry]
+            assert low - 50.0 <= g.distance_ft <= high + 50.0, geometry
+        else:
+            assert 2900.0 <= g.distance_ft <= 9200.0, geometry
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_wez_starts_inside_the_cone_on_a_target_flying_away(seed: int):
+    g = start("wez", seed)
+    assert 500.0 < g.distance_ft < 3000.0
+    assert g.track_angle_deg < 1.0, "inside the half-angle from the first frame"
+    assert g.aspect_angle_deg > 165.0, "its tail is towards us"
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_wezdef_starts_with_the_target_in_our_six_pointing_at_us(seed: int):
+    g = start("wezdef", seed)
+    assert 500.0 < g.distance_ft < 3000.0
+    assert abs(g.azimuth_deg) > 178.0
+    assert g.aspect_angle_deg < 15.0, "it is pointing at us"
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_cz_starts_in_the_control_zone(seed: int):
+    """AETC TTP 11-1: 2,500-4,500 ft slant range, 25-45 degrees off the tail."""
+    g = start("cz", seed)
+    assert 2450.0 <= g.distance_ft <= 4550.0
+    # 25-45 degrees of heading off its tail, plus up to 10 degrees of our own
+    # bearing jitter, in the reference's 180-is-behind numbers.
+    assert 125.0 <= g.aspect_angle_deg <= 168.0
+    assert abs(g.azimuth_deg) < 15.0
 
 
 def test_an_unknown_geometry_is_refused():

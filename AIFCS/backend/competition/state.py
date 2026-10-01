@@ -232,7 +232,13 @@ class Geometry:
     track_angle_deg: float
     azimuth_deg: float
     elevation_deg: float
-    #: Aspect angle: between the target's tail and the line of sight to us.
+    #: Aspect angle in the *reference environment's* convention, which
+    #: `_angle_off_tail` produces and the reference 20-wide state carries: 180
+    #: when the target flies straight away from us (we are on its tail), 0
+    #: when it points straight at us. The rules' AA, measured from the
+    #: target's tail, is 180 minus this; `scoring.position_advantage` does
+    #: that conversion. Kept this way round because the reference state must
+    #: stay bit-for-bit the reference's.
     aspect_angle_deg: float
     own_alt_m: float
     enemy_alt_m: float

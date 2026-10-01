@@ -78,7 +78,32 @@ OBSERVATION_BOUND = 500.0
 #:   offensive  the target ahead and flying away: we start near the cone
 #:   defensive  the target behind us, chasing
 #:   mix        abreast : headon = 4 : 1, SRC-012's training distribution
-GEOMETRIES: tuple[str, ...] = ("published", "abreast", "headon", "offensive", "defensive", "mix")
+GEOMETRIES: tuple[str, ...] = (
+    "published",
+    "abreast",
+    "headon",
+    "offensive",
+    "defensive",
+    "mix",
+    "wez",
+    "wezdef",
+    "cz",
+)
+
+#: Geometries that also set the separation, because the tactic they start is
+#: defined by a range: inside the gun envelope, or inside the control zone. The
+#: rules' 3/6/9 thousand feet stay for every other geometry.
+RANGED_GEOMETRIES: dict[str, tuple[float, float]] = {
+    # The attack envelope is 500-3000 ft; start well inside it, as the
+    # AlphaDogfight shooters trained (SRC-018): the WEZ memories are the ones
+    # that teach holding the cone.
+    "wez": (700.0, 2800.0),
+    "wezdef": (700.0, 2800.0),
+    # The control zone, AETC TTP 11-1: 2,500-4,500 ft slant range, 25-45
+    # degrees behind the target. From here nothing the target does denies the
+    # attacker, and the attacker still has to close to the gun.
+    "cz": (2500.0, 4500.0),
+}
 
 
 @dataclass(frozen=True)
@@ -484,7 +509,7 @@ class CompetitionRound:
         setup = self.config.setup
         root = resolve_jsbsim_root(self.config.jsbsim_root)
 
-        separation_ft = self.random.choice(setup.separations_ft)
+        separation_ft = initial_separation_ft(self.random, setup.geometry, setup.separations_ft)
         altitude_ft = self.random.uniform(*setup.altitude_range_ft)
         # Measured against the real host, 2026-09-25: both aircraft started at
         # 19,116.00001 and 19,116.00002 ft, matching to a hundred-thousandth of
@@ -626,9 +651,30 @@ def initial_geometry(rng: random.Random, geometry: str) -> tuple[float, float, f
         # Not dead astern: a little off to a side, so the first seconds are a
         # small correction rather than nothing at all.
         bearing, foe = own + side * rng.uniform(0.0, 20.0), own
-    else:  # defensive
+    elif geometry == "defensive":
         bearing, foe = own + 180.0 + side * rng.uniform(0.0, 20.0), own
+    elif geometry == "wez":
+        # Already inside the cone: the target dead ahead within the half-angle,
+        # flying away. What is left to learn is staying there.
+        bearing, foe = own + side * rng.uniform(0.0, 0.8), own + side * rng.uniform(0.0, 10.0)
+    elif geometry == "wezdef":
+        # The mirror: the target on our tail with its nose on us.
+        bearing, foe = own + 180.0 + side * rng.uniform(0.0, 0.8), own + side * rng.uniform(0.0, 10.0)
+    else:  # cz
+        # In the control zone behind the target: 25-45 degrees off its tail,
+        # our nose roughly on it.
+        off_tail = side * rng.uniform(25.0, 45.0)
+        foe = own + off_tail
+        bearing = own + side * rng.uniform(0.0, 10.0)
     return bearing % 360.0, own, foe % 360.0
+
+
+def initial_separation_ft(rng: random.Random, geometry: str, separations_ft: tuple[float, ...]) -> float:
+    """The starting range: the rules' own, unless the geometry defines one."""
+    band = RANGED_GEOMETRIES.get(geometry)
+    if band is None:
+        return float(rng.choice(separations_ft))
+    return float(rng.uniform(*band))
 
 
 def _offset(lat_deg: float, lon_deg: float, bearing_deg: float, distance_m: float) -> tuple[float, float]:
@@ -796,7 +842,7 @@ def pursuit_opponent(
 
 def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float, *, seed: int = 0) -> Opponent:
     """One place that knows the names, so adding one cannot miss a call site."""
-    from competition.adversaries import ADVERSARIES
+    from competition.adversaries import SCRIPTED
     from competition.adversaries import build as build_adversary
 
     policy = config.opponent_policy
@@ -813,9 +859,9 @@ def _build_opponent(config: EnvConfig, altitude_ft: float, speed_kcas: float, *,
         return level_opponent(altitude_ft)
     if name == "pursuit":
         return pursuit_opponent(speed_kcas, aggression=config.opponent_aggression)
-    if name in ADVERSARIES:
-        # The scripted set: a break turn, an energy fighter, a scissors and a
-        # wanderer. Imported here rather than at module scope because
+    if name in SCRIPTED:
+        # The scripted set: the four on the bench and the doctrine four.
+        # Imported here rather than at module scope because
         # adversaries imports StateEncoder from state, and state is imported by
         # this module — at the top it is a cycle.
         # The round's own seed, drawn from the round's own generator, so a
@@ -830,6 +876,6 @@ BUILTIN_OPPONENTS: tuple[str, ...] = ("reference", "level", "pursuit")
 
 def opponent_names() -> tuple[str, ...]:
     """Every name `_build_opponent` answers to: the built-ins, then the scripted set."""
-    from competition.adversaries import ADVERSARIES
+    from competition.adversaries import SCRIPTED
 
-    return BUILTIN_OPPONENTS + tuple(ADVERSARIES)
+    return BUILTIN_OPPONENTS + tuple(SCRIPTED)

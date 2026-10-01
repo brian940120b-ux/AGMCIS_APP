@@ -78,32 +78,57 @@ def test_closing_inside_150_metres_is_worth_less_than_staying_out():
 
 
 def test_the_best_possible_instant_is_worth_2_point_4():
-    """Nose on, directly behind, inside the best-attack band."""
+    """Nose on, directly behind, inside the best-attack band.
+
+    `aspect_deg` here is the reference's number, 180 when the target flies
+    straight away from us; that is "directly behind" in the rules' words.
+    """
     assert position_advantage(
-        geometry(range_ft=300.0 / FT_TO_M, track_deg=0.0, aspect_deg=0.0)
+        geometry(range_ft=300.0 / FT_TO_M, track_deg=0.0, aspect_deg=180.0)
     ) == pytest.approx(2.4)
 
 
-@pytest.mark.parametrize(("track", "aspect"), [(90.0, 0.0), (0.0, 90.0), (120.0, 150.0)])
+@pytest.mark.parametrize(("track", "aspect"), [(90.0, 180.0), (0.0, 90.0), (120.0, 30.0)])
 def test_beyond_ninety_degrees_a_half_of_the_term_pays_nothing(track, aspect):
-    perfect = position_advantage(geometry(range_ft=1000.0, track_deg=0.0, aspect_deg=0.0))
+    perfect = position_advantage(geometry(range_ft=1000.0, track_deg=0.0, aspect_deg=180.0))
     partial = position_advantage(geometry(range_ft=1000.0, track_deg=track, aspect_deg=aspect))
     assert partial < perfect
 
 
 def test_a_head_on_merge_pays_for_the_nose_and_nothing_for_the_position():
-    """Nose on, but they are pointing straight back at us.
+    """Nose on, but they are pointing straight back at us (reference aspect 0).
 
     1000 ft is 305 m, inside the best-attack band, so the track half pays its
-    full 1.0 * 1.2. The aspect half pays nothing at 180 degrees: being in front
-    of someone is not an advantage, however well aimed.
+    full 1.0 * 1.2. The aspect half pays nothing when we are in front of them:
+    being in front of someone is not an advantage, however well aimed.
     """
-    assert position_advantage(geometry(range_ft=1000.0, track_deg=0.0, aspect_deg=180.0)) == pytest.approx(
-        1.2
-    )
-    assert position_advantage(geometry(range_ft=1000.0, track_deg=95.0, aspect_deg=180.0)) == pytest.approx(
-        0.0
-    )
+    assert position_advantage(geometry(range_ft=1000.0, track_deg=0.0, aspect_deg=0.0)) == pytest.approx(1.2)
+    assert position_advantage(geometry(range_ft=1000.0, track_deg=95.0, aspect_deg=0.0)) == pytest.approx(0.0)
+
+
+def test_the_aspect_half_is_read_through_the_encoder_the_right_way_round():
+    """The regression the host's CSV caught: through the real encoder, a target
+    dead ahead flying away is the best position and a target flying at us is
+    the worst, whatever the reference calls the angle."""
+    import numpy as np
+
+    from competition.state import StateEncoder, Telemetry
+
+    def telemetry(enemy_vn_fps: float) -> Telemetry:
+        values = np.zeros(26)
+        values[0], values[1], values[2] = 25.0, 121.0, 10_000.0
+        values[6] = values[12] = values[13] = values[15] = 574.0
+        values[20], values[21], values[22] = 25.0 + 1000.0 / 111_320.0, 121.0, 10_000.0
+        values[23] = enemy_vn_fps
+        return Telemetry.from_observation(values)
+
+    encoder = StateEncoder()
+    on_its_tail = encoder.geometry(telemetry(574.0))
+    nose_to_nose = encoder.geometry(telemetry(-574.0))
+
+    assert on_its_tail.aspect_angle_deg == pytest.approx(180.0)
+    assert position_advantage(on_its_tail) == pytest.approx(2.0, abs=1e-3)
+    assert position_advantage(nose_to_nose) == pytest.approx(1.0, abs=1e-3)
 
 
 # ------------------------------------------------------------ accumulation
@@ -275,8 +300,8 @@ def test_the_host_normalisation_pays_half_credit_at_the_gate():
     """Measured from the organiser's public host on 2026-10-01: its columns
     are (180 - angle) / 180 inside 90 degrees, zero beyond, times the distance
     factor. The announcement's (90 - angle) / 90 is kept as the default."""
-    announced = position_advantage(geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=45.0))
-    host = position_advantage(geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=45.0), Normalisation.HOST)
+    announced = position_advantage(geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=135.0))
+    host = position_advantage(geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=135.0), Normalisation.HOST)
 
     assert announced == pytest.approx(1.0)
     assert host == pytest.approx(1.5)
@@ -289,13 +314,14 @@ def test_the_host_normalisation_pays_half_credit_at_the_gate():
     # And agree when the nose is dead on.
     for normalisation in Normalisation:
         assert (
-            position_advantage(geometry(range_ft=2000.0, track_deg=0.0, aspect_deg=0.0), normalisation) == 2.0
+            position_advantage(geometry(range_ft=2000.0, track_deg=0.0, aspect_deg=180.0), normalisation)
+            == 2.0
         )
 
 
 def test_a_side_score_can_be_asked_to_count_the_hosts_way():
     announced, host = SideScore(), SideScore(normalisation=Normalisation.HOST)
-    g = geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=45.0)
+    g = geometry(range_ft=2000.0, track_deg=45.0, aspect_deg=135.0)
     for _ in range(60):
         announced.observe(g, 1.0)
         host.observe(g, 1.0)

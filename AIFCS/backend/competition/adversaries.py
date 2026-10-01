@@ -289,8 +289,218 @@ class Wanderer(_Scripted):
         )
 
 
+# ------------------------------------------------------------ doctrine set
+#
+# Four more, each one a page of the USAF F-16 handbook (AFTTP 3-3 Vol 5,
+# SRC-022; docs/TACTICS.md) or of APL's AlphaDogfight adversaries (SRC-019).
+# They differ from the first four in one way that matters for training: they
+# *react to what the attacker is doing* — where its nose is, how close it is,
+# whether it has just overshot — rather than flying a pattern. A policy that
+# beats a break turn has learned to out-turn; a policy that beats these has
+# learned to read the other aircraft.
+#
+# They are kept out of ADVERSARIES on purpose. ADVERSARIES is the scoreboard's
+# ruler and a ruler does not grow marks; every board since EXP-001 is on those
+# four. These are available to the pool and to evaluation by name.
+
+
+def _away(azimuth_deg: float) -> float:
+    """The roll that points the lift vector away from a bearing."""
+    away = azimuth_deg + 180.0
+    while away > 180.0:
+        away -= 360.0
+    while away < -180.0:
+        away += 360.0
+    return away
+
+
+class Flare(_Scripted):
+    """Cruises until something closes from behind, then throws out the anchor.
+
+    APL's BUD FSM did exactly this (SRC-019): detect an opponent closing in from
+    behind, select "flare", reduce speed hard to force the overshoot. The
+    handbook's defensive chapter is built on the same bet: the attacker's
+    closure is the defender's weapon (4.3.10.5.7). Here: throttle to idle, nose
+    up to bleed speed, bank away; once the attacker is no longer behind,
+    reverse into it to take the position it just gave up.
+
+    Learnable, like everything here: a policy that controls its closure to the
+    handbook's 5% rule never overshoots and the flare does nothing.
+    """
+
+    name = "flare"
+
+    def __init__(self, *args: Any, trigger_m: float = 1200.0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.trigger_m = trigger_m
+        self._flaring_until = 0
+        self._side = 1.0
+
+    def reset(self) -> None:
+        super().reset()
+        self._flaring_until = 0
+        self._side = 1.0
+
+    def act(self, telemetry: Telemetry) -> np.ndarray:
+        geometry = self.encoder.geometry(telemetry)
+        # Aspect is the angle between their nose and the line from us to them,
+        # measured as the encoder measures it: near 0 they are on our tail.
+        behind = abs(geometry.azimuth_deg) > 120.0
+        close = geometry.distance_m < self.trigger_m
+        if behind and close and self.frame >= self._flaring_until:
+            self._flaring_until = self.frame + int(3.0 * SIM_HZ)
+            self._side = 1.0 if geometry.azimuth_deg > 0.0 else -1.0
+        if self.frame < self._flaring_until:
+            # Anchor out: idle, nose up, bank toward the side they are on so
+            # the overshoot carries them past the other side.
+            return self.airframe.fly_to(telemetry, roll_deg=self._side * 60.0, pitch_deg=15.0, throttle=0.0)
+        if close and not behind:
+            # They went past: turn into them.
+            return self.airframe.fly_to(
+                telemetry, roll_deg=geometry.azimuth_deg * 1.2, pitch_deg=4.0, throttle=1.0
+            )
+        return self.airframe.fly_to(telemetry, roll_deg=0.0, pitch_deg=2.0, speed_kcas=self.speed_kcas)
+
+
+class Jinker(_Scripted):
+    """Guns defence on the handbook's timing: out of plane when the shot is coming.
+
+    AFTTP 3-3 4.3.10.4.3.2: begin the roll when the attacker pulls to lead, or
+    at 3,000-4,000 ft slant range if the lead cue cannot be read; lift vector
+    45-60 degrees off the attacker, pull *down* for one to two seconds, then
+    back up below it. Timing is the whole trick: too early and the attacker
+    re-solves the plane, too late and it has already fired. The cue used here
+    is the attacker's nose inside ten degrees of us at under 1,200 m, which is
+    "pulling to lead" as the OBS packet can see it. Between jinks it flies a
+    gentle turn away, the sanctuary the handbook names: in tight and off the
+    nose.
+
+    What it is for: a policy that can hold the cone on a target that turns
+    (BreakTurn) still has to learn that a target can *leave the plane* at the
+    moment that matters. That is the step from 0.72 s in the cone to three.
+    """
+
+    name = "jinker"
+
+    def __init__(self, *args: Any, trigger_m: float = 1200.0, lead_deg: float = 10.0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.trigger_m = trigger_m
+        self.lead_deg = lead_deg
+        self._jink_until = 0
+        self._cooldown_until = 0
+        self._side = 1.0
+
+    def reset(self) -> None:
+        super().reset()
+        self._jink_until = 0
+        self._cooldown_until = 0
+        self._side = 1.0
+
+    def act(self, telemetry: Telemetry) -> np.ndarray:
+        geometry = self.encoder.geometry(telemetry)
+        # `aspect_angle_deg` is the reference's number: 0 when the other
+        # aircraft flies straight at us, 180 when straight away. So it *is*
+        # how far their nose is off us.
+        their_nose_off_us = abs(geometry.aspect_angle_deg)
+        shot_coming = geometry.distance_m < self.trigger_m and their_nose_off_us < self.lead_deg
+        if shot_coming and self.frame >= self._cooldown_until:
+            self._jink_until = self.frame + int(1.5 * SIM_HZ)
+            self._cooldown_until = self._jink_until + int(2.0 * SIM_HZ)
+            self._side = -1.0 if geometry.azimuth_deg > 0.0 else 1.0
+        if self.frame < self._jink_until:
+            # Out of plane: 55 degrees of bank off their side, nose down hard.
+            return self.airframe.fly_to(telemetry, roll_deg=self._side * 55.0, pitch_deg=-12.0, throttle=0.3)
+        if self.frame < self._cooldown_until:
+            # Back up below them, building heading difference.
+            return self.airframe.fly_to(telemetry, roll_deg=self._side * 40.0, pitch_deg=10.0, throttle=1.0)
+        # Sanctuary: a turn away from their nose, not a straight line.
+        away = _away(geometry.azimuth_deg)
+        roll = float(np.clip(away * 0.5, -45.0, 45.0))
+        return self.airframe.fly_to(telemetry, roll_deg=roll, pitch_deg=3.0, speed_kcas=self.speed_kcas)
+
+
+class Reversal(_Scripted):
+    """Turns hard one way and reverses when the attacker overshoots.
+
+    AFTTP 3-3 4.3.10.4.2.2 and 4.3.10.5.7: after a merge or a close pass, a
+    reversal puts a larger-radius attacker forward of the 3/9 line unless it
+    cuts power; against a high line-of-sight overshoot, roll to lift-vector-on
+    and the fight becomes one-circle, where the smaller radius wins. Overshoot
+    is read as the attacker crossing from one side to the other at close range
+    with its nose no longer on us. Otherwise it is a break turn, the hardest
+    thing here to track — so the reversal is a break turn that *also* punishes
+    the overshoot a tracking policy makes when it finally gets close.
+    """
+
+    name = "reversal"
+
+    def __init__(self, *args: Any, close_m: float = 900.0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.close_m = close_m
+        self._direction = 1.0
+        self._last_side = 0.0
+        self._reversed_until = 0
+
+    def reset(self) -> None:
+        super().reset()
+        self._direction = 1.0
+        self._last_side = 0.0
+        self._reversed_until = 0
+
+    def act(self, telemetry: Telemetry) -> np.ndarray:
+        geometry = self.encoder.geometry(telemetry)
+        side = 1.0 if geometry.azimuth_deg > 0.0 else -1.0
+        if self.frame == 1:
+            # Turn away from them to begin with, like the break turn does.
+            self._direction = -side
+        crossed = self._last_side != 0.0 and side != self._last_side
+        close = geometry.distance_m < self.close_m
+        if crossed and close and self.frame >= self._reversed_until:
+            # They just went past: reverse into them. Unload for a few frames
+            # is implicit in the roll through wings level.
+            self._direction = -self._direction
+            self._reversed_until = self.frame + int(2.0 * SIM_HZ)
+        self._last_side = side
+        return self.airframe.fly_to(telemetry, roll_deg=self._direction * 70.0, pitch_deg=8.0, throttle=1.0)
+
+
+class LeadTurn(_Scripted):
+    """A merge fighter: points at the attacker, turns in before the pass.
+
+    AFTTP 3-3 4.3.11: turning room before the 3/9 pass is only there if the
+    other side gives it, and an unaware opponent gives it by flying straight
+    to the merge. This one flies at the attacker (pure pursuit, the thing the
+    handbook says overshoots if held) and, inside two kilometres, starts the
+    turn toward the attacker's side so that it arrives at the pass with angles
+    in hand, then keeps turning into it: a one-circle fight from the first
+    pass. The public host starts both aircraft on opposite headings abeam
+    (CONFORMANCE.md F), which is this fight.
+    """
+
+    name = "leadturn"
+
+    def __init__(self, *args: Any, turn_in_m: float = 2000.0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.turn_in_m = turn_in_m
+
+    def act(self, telemetry: Telemetry) -> np.ndarray:
+        geometry = self.encoder.geometry(telemetry)
+        if geometry.distance_m > self.turn_in_m:
+            # Pure pursuit to the merge, at speed.
+            return self.airframe.fly_to(
+                telemetry,
+                roll_deg=float(np.clip(geometry.azimuth_deg * 1.5, -60.0, 60.0)),
+                pitch_deg=float(np.clip(geometry.elevation_deg * 0.5, -10.0, 10.0)),
+                throttle=1.0,
+            )
+        # Inside: turn hard toward them and keep the lift vector on them.
+        roll = 75.0 if geometry.azimuth_deg >= 0.0 else -75.0
+        return self.airframe.fly_to(telemetry, roll_deg=roll, pitch_deg=10.0, throttle=1.0)
+
+
 #: Every scripted opponent, by the name a flag uses. Ordered roughly by how
 #: hard they are to score against, which is the order a curriculum wants.
+#: This is the scoreboard's ruler and does not change.
 ADVERSARIES: dict[str, type[_Scripted]] = {
     "wanderer": Wanderer,
     "scissors": Scissors,
@@ -298,12 +508,24 @@ ADVERSARIES: dict[str, type[_Scripted]] = {
     "break": BreakTurn,
 }
 
+#: The doctrine set: reactive opponents from the handbook and APL. Pool and
+#: evaluation material, not on the fixed bench.
+DOCTRINE: dict[str, type[_Scripted]] = {
+    "flare": Flare,
+    "jinker": Jinker,
+    "reversal": Reversal,
+    "leadturn": LeadTurn,
+}
+
+#: Everything buildable by name.
+SCRIPTED: dict[str, type[_Scripted]] = {**ADVERSARIES, **DOCTRINE}
+
 
 def build(name: str, *, speed_kcas: float = 340.0, seed: int = 0) -> _Scripted:
     """One scripted opponent by name."""
-    if name not in ADVERSARIES:
-        raise KeyError(f"unknown adversary {name!r}; have {', '.join(sorted(ADVERSARIES))}")
-    kind = ADVERSARIES[name]
+    if name not in SCRIPTED:
+        raise KeyError(f"unknown adversary {name!r}; have {', '.join(sorted(SCRIPTED))}")
+    kind = SCRIPTED[name]
     if kind is Wanderer:
         return Wanderer(speed_kcas=speed_kcas, seed=seed)
     return kind(speed_kcas=speed_kcas)

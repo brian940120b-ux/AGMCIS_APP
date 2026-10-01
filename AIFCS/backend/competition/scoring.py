@@ -135,7 +135,15 @@ def position_advantage(
     head-on merge scores on neither and an overshoot scores on neither.
     """
     track = _normalised(geometry.track_angle_deg, normalisation)
-    aspect = _normalised(geometry.aspect_angle_deg, normalisation)
+    # `Geometry.aspect_angle_deg` is the reference environment's number: 180
+    # when the target flies straight away from us (we are on its tail), 0 when
+    # it points at us. The rules' AA is the angle off the target's *tail*, so
+    # it is the complement. Until 2026-10-01 this read the reference's value
+    # directly and so paid the aspect half for a head-on and nothing for a
+    # tail chase: inverted, in every margin and in the `shaped` reward v6 and
+    # v8_pool trained on. The host's own CSV is what caught it (hostcsv.py).
+    off_tail = 180.0 - abs(geometry.aspect_angle_deg)
+    aspect = _normalised(off_tail, normalisation)
     return (track + aspect) * distance_factor(geometry.distance_m)
 
 
