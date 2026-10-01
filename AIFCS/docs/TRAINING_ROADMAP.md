@@ -142,7 +142,7 @@ v6 量出來就是這樣（1° 內的時間只有立體角的機率值）。`pot
 | 7 | EXP-004 | v6 的勝率 | exploiter（Dataset 要加 v6） |
 
 3–6 各自只跟 EXP-002 差一件事，可以**平行跑**（Kaggle 一次一個 notebook version，開四個 version 就是四個實驗）。
-每個都要先 `git pull`、改 `kaggle/aifcs_train.py` 第 60 行的 EXPERIMENT、push，再 Save & Run All。
+不用再改第 60 行：在 Kaggle 那個 cell 最上面加一行 `import os; os.environ["AIFCS_EXPERIMENT"] = "EXP-008-doctrine-pool"`（換名字就是換實驗），再 Save & Run All。一個實驗一個 version。
 贏的那些旗標最後疊在一起，變成 EXP-009（那時再寫紀錄）。
 
 ## 5. 每次跑完都要看的三個數字

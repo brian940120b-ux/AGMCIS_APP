@@ -5,6 +5,13 @@ flags — lives in kaggle/aifcs_train.py in the repository, so changing a run
 means a commit and a rerun of this same cell, not another 130 lines pasted
 into a browser at one in the morning.
 
+To choose the experiment, put one line above this block in the same cell:
+
+    import os; os.environ["AIFCS_EXPERIMENT"] = "EXP-008-doctrine-pool"
+
+Leave it out and aifcs_train.py runs its default. One version per
+experiment; they can run side by side as far as Kaggle's GPU quota allows.
+
 Before pressing Save Version -> Save & Run All, in the right-hand panel:
 
   * Settings -> Accelerator -> GPU T4 x2  (or P100)

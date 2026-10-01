@@ -25,6 +25,10 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — Kaggle 的實驗改由 notebook cell 選（`AIFCS_EXPERIMENT`）
+
+- `kaggle/aifcs_train.py` 的 `EXPERIMENT` 改讀環境變數 `AIFCS_EXPERIMENT`，沒設就用預設（現在是 `EXP-008-doctrine-pool`）。筆電連不上 GitHub，改第 60 行再 push 這條路走不通；在 cell 第一行設變數，三個實驗 = 三個 version，不用三個 commit。`bootstrap.py` 說明同步。測試一個。
+
 ## 2026-10-01 — `--observation lookahead`：把「預測未來軌跡」做進觀測（H16）
 
 - 出處三個：Heron 說 10 Hz 下 agent「要知道未來 3 秒的軌跡才留得住 1° 錐」（SRC-020）；手冊 4.3.9.7.2.2.2「預判他出 jink 的位置，先把砲口放到 lead」（SRC-022）；韓國冠軍餵的是瞄準／距離的 margin 不是現值（SRC-012）。三者都是 lead computing：射擊解是預測，不是量測。

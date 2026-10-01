@@ -55,9 +55,15 @@ MAX_HOURS = 7.5
 
 #: Which experiment this session runs. The record under experiments/ holds the
 #: session name, the flags and the opponent pool, so the thing that runs is the
-#: thing that was declared, and changing a run is a commit to a YAML file
-#: rather than an edit to three constants here. Set it, commit, rerun the cell.
-EXPERIMENT = "EXP-005-potential-shaping"
+#: thing that was declared. Two ways to choose it:
+#:
+#:   * the notebook cell sets AIFCS_EXPERIMENT before bootstrap.py runs, which
+#:     is how three experiments become three Kaggle versions without three
+#:     commits (and without a laptop that can reach GitHub);
+#:   * otherwise this default, which is the next experiment in the queue.
+#:
+#: Printed at the top of the log either way, so a run says what it is.
+EXPERIMENT = os.environ.get("AIFCS_EXPERIMENT", "EXP-008-doctrine-pool").strip()
 
 HOME = Path("/kaggle/temp/AGMCIS_APP")
 AIFCS = HOME / "AIFCS"

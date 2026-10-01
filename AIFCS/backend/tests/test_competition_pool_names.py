@@ -188,3 +188,24 @@ def test_the_kaggle_trainer_leaves_a_git_bundle_and_never_fails_on_it(tmp_path, 
     # Not a repository at all: reported, not raised.
     assert module.export_bundle(home=tmp_path / "nowhere", target=tmp_path / "no.bundle") is False
     assert "bundle skipped" in capsys.readouterr().out
+
+
+def test_the_kaggle_experiment_can_be_chosen_from_the_notebook_cell(monkeypatch):
+    """AIFCS_EXPERIMENT in the cell beats the constant: three experiments become
+    three Kaggle versions without three commits, from a laptop that cannot
+    push."""
+    import importlib.util
+
+    script = Path(__file__).resolve().parents[2] / "kaggle" / "aifcs_train.py"
+
+    def load(name: str):
+        spec = importlib.util.spec_from_file_location(name, script)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    monkeypatch.delenv("AIFCS_EXPERIMENT", raising=False)
+    assert load("aifcs_train_default").EXPERIMENT == "EXP-008-doctrine-pool"
+    monkeypatch.setenv("AIFCS_EXPERIMENT", " EXP-010-lookahead-observation ")
+    assert load("aifcs_train_chosen").EXPERIMENT == "EXP-010-lookahead-observation"
