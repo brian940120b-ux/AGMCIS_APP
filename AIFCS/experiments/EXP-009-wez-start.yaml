@@ -25,11 +25,55 @@ pool:
 - reversal
 - leadturn
 reward_tier: research
-status: PLANNED
+status: TRAINED
 created_at: '2026-10-01T12:20:58+00:00'
 started_at: null
 finished_at: null
 git_commit: 4156c86
-results: {}
+results:
+  kaggle_2026-10-02:
+    steps: 2000000
+    hours: 6.7
+    scoring: 'aspect term fixed (401c927+): margins on the new scale, not comparable
+      with EXP-001..005'
+    do_nothing_floor:
+      vs_v4:
+        won: 0.75
+        margin: -18197
+      vs_v5:
+        won: 0.45
+        margin: -4836
+    evaluate_20_rounds_seed_1000_floor:
+      vs_v4:
+        won: 0.95
+        killed: 0.05
+        crashed: 0.05
+        margin: 218046
+        sweet_152_500m_s: 21.0
+        under_5deg_s: 21.5
+        best_deg: 0.1
+        cone_s: 0.73
+        cone_plus_s: 3.0
+        deg_per_s: 2.7
+        floor_share: 0.03
+      vs_v5:
+        won: 0.85
+        killed: 0.0
+        crashed: 0.15
+        margin: 25990
+        sweet_152_500m_s: 2.3
+        under_5deg_s: 0.5
+        best_deg: 0.2
+        cone_s: 0.05
+        cone_plus_s: 0.7
+        deg_per_s: 5.4
+        floor_share: 0.07
 decision: null
-notes: ''
+notes: '
+
+  INTERIM (Kaggle): vs v4 95%, one kill, cone+ 3.00, mean cone 0.73, 21.5 s within
+  5 deg (more than EXP-008''s 17.7); vs v5 85% with 15% crashes and cone+ 0.70 (EXP-008:
+  0.37). Starting inside the cone bought time near the cone and cost survival: three
+  crashes in 20 against v5, none for EXP-008. Not a clean win over EXP-008 on its
+  own terms; the natural use is as a curriculum stage (resume under --geometry published),
+  which the record''s decision rule names. Decision waits for the laptop board.'

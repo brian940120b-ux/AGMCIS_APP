@@ -62,6 +62,6 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-005-potential-shaping` | DONE / reject | Kaggle V8：vs v4 65%／−321／cone+ 0.00／best 12°，vs v5 60%／−66／0.23。錐沒動，對 v4 根本沒瞄。跑在位置項修正前（fda84e3），margin 不可比。 EXP-002 配方，`--reward potential`。H4；看 cone+ |
 | `EXP-006-frames-observation` | PLANNED | EXP-002 配方，`--observation frames`。H5 |
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
-| `EXP-008-doctrine-pool` | PLANNED | EXP-002 配方 + 手冊對手 flare／jinker／reversal／leadturn 進池；計分位置項已修。H12 |
-| `EXP-009-wez-start` | PLANNED | EXP-008 + `--geometry wez`（從錐內開始）。H8 |
+| `EXP-008-doctrine-pool` | TRAINED | Kaggle：vs v4 **100%、一次擊殺、cone+ 3.00**、錐內平均 0.88 s、5° 內 17.7 s；vs v5 100%／0.37。專案第一次評測擊殺。等六對手板 |
+| `EXP-009-wez-start` | TRAINED | Kaggle：vs v4 95%、一次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。比 EXP-008 更靠近錐、但會摔。等六對手板；定位是課程階段 |
 | `EXP-010-lookahead-observation` | PLANNED | EXP-008 配方，`--observation lookahead`（預測 1 s／3 s 幾何）。H16 |

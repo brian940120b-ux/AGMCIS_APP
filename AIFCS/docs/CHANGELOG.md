@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-02 — EXP-008／009 Kaggle 結果：第一次擊殺
+
+- **EXP-008 v9_doctrine**：vs v4 100%、killed 5%（20 回合中 1 次）、cone+ 3.00 s、錐內平均 0.88 s、射程內 5° 以內 17.7 s、最近 0.0°；vs v5 100%、cone+ 0.37。v6 最好 2.22、v8_pool 0.22。
+- **EXP-009 v9_wez**：vs v4 95%、1 次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。從錐內開始多了靠近錐的時間、少了存活。
+- 兩個都同時含兩個變因（手冊對手進池、位置項修正後的 shaped 獎勵），紀錄設計上就是如此（EXP-008 是新基準）；分差換了尺度（+220,514）。決定等筆電六對手板。
+- 下一步：v9_doctrine 放進筆電，`play.bat` 對真 HOST 預演一回合看有沒有擊殺（順便量 W_time／HP）；Kaggle Dataset 加 v9_doctrine 供 EXP-004 exploiter 用。
+
 ## 2026-10-01 — EXP-005（位能 shaping）結案：reject
 
 - Kaggle V8（7.05 h，commit fda84e3）：v8_potential vs v4 65%／−321／cone+ 0.00／best 12.0°；vs v5 60%／−66／0.23／best 0.2°。同板 v8_pool：55%／+426／0.22；60%／+197／0.00。錐沒動（兩邊都是雜訊等級），對 v4 完全沒瞄到（最近 12°）。won 在置中搖桿地板（80%）之下。H4 以這個實作（Φ = 2000·aim·range_factor 疊在 shaped 上）不買到錐內時間。
