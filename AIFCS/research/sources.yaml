@@ -464,3 +464,90 @@
   extracted:
     - "Objectives: local air-combat autonomy performance, pilot trust calibration, scaling to heterogeneous multi-aircraft, and air-combat test infrastructure."
   confidence: high
+
+- id: SRC-022
+  title: "AFTTP 3-3 Volume 5, F-16 Combat Aircraft Fundamentals (9 April 1999; supersedes MCH 11-F16 Vol 5, 10 May 1996)"
+  authors: US Air Force, Air Combat Command / Air Education and Training Command
+  organization: USAF (UNCLASSIFIED; full text on the Internet Archive item vol-05_202208)
+  url: https://archive.org/details/vol-05_202208
+  access_date: 2026-10-01
+  verification: verified
+  verification_note: >
+    The f-16.net PDF (4.5 MB) is the table of contents only, six pages. The
+    archive.org item carries the full OCR text (Vol05_djvu.txt, 939,930 bytes,
+    sha256 c6fd86c2...), read: chapter 4 air-to-air, sections 4.3.2 geometry,
+    4.3.4 turn and energy, 4.3.9 offensive BFM, 4.3.10 defensive BFM, 4.3.11
+    high-aspect BFM, 4.6 gun employment. Pages carry UNCLASSIFIED; this is
+    the 1999 doctrine, long superseded for real operations, and used here
+    only as the vocabulary and the numbers for a game.
+  applicability: direct
+  applicability_reason: The USAF's own teaching text for exactly the 1v1 F-16 guns problem, with numbers; the source behind docs/TACTICS.md.
+  extracted:
+    - "Fourth-generation fighters: max-performance turn radius about 3,000 ft, turn circle about 6,000 ft. F-16 has no single corner velocity but a corner plateau at 330-440 KCAS; radius nearly constant 170-330 KCAS, increases dramatically above 440. Formulas: radius = V^2/(g G), rate = 1092 G / KTAS. At max G, AOA 10-15 deg above 350 kt, about 25 deg below."
+    - "Offensive: kill, stay offensive, manoeuvre to WEZ, employ valid ordnance. Recognise outside the turn circle (bandit rotates with little LOS movement). Point the lag entry window; 10 deg of heading = 1,000 ft of turning room at entry. Get to the circle at 450-480 KCAS; if faster, climb 500-1,000 ft."
+    - "Closure rule of thumb: never more than 5% of range (150 kt at 3,000 ft, 100 at 2,000, 50 at 1,000) unless committed to the last shot and accepting an overshoot. 1,000-2,000 ft is a comfortable lethal range. Against a jinking defender, set up the shot where he exits the jink; keep him within 25 deg of the nose; make a bigger similar manoeuvre as he jinks."
+    - "High-aspect shooters press to about 2,000 ft before repositioning (3,000-4,000 for the less proficient); the longer the press, the longer the defender must jink."
+    - "Defensive priorities: survive; create BFM problems and exploit errors. 'Not jinking can be fatal - dead men do not reverse.' The only sanctuary is in tight, off the bandit's nose."
+    - "Out-of-plane guns jink: begin the roll on a definite pull to lead, or at 3,000-4,000 ft slant range; lift vector 45-60 deg off the bandit, pull down 1-2 s, then back up below him to build HCA. Rolling duckunder needs 1,000-1,500 ft. Nose-counter: unloaded 180-degree reversal just before his nose reaches pure pursuit."
+    - "Overshoots: high LOS rate -> unloaded roll to lift-vector-on, one-circle, smallest radius wins; low LOS -> nose high to slow forward motion and roll toward the overshoot; very low LOS with HCA and range under control -> keep turning, trap him in lag. After a merge overshoot, reversing the turn moves a larger-radius bandit forward of the 3/9 line unless he cuts power."
+    - "High-aspect: judge winning/losing/even before the next pass; turning room before the 3/9 pass exists only if the bandit gives it; the first two passes rarely allow a lead turn ('the fighter who seeks to win it all in the first two turns is in for a disappointment'); offset at the merge drives a two-circle (rate) fight, lack of it a one-circle (radius) fight; only the altitude between the adversaries is energy that matters."
+    - "Gun employment: opportunities are rare; fire a lethal 1-2 s burst and reposition; range is the one parameter that minimises every error."
+  confidence: high
+
+- id: SRC-023
+  title: "AETC TTP 11-1, Employment Fundamentals, T-38C Introduction to Fighter Fundamentals - section 4.3 BFM Concepts (mirror)"
+  authors: US Air Force, Air Education and Training Command
+  organization: USAF; mirrored on a flight-sim community wiki (wiki.455aew.com)
+  url: https://wiki.455aew.com/books/aetcttp-11-1-employment-fundamental-t-38cintroduction-to-fighter-fundamentals-iff/page/43-bfm-concepts
+  access_date: 2026-10-01
+  verification: partial
+  verification_note: >
+    Read through the mirror only; the original publication was not fetched.
+    Definitions agree with SRC-022 and SRC-016. Used for one number not in
+    SRC-022's text: the control-zone dimensions.
+  applicability: direct
+  applicability_reason: Trainer-level definitions of the same geometry, with the control zone sized.
+  extracted:
+    - "Control zone: 2,500 to 4,500 ft slant range, within a 25-45 degree cone behind the target."
+    - "Lead pursuit increases closure and aspect, decreases range (gun employment); pure pursuit for lock/missile, overshoots if held; lag pursuit decreases closure and aspect, increases range, builds turning room."
+    - "Aspect angle from the target's tail to the attacker; angle-off-tail from own tail to the bandit; antenna train angle from own nose; heading crossing angle up to 180 for head-on."
+  confidence: medium
+
+- id: SRC-024
+  title: "GTRI's Lessons Learned from 2020 AlphaDogfight Trials"
+  authors: Georgia Tech Research Institute newsroom
+  organization: GTRI (6th of 8 in ADT)
+  url: https://www.gtri.gatech.edu/newsroom/gtris-lessons-learned-2020-alphadogfight-trials
+  access_date: 2026-10-01
+  verification: verified
+  verification_note: Page read. Institutional news, no technical detail beyond the approach.
+  applicability: partial
+  applicability_reason: Confirms a losing team's recipe (RL with pilot-interview-derived shaping) and the winner's head-on tactic from a third observer.
+  extracted:
+    - "GTRI used RL with reward terms derived from fighter-pilot interviews; the agent produced behaviours the team had not taught; placed 6th."
+    - "The winner beat the human with a head-on attack considered unconventional in real dogfighting; pilots do not normally train in VR, which may have affected the human."
+  confidence: medium
+
+- id: SRC-025
+  title: "A survey of air combat behavior modeling using machine learning"
+  authors: Gorton, Strand, Brathen
+  organization: arXiv 2404.13954 (IEEE Access 2025)
+  url: https://arxiv.org/abs/2404.13954
+  access_date: 2026-10-01
+  verification: abstract-only
+  verification_note: Abstract page read; the PDF was not fetched this session. Candidate map of the reward and curriculum literature; to read when a reward experiment stalls.
+  applicability: partial
+  applicability_reason: A survey, not a recipe.
+  confidence: low
+
+- id: SRC-026
+  title: "Autonomous Dogfight Decision-Making for Air Combat Based on Reinforcement Learning with Automatic Opponent Sampling"
+  authors: Chen, Song, Mo, Lv, Lin
+  organization: Beijing Institute of Technology; Aerospace 12(3):265, 2025 (MDPI, open access)
+  url: https://doi.org/10.3390/aerospace12030265
+  access_date: 2026-10-01
+  verification: abstract-only
+  verification_note: MDPI returned HTTP 403 to both the page and the PDF from here; only the search abstract was read (PPO with automatic opponent sampling, high-fidelity nonlinear aircraft model). Retry from the laptop.
+  applicability: partial
+  applicability_reason: Another opponent-sampling rule for the same 1v1 problem; comparable to our EMA league if the text can be reached.
+  confidence: low

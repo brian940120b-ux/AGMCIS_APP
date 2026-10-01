@@ -25,6 +25,12 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — 美軍 F-16 戰技手冊 → `docs/TACTICS.md`（SRC-022～026）
+
+- f-16.net 的 MCH 11-F16 Vol 5 PDF 只有目錄；Internet Archive 的 AFTTP 3-3 Vol 5（1999）全文 OCR 讀完第四章：幾何、轉彎性能（半徑 3,000 ft／Tc 6,000 ft、corner plateau 330–440 KCAS、公式）、攻擊 BFM（入口、450–480 KCAS、閉合 5% 法則、1,000–2,000 ft 致命射程、壓到 2,000 ft 再脫）、防守 BFM（jink 時機 3,000–4,000 ft、Lv 偏 45–60°、rolling duckunder 1,000–1,500 ft、nose-counter、利用 overshoot 看 LOS rate）、高角度合併（一圈比半徑、兩圈比轉率、前兩個 pass 別想贏完）、機砲（1–2 秒 burst）。控制區尺寸 2,500–4,500 ft／25–45° 來自 AETC TTP 11-1 鏡像。
+- `docs/TACTICS.md`：把規則翻成戰術語言（累積 3 秒 → 短 snap 加總；HOST 的 /180 讓「待在後半球」本身值錢；公開版開局 = 高角度合併），五節手冊摘要，ADT 的 AI 行為對照，H12–H15。路線圖加四列。
+- 來源另登錄 GTRI 賽後文（SRC-024）、Gorton 綜述（SRC-025，僅摘要）、Chen 2025 AOS（SRC-026，MDPI 403，僅摘要）。
+
 ## 2026-10-01 — 美軍 DARPA AlphaDogfight Trials 文獻（SRC-018～021）
 
 - 主辦方的 WEZ（2°、500–3000 ft、300 s）逐字等於 DARPA ADT 的定義；ADT 文獻因此是同一幾何的第一手資料。來源登錄：Lockheed 亞軍論文 arXiv 2105.00990（PDF 讀完，獎勵八項公式、SAC 超參、對手課程、GPU 決定性截斷）、JHU APL 技術文摘 36(2)（環境、四層對手、Elo 自我對弈、賽果 16–4／5–0）、Aviation Week 的 Heron 訪談（10 Hz 平順、102 agent league、40 億樣本）、DARPA ACE 頁。Heron 官網兩次 503。

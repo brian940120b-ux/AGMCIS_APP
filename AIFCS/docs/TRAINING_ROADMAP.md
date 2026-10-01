@@ -87,6 +87,10 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 | H9 | **寬淺網路**（單層 12,288） | 未做：`--hidden 8192` 既有旗標即可 | 最便宜；推論時間要量 |
 | H10 | **狀態／動作截斷**求 GPU／CPU 一致 | 未做 | 可能解釋 Kaggle 55% vs 筆電 60%；PRIOR_ART 七.5 |
 | H11 | 對手門：腳本勝率過 50% 才抽 session | 未做：`league.py` | PHANG-MAN 的課程 |
+| H12 | **手冊腳本對手**：flare、duckunder、reversal、onecircle/twocircle、leadturn | 未做：`adversaries.py` | AFTTP 3-3 4.3.10–11、APL BUD FSM；`docs/TACTICS.md` 六 |
+| H13 | **固定起始集**：攻／守／中立／高角度各 N seed，加 `cz` 幾何（2,500–4,500 ft、25–45°） | 未做：`--geometry cz` + evaluate 固定集 | ADT 的 benchmark 做法 |
+| H14 | 閉合率不超過距離 5% 的平滑懲罰 | 未做：研究層獎勵 | 手冊 ROT；先量 v6 的 overshoot |
+| H15 | 出平面防守對手（3,000–4,000 ft 且對方拉 lead 才 jink） | 未做：`adversaries.py` | 比 `break` 像真的 |
 
 **不做的**：HP 模型、200 秒、放寬的錐、離散動作、任何改 OBS/CMD/計分的東西。
 
