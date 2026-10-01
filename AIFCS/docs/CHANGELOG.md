@@ -30,7 +30,7 @@ git push origin --tags
 - `play.bat models/competition/v6 --record` 對 `JSB_host_GUI_publish.exe`：19,146 幀、0 錯誤、state 2、3,191 次決策、平均 0.37 ms、最慢 24.6 ms（預算 16.7）。報告與逐幀 `.jsonl` 在筆電 `data/play/`。
 - 對策一：`serve()` 期間 `gc.disable()`，結束 `gc.enable()`。`--record` 每幀留一個 dict，第二代回收掃全部物件的時間隨回合變長；每幀路徑沒有循環引用，refcount 就夠。測試鎖住：policy 執行時 collector 關、迴圈結束後開。
 - 對策二：Windows 上 `SetPriorityClass(HIGH_PRIORITY_CLASS)`（不用 REALTIME，失控會鎖住要按 START 的那台機器）。非 Windows 或失敗只回報一行，不擋啟動。
-- 兩個對策的效果**還沒量**，下次預演看 `worst_decision_ms`。
+- 量了：第二回合 18,451 幀、最慢 13.6 ms（< 16.7）、平均 0.42 ms。兩回合 24.6 → 13.6，方向對；樣本小，每次預演都記。
 
 ## 2026-10-01 — 六對手 scoreboard 補進 EXP-001／EXP-002；`play.bat --selftest` 在筆電 PASS
 
