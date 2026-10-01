@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — 比賽用程式 `play.py`／`scripts/play.bat`，以及 client 漏接 G 限制
+
+- **新**：`backend/competition/play.py` + `scripts/play.bat <session> [--listen-ip --listen-port --host-ip --host-port --record --selftest]`。載入 `card.json` + `checkpoint.zip`，用 `evaluate.config_from_card` 還原訓練時的飛機（觀測編碼、action repeat、方向舵／升降舵上限、地面防護、G 限制），套進 `CompetitionClient` + `serve`，飛到 Ctrl+C。網路位址以外沒有旗標能改飛機。先做一次 warm-up 決策（第一次 forward pass 最慢）。checkpoint 寬度和 card 的觀測不合就拒飛；少 card 拒飛並列出資料夾內容。報告寫 `data/play/play-<時間>.json`，`--record` 另存每幀 `.jsonl`（和探針同格式，可 `--compare`）。`--selftest` 在本機送 120 幀合成封包，檢查全部回覆且最慢決策 < 16.7 ms。
+- **修**：`CompetitionClient` 原本沒有 `g_limit`，`shape_command` 永遠走範例的速度式升降舵限制。訓練環境（`environment.py:569`）有傳 `g_load`/`g_limit`，所以 v6 起每個用 `--g-limit 9` 練的 session 當天都會碰到不是自己練的那支搖桿（高空轉彎率減半）。加 `g_limit` 參數並傳入；兩個測試鎖住（−9.3 G 全拉時限幅、無限制時與範例逐位元相同）。
+- 測試 `test_competition_play.py` 16 個：用未訓練的真 SAC checkpoint（8×8）建 session，跑 loopback 自測、整回合、拒飛路徑。
+- 文件：`COMPETITION.md` 新節「比賽用程式」（自測、P1/P2 指令、用主辦方 HOST 預演）；`RULES.md` 狀態表；矩陣 C1 列註記。
+
 ## 2026-10-01 — 筆電：主辦方環境裝好、範例跑通（指引02 步驟逐一驗證）
 
 - Anaconda 全機版（`C:\ProgramData\anaconda3`，conda 24.11.3）。libmamba 解算器外掛壞（`libmambapy` 無 `QueryFormat`），`conda config --set solver classic` 後正常；每次仍印兩行 entry point 錯誤，無害。

@@ -129,9 +129,18 @@ class CompetitionClient:
         high_speed_elevator_limit: float = ELEVATOR_LIMIT_HIGH_SPEED,
         ground_avoidance: GroundAvoidance | None = None,
         encoder: Any | None = None,
+        g_limit: float | None = None,
     ) -> None:
         if action_repeat < 1:
             raise ValueError(f"action_repeat is a number of frames, not {action_repeat}")
+        #: Must match `EnvConfig.g_limit`. With one, the training plant replaces
+        #: the speed-based elevator limit with a load-factor one (see
+        #: `action.g_limited`); a client without it hands the same policy the
+        #: sample client's elevator instead, which halves its turn rate at
+        #: altitude. Every session since v6 trained with `--g-limit 9`, and
+        #: until this was plumbed through none of them would have met its own
+        #: aircraft on the day.
+        self.g_limit = g_limit
         #: Must match `EnvConfig.action_repeat`, or the policy meets a control
         #: rate on the day that it never trained against. A command still goes
         #: back every frame — it is the same command, held.
@@ -284,6 +293,8 @@ class CompetitionClient:
             telemetry.reference_mach,
             high_speed_elevator_limit=self.high_speed_elevator_limit,
             rudder_limit=self.rudder_limit,
+            g_load=None if self.g_limit is None else telemetry.own_g_acc,
+            g_limit=self.g_limit,
         )
 
         reply = encode_command(

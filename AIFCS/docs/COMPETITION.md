@@ -176,7 +176,66 @@ data/probe/probe-20261107-xxxxxx.jsonl   ← 每一幀的原始記錄
 
 它飛的是**維持高度、機翼水平**，不會追擊、不會閃躲。它的工作是**把資料帶回來**，不是比賽。
 
-比賽用的程式是同一套 `CompetitionClient`，只是換上訓練好的策略。
+比賽用的程式是 `scripts\play.bat`（下一節）：同一套 `CompetitionClient`，換上訓練好的策略。
+
+---
+
+## 比賽用程式：`scripts\play.bat`（2026-10-01 起）
+
+把一個訓練好的 session 接上 HOST，飛到你按 Ctrl+C 為止。**飛機的所有設定都從 session 的
+`card.json` 來**（觀測、決策頻率、方向舵上限、升降舵上限或 G 限制、地面防護），旗標只能改
+網路位址和錄不錄。策略在哪架飛機上練的，就在哪架飛機上飛，這是刻意的：沒有任何旗標能讓它飛
+別的飛機。
+
+### 每次接 HUB 之前先自測（10 秒）
+
+```
+scripts\play.bat models\competition\v6 --selftest
+```
+
+成功的樣子：
+
+```
+  OK  session loaded: observation extended (30 wide), decision every 6 frame(s), rudder limit 0.6, G-limit 9, ground floor on
+  OK  warm-up decision 1.6 ms
+  OK  listening on 127.0.0.1:8199
+  OK  120 of 120 synthetic frames were answered
+  OK  20 decisions, 1 round(s) seen
+  OK  worst decision 1.01 ms, mean 0.21 ms (budget 16.7 ms)
+PASS  the session loads, listens, decides and replies.
+```
+
+`FAIL` 會說缺什麼（沒有 card.json、checkpoint 和 card 不是同一個 session、port 被占）。
+`WARN` 是某一幀決策超過 16.7 ms：關掉別的程式再跑一次。
+
+### 比賽當天
+
+抽到 P1：
+
+```
+scripts\play.bat models\competition\v6 --listen-ip 192.168.1.3 --listen-port 8199 --host-ip 192.168.1.1 --host-port 8099 --record
+```
+
+抽到 P2：
+
+```
+scripts\play.bat models\competition\v6 --listen-ip 192.168.1.4 --listen-port 8201 --host-ip 192.168.1.1 --host-port 8101 --record
+```
+
+IP／port **以檢入時主辦方給的為準**。開了之後畫面會顯示 `waiting for the host…`，這時去開主辦方
+的 HOST、按 INIT、等兩邊都好、按 START。畫面每秒更新一行：封包數、第幾回合、第幾幀、state
+（0/1/2）、最慢的一次決策。回合結束主辦方宣布後按 Ctrl+C，報告寫在 `data\play\play-<時間>.json`；
+`--record` 另外存每一幀到 `.jsonl`，可以像探針一樣用 `probe.py --compare` 對我們的環境。
+
+沒收到任何封包會印 `no packets arrived`，exit code 1：那是 HOST、port 或防火牆，不是程式（自測
+已經證明程式會回）。
+
+### 在筆電上用主辦方的 HOST 預演（賽前一定要做一次）
+
+`C:\AirCombat_Train_Test\D.比賽用主辦方連線程式_驗證是否符合能正確連線\JSB_host_GUI_publish.exe`
+就是主辦方的 HOST。照上面探針的步驟 1–5，只是步驟 1 改開 `play.bat`（本機預設 127.0.0.1:8199 →
+8099，和探針相同），一回合五分鐘。看三件事：state 有沒有走到 2、`worst decision` 有沒有低於
+16.7 ms、HOST 的 CSV 裡我們有沒有在追敵機而不是平飛。
 
 
 ---

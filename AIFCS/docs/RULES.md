@@ -178,7 +178,8 @@ S_advantage = 2000 × 攻擊秒數
 | 狀態/控制 | ✅ 和主辦方程式逐點相等（41 個差分測試） |
 | 計分引擎 | ✅ 自己算得出主辦方的分數 |
 | 評估器 | ✅ 可用主辦方判定表比較兩個模型 |
-| 訓練 | 🔄 run1 進行中 |
+| 比賽用程式 | ✅ `scripts\play.bat <session>`：載入 session、接 HOST、飛到 Ctrl+C；`--selftest` 自測（見 `COMPETITION.md`） |
+| 訓練 | 🔄 EXP-005 在 Kaggle；v6 仍是最好的（cone+ 2.22 s，擊殺要 3 s） |
 | 最大未知數 | ⚠️ HOST 是否配平（見 `CONFORMANCE.md`） |
 
 ### 已知的一個優勢

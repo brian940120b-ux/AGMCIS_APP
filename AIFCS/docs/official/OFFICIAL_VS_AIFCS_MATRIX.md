@@ -22,7 +22,7 @@
 | T_G = 超過 9G 秒數（U04 方向未定） | `abs(g) > 9.0`（雙向） | PARTIAL（解讀） | `scoring.py:59`；TUNING「正負號」 |
 | ΣP_t 每幀（U05） | 每幀累加 | PARTIAL（解讀） | CONFORMANCE D.2 |
 | 搖桿整形常數（player1:336-370；jsbsimEnv:148-178） | 差分測試逐點相等 | MATCH | `test_competition_parity.py`（41 測試） |
-| 升降舵高速限制：client 0.4 vs env 1.0（C1） | 採 client 的 0.4（比賽跑的是 client）；`--g-limit` 可改用 G 限制（研究層） | PARTIAL（選了一邊；官方衝突） | `action.py`；CONFORMANCE B 表 |
+| 升降舵高速限制：client 0.4 vs env 1.0（C1） | 採 client 的 0.4（比賽跑的是 client）；`--g-limit` 可改用 G 限制（研究層）。2026-10-01 前 `CompetitionClient` 沒接 `g_limit`，用 `--g-limit` 練的 session（v6 起）當天會拿到範例的升降舵而非訓練時的 G 限制；已修（`client.py`、`play.py` 從 card 帶入） | PARTIAL（選了一邊；官方衝突） | `action.py`；CONFORMANCE B 表 |
 | Mach 的算法：client `vt*0.3048/340`（player1:341）；env 用 JSBSim `velocities/mach`（jsbsimFdm velocity[12]） | 採 client：真空速/340 | PARTIAL（同 C1 的一體兩面） | `state.py:85-94` |
 | Rudder：規則 ±1；範例 0.2 / 鎖舵（C3） | 預設 0.2（`--rudder` 可開） | MATCH（規則允許） | `action.py:RUDDER_LIMIT`；spec test |
 | 4+1 參數、不得要求其他介面（六.1） | 只送表 2 的 5 欄 | MATCH | `protocol.py` |
