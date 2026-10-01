@@ -328,6 +328,43 @@ def test_realtime_setup_reports_what_it_did_and_never_raises():
     assert torch.get_num_threads() == 1
 
 
+def test_the_collector_is_off_while_serving_and_back_on_after():
+    """A full collection over a round's worth of recorded frames is the one
+    thing measured to take longer than a frame; it must not run mid-round,
+    and it must not stay off once the loop is over."""
+    import gc
+
+    from competition.client import Endpoint, serve
+
+    seen: list[bool] = []
+
+    def policy(_state: np.ndarray) -> np.ndarray:
+        seen.append(gc.isenabled())
+        return np.array([0.0, 0.0, 0.0, 0.8])
+
+    listen_port = _free_udp_port()
+    client = CompetitionClient(policy)
+    endpoint = Endpoint(
+        listen_ip="127.0.0.1", listen_port=listen_port, host_ip="127.0.0.1", host_port=_free_udp_port()
+    )
+    listening = threading.Event()
+    worker = threading.Thread(
+        target=serve, args=(client, endpoint), kwargs={"max_frames": 1, "timeout_s": 5.0, "ready": listening}
+    )
+    assert gc.isenabled()
+    worker.start()
+    try:
+        assert listening.wait(timeout=5.0)
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sender.sendto(observation(own_lat=23.06, enemy_lat=23.07), ("127.0.0.1", listen_port))
+        sender.close()
+    finally:
+        worker.join(timeout=10)
+
+    assert seen == [False], "the policy ran with the collector off"
+    assert gc.isenabled(), "and it is back on once the loop has ended"
+
+
 def test_silence_is_not_a_reason_to_stop_listening():
     """The host is started by hand, and that takes longer than any timeout.
 

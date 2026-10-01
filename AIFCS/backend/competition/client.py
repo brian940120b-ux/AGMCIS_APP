@@ -27,7 +27,9 @@ on the network.
 
 from __future__ import annotations
 
+import gc
 import socket
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -331,12 +333,40 @@ def configure_realtime() -> str:
 
     Applied when serving, not at import: training wants every thread it can get.
     """
+    notes = [_raise_process_priority()]
     try:
         import torch
     except Exception as exc:  # torch is optional; a client can run without it
-        return f"torch not configured: {exc}"
-    torch.set_num_threads(1)
-    return "torch limited to one thread for a shorter latency tail"
+        notes.append(f"torch not configured: {exc}")
+    else:
+        torch.set_num_threads(1)
+        notes.append("torch limited to one thread for a shorter latency tail")
+    return "; ".join(notes)
+
+
+def _raise_process_priority() -> str:
+    """On Windows, ask the scheduler to prefer this process.
+
+    Measured on the competition laptop against the organiser's host, 19,146
+    frames: mean decision 0.37 ms, worst 24.6 ms. One late frame in 19,146 is
+    one command the host did not get in time, and the mean says the network is
+    not where that frame went: something else took the core. HIGH_PRIORITY_CLASS
+    is what Windows offers a process that would rather not wait; REALTIME is
+    not used, because a runaway at that level locks the machine the operator
+    needs to press START on.
+    """
+    if sys.platform != "win32":
+        return "process priority left alone (not Windows)"
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        high_priority_class = 0x00000080
+        if kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), high_priority_class):
+            return "process priority raised to HIGH"
+        return f"process priority unchanged (error {kernel32.GetLastError()})"
+    except Exception as exc:  # never the reason the client fails to start
+        return f"process priority unchanged ({exc})"
 
 
 def _frame_move_m(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
@@ -397,6 +427,15 @@ def serve(
         "preparing for real-time inference",
         extra={"event": "COMPETITION_REALTIME_SETUP", "detail": configure_realtime()},
     )
+    # The cyclic collector runs whenever allocations cross a threshold, and
+    # its full passes grow with the number of objects alive: a --record run
+    # keeps a dict per frame, 19,146 of them by the end of a round, and a pass
+    # over all of them lands inside whichever frame happened to allocate the
+    # one object too many. Nothing on the per-frame path makes reference
+    # cycles, so refcounting frees it all without the collector; it is turned
+    # back on when the loop ends.
+    gc.collect()
+    gc.disable()
     inbound = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     outbound = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     inbound.bind((endpoint.listen_ip, endpoint.listen_port))
@@ -434,6 +473,7 @@ def serve(
             if reply is not None:
                 outbound.sendto(reply, (endpoint.host_ip, endpoint.host_port))
     finally:
+        gc.enable()
         inbound.close()
         outbound.close()
         log.info(

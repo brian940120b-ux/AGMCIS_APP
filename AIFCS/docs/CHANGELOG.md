@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-01 — v6 第一次對真實 HOST 飛完整回合；一幀決策超時的兩個對策
+
+- `play.bat models/competition/v6 --record` 對 `JSB_host_GUI_publish.exe`：19,146 幀、0 錯誤、state 2、3,191 次決策、平均 0.37 ms、最慢 24.6 ms（預算 16.7）。報告與逐幀 `.jsonl` 在筆電 `data/play/`。
+- 對策一：`serve()` 期間 `gc.disable()`，結束 `gc.enable()`。`--record` 每幀留一個 dict，第二代回收掃全部物件的時間隨回合變長；每幀路徑沒有循環引用，refcount 就夠。測試鎖住：policy 執行時 collector 關、迴圈結束後開。
+- 對策二：Windows 上 `SetPriorityClass(HIGH_PRIORITY_CLASS)`（不用 REALTIME，失控會鎖住要按 START 的那台機器）。非 Windows 或失敗只回報一行，不擋啟動。
+- 兩個對策的效果**還沒量**，下次預演看 `worst_decision_ms`。
+
 ## 2026-10-01 — 六對手 scoreboard 補進 EXP-001／EXP-002；`play.bat --selftest` 在筆電 PASS
 
 - 筆電 `scripts/scoreboard.bat v8_pool official_sac_baseline v6`（6 回合×6 對手，seed 1000）。置中搖桿＋地面防護對六個腳本對手贏 67–83%，所以這張板的 won 幾乎是地板在贏；看分差和 cone。全板無擊殺。
