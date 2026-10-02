@@ -62,6 +62,6 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-005-potential-shaping` | DONE / reject | Kaggle V8：vs v4 65%／−321／cone+ 0.00／best 12°，vs v5 60%／−66／0.23。錐沒動，對 v4 根本沒瞄。跑在位置項修正前（fda84e3），margin 不可比。 EXP-002 配方，`--reward potential`。H4；看 cone+ |
 | `EXP-006-frames-observation` | PLANNED | EXP-002 配方，`--observation frames`。H5 |
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
-| `EXP-008-doctrine-pool` | TRAINED | Kaggle：vs v4 **100%、一次擊殺、cone+ 3.00**、錐內平均 0.88 s、5° 內 17.7 s；vs v5 100%／0.37。專案第一次評測擊殺。等六對手板 |
-| `EXP-009-wez-start` | TRAINED | Kaggle：vs v4 95%、一次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。比 EXP-008 更靠近錐、但會摔。等六對手板；定位是課程階段 |
+| `EXP-008-doctrine-pool` | DONE / keep | Kaggle：vs v4 **100%、一次擊殺、cone+ 3.00**、錐內平均 0.88 s、5° 內 17.7 s；vs v5 100%／0.37。六對手板：cone reference 2.42／wanderer 1.63（v6 全 0），分差五項贏 v6；**弱點 pursuit 17%**（v6 50%）。新基準、冠軍候選，當天模型要先補 pursuit |
+| `EXP-009-wez-start` | DONE / keep（課程階段） | Kaggle：vs v4 95%、一次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。六對手板：cone reference 3.00、wanderer 3.00，**各擊殺 1/6**（bench 上第一次擊殺）；但 pursuit 33%（分差負）、energy 50%。當課程第一階段，接著用 published 幾何續練 |
 | `EXP-010-lookahead-observation` | PLANNED | EXP-008 配方，`--observation lookahead`（預測 1 s／3 s 幾何）。H16 |

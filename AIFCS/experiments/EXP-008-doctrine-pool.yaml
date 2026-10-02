@@ -26,10 +26,10 @@ pool:
 - reversal
 - leadturn
 reward_tier: research
-status: TRAINED
+status: DONE
 created_at: '2026-10-01T12:20:58+00:00'
 started_at: null
-finished_at: null
+finished_at: '2026-10-02T17:18:11+00:00'
 git_commit: 4156c86
 results:
   kaggle_2026-10-02:
@@ -69,14 +69,153 @@ results:
         cone_plus_s: 0.37
         deg_per_s: 5.0
         floor_share: 0.03
-decision: null
-notes: '
+  laptop_scoreboard_2026-10-02:
+    tool: scripts/scoreboard.bat at b77590e (aspect term fixed), laptop, 6 rounds
+      per opponent, seed 1000, floor on
+    detail: results/exp008_009.json (laptop)
+    v9_doctrine:
+      reference:
+        won: 1.0
+        margin: 225170
+        cone_best_s: 2.42
+        killed: 0
+      pursuit:
+        won: 0.17
+        margin: 6647
+        cone_best_s: 0
+        killed: 0
+      break:
+        won: 1.0
+        margin: 50883
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 1.0
+        margin: 77549
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 1.0
+        margin: 35748
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 0.83
+        margin: 118104
+        cone_best_s: 1.63
+        killed: 0
+    v9_wez:
+      reference:
+        won: 1.0
+        margin: 61125
+        cone_best_s: 3.0
+        killed: 0.17
+      pursuit:
+        won: 0.33
+        margin: -649
+        cone_best_s: 0.2
+        killed: 0
+      break:
+        won: 1.0
+        margin: 29402
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 0.5
+        margin: 55315
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 1.0
+        margin: 21531
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 1.0
+        margin: 154401
+        cone_best_s: 3.0
+        killed: 0.17
+    v6:
+      reference:
+        won: 1.0
+        margin: 60307
+        cone_best_s: 0
+        killed: 0
+      pursuit:
+        won: 0.5
+        margin: 41907
+        cone_best_s: 0
+        killed: 0
+      break:
+        won: 1.0
+        margin: 25508
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 1.0
+        margin: 29085
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 0.67
+        margin: 13705
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 1.0
+        margin: 57992
+        cone_best_s: 0
+        killed: 0
+    do_nothing_with_floor:
+      reference:
+        won: 0.17
+        margin: -11200
+        cone_best_s: 0
+        killed: 0
+      pursuit:
+        won: 0
+        margin: -33208
+        cone_best_s: 0
+        killed: 0
+      break:
+        won: 1.0
+        margin: 5340
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 0.5
+        margin: -9674
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 0.67
+        margin: -426
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 0.17
+        margin: -10709
+        cone_best_s: 0
+        killed: 0
+    note: 'First board under the corrected position term: the centred stick now loses
+      to the reference (17%), so won carries signal again. Margins on the new scale.'
+decision: keep
+notes: 'INTERIM (Kaggle): vs v4 100% won, ONE KILL in 20 rounds (killed 5%), cone+
+  3.00 s, mean cone 0.88 s, 17.7 s within 5 deg in range, best aim 0.0 deg; vs v5
+  100%, cone+ 0.37. The first kill this project has produced in evaluation: v6''s
+  best was 2.22 s and v8_pool''s 0.22. Two things changed at once relative to EXP-002,
+  by design of the record: the doctrine opponents in the pool and the corrected position
+  term in the shaped reward; the six-opponent laptop board is what separates them
+  from a v4-specific gain. Candidate to replace v6 as the day''s model pending that
+  board and a rehearsal on the real host.
 
-  INTERIM (Kaggle): vs v4 100% won, ONE KILL in 20 rounds (killed 5%), cone+ 3.00
-  s, mean cone 0.88 s, 17.7 s within 5 deg in range, best aim 0.0 deg; vs v5 100%,
-  cone+ 0.37. The first kill this project has produced in evaluation: v6''s best was
-  2.22 s and v8_pool''s 0.22. Two things changed at once relative to EXP-002, by design
-  of the record: the doctrine opponents in the pool and the corrected position term
-  in the shaped reward; the six-opponent laptop board is what separates them from
-  a v4-specific gain. Candidate to replace v6 as the day''s model pending that board
-  and a rehearsal on the real host.'
+  DECISION (laptop six-opponent board): cone vs reference 2.42 and vs wanderer 1.63
+  against v8_pool''s 0.72 and 0.00 and v6''s 0.00 everywhere: the first clause (cone
+  improves on 2 of 6) is met twice over. The second clause is NOT met: vs pursuit
+  it wins 17% against v8_pool''s 83% and v6''s 50%, four rounds down, and its margin
+  there (+6,647) is a sixth of v6''s. Everywhere else it beats v6 on margin (reference
+  +225,170 vs +60,307) and ties or beats it on won. KEEP as the new base and the champion
+  candidate, overriding the second clause on purpose: the cone is the thing nothing
+  else has moved, and the pursuit weakness is a named, addressable gap (it is the
+  one opponent that attacks). Not yet the day''s model: that needs the paired v9_doctrine-vs-v6
+  evaluation, a rehearsal on the real host, and a fix for pursuit (next experiment).'

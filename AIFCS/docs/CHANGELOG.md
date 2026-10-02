@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-02 — 六對手板（修正後計分的第一張）：EXP-008 keep、EXP-009 keep（課程階段）
+
+- 置中搖桿對 reference 只剩 17%（之前 83%）：位置項修正後 won 又有意義了。
+- **v9_doctrine**：won 100/17/100/100/100/83；cone reference 2.42、wanderer 1.63；分差 reference +225,170（v6 +60,307）。弱點 **pursuit 17%**（v6 50%、v8_pool 83%），唯一會主動攻擊的對手。決定規則第二款（不輸 v8_pool 超過一回合）在 pursuit 不成立，**刻意覆寫**：錐是別的實驗都沒動過的東西，pursuit 是可命名、可補的洞。keep 為新基準與冠軍候選；當天模型等配對評測、HOST 預演、pursuit 補強。
+- **v9_wez**：cone reference 3.00、wanderer 3.00，**各擊殺 1/6**，bench 上第一次；但 pursuit 33%（分差 −649）、energy 50%。keep 為課程第一階段，下一步 published 幾何續練。
+- 下一步：配對評測 v9_doctrine vs v6 雙向；真 HOST 預演；看兩個 log 裡訓練期對 pursuit 的勝率，決定 EXP-011（pursuit 補強）怎麼開。
+
 ## 2026-10-02 — EXP-008／009 Kaggle 結果：第一次擊殺
 
 - **EXP-008 v9_doctrine**：vs v4 100%、killed 5%（20 回合中 1 次）、cone+ 3.00 s、錐內平均 0.88 s、射程內 5° 以內 17.7 s、最近 0.0°；vs v5 100%、cone+ 0.37。v6 最好 2.22、v8_pool 0.22。

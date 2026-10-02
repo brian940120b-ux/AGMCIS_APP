@@ -25,10 +25,10 @@ pool:
 - reversal
 - leadturn
 reward_tier: research
-status: TRAINED
+status: DONE
 created_at: '2026-10-01T12:20:58+00:00'
 started_at: null
-finished_at: null
+finished_at: '2026-10-02T17:18:11+00:00'
 git_commit: 4156c86
 results:
   kaggle_2026-10-02:
@@ -68,12 +68,150 @@ results:
         cone_plus_s: 0.7
         deg_per_s: 5.4
         floor_share: 0.07
-decision: null
-notes: '
+  laptop_scoreboard_2026-10-02:
+    tool: scripts/scoreboard.bat at b77590e (aspect term fixed), laptop, 6 rounds
+      per opponent, seed 1000, floor on
+    detail: results/exp008_009.json (laptop)
+    v9_doctrine:
+      reference:
+        won: 1.0
+        margin: 225170
+        cone_best_s: 2.42
+        killed: 0
+      pursuit:
+        won: 0.17
+        margin: 6647
+        cone_best_s: 0
+        killed: 0
+      break:
+        won: 1.0
+        margin: 50883
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 1.0
+        margin: 77549
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 1.0
+        margin: 35748
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 0.83
+        margin: 118104
+        cone_best_s: 1.63
+        killed: 0
+    v9_wez:
+      reference:
+        won: 1.0
+        margin: 61125
+        cone_best_s: 3.0
+        killed: 0.17
+      pursuit:
+        won: 0.33
+        margin: -649
+        cone_best_s: 0.2
+        killed: 0
+      break:
+        won: 1.0
+        margin: 29402
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 0.5
+        margin: 55315
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 1.0
+        margin: 21531
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 1.0
+        margin: 154401
+        cone_best_s: 3.0
+        killed: 0.17
+    v6:
+      reference:
+        won: 1.0
+        margin: 60307
+        cone_best_s: 0
+        killed: 0
+      pursuit:
+        won: 0.5
+        margin: 41907
+        cone_best_s: 0
+        killed: 0
+      break:
+        won: 1.0
+        margin: 25508
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 1.0
+        margin: 29085
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 0.67
+        margin: 13705
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 1.0
+        margin: 57992
+        cone_best_s: 0
+        killed: 0
+    do_nothing_with_floor:
+      reference:
+        won: 0.17
+        margin: -11200
+        cone_best_s: 0
+        killed: 0
+      pursuit:
+        won: 0
+        margin: -33208
+        cone_best_s: 0
+        killed: 0
+      break:
+        won: 1.0
+        margin: 5340
+        cone_best_s: 0
+        killed: 0
+      energy:
+        won: 0.5
+        margin: -9674
+        cone_best_s: 0
+        killed: 0
+      scissors:
+        won: 0.67
+        margin: -426
+        cone_best_s: 0
+        killed: 0
+      wanderer:
+        won: 0.17
+        margin: -10709
+        cone_best_s: 0
+        killed: 0
+    note: 'First board under the corrected position term: the centred stick now loses
+      to the reference (17%), so won carries signal again. Margins on the new scale.'
+decision: keep
+notes: 'INTERIM (Kaggle): vs v4 95%, one kill, cone+ 3.00, mean cone 0.73, 21.5 s
+  within 5 deg (more than EXP-008''s 17.7); vs v5 85% with 15% crashes and cone+ 0.70
+  (EXP-008: 0.37). Starting inside the cone bought time near the cone and cost survival:
+  three crashes in 20 against v5, none for EXP-008. Not a clean win over EXP-008 on
+  its own terms; the natural use is as a curriculum stage (resume under --geometry
+  published), which the record''s decision rule names. Decision waits for the laptop
+  board.
 
-  INTERIM (Kaggle): vs v4 95%, one kill, cone+ 3.00, mean cone 0.73, 21.5 s within
-  5 deg (more than EXP-008''s 17.7); vs v5 85% with 15% crashes and cone+ 0.70 (EXP-008:
-  0.37). Starting inside the cone bought time near the cone and cost survival: three
-  crashes in 20 against v5, none for EXP-008. Not a clean win over EXP-008 on its
-  own terms; the natural use is as a curriculum stage (resume under --geometry published),
-  which the record''s decision rule names. Decision waits for the laptop board.'
+  DECISION (laptop six-opponent board): cone vs reference 3.00 and vs wanderer 3.00,
+  with a KILL in one of six rounds against each (killed 17%): the only kills on any
+  bench so far, and the rule''s 1.5 s threshold cleared twice. But pursuit 33% (margin
+  -649, a loss) and energy 50%: starting inside the cone taught holding it and nothing
+  about being attacked or about an opponent that leaves. KEEP as a curriculum stage,
+  not as a model: the next use is to resume it under --geometry published with the
+  full pool, which the record''s hypothesis named. Candidate for the day only if that
+  resume keeps the kills and recovers pursuit.'
