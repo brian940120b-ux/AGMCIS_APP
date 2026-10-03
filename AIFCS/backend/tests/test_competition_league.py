@@ -650,3 +650,43 @@ def test_the_paper_scheme_is_untouched_by_the_ema_fields():
     assert league.scheme == "paper"
     league.record("a", False)
     assert league.shares()["a"] == pytest.approx(0.5), "uniform: the gate has not opened"
+
+
+def test_a_pool_opponent_encodes_every_frame_and_decides_every_action_repeat():
+    """The extended observation's rates are per-frame differences times 60,
+    and its clock counts encode calls. An opponent that encoded only when it
+    decided saw rates six times too large and a round ageing at a sixth of
+    the speed; the seat under test, encoded every frame, won 85% against the
+    same checkpoint. Both seats have to read the same numbers.
+    """
+    from competition.features import EXTRA_FIELDS, ExtendedEncoder
+    from competition.state import STATE_SIZE, Telemetry
+
+    seen: list[np.ndarray] = []
+
+    def predict(observation):
+        seen.append(np.array(observation, dtype=np.float64))
+        return np.zeros(4)
+
+    opponent = PolicyOpponent(predict, action_repeat=6, encoder=ExtendedEncoder())
+    reference = ExtendedEncoder()
+    frames = []
+    for frame in range(13):
+        values = dict.fromkeys(Telemetry.__dataclass_fields__, 0.0)
+        values["own_alt_ft"] = values["enemy_alt_ft"] = 18_000.0
+        values["own_vc_fps"], values["own_vt_fps"] = 574.0, 740.0
+        values["own_vn_fps"] = values["enemy_vn_fps"] = 700.0
+        values["enemy_lat_deg"] = 0.01
+        values["enemy_lon_deg"] = 0.0005 * frame  # drifting across the nose
+        frames.append(Telemetry(**values))
+
+    per_frame = [reference.encode(t) for t in frames]
+    for t in frames:
+        opponent(t)
+
+    assert len(seen) == 3, "decisions at frames 0, 6 and 12"
+    rate = STATE_SIZE + EXTRA_FIELDS.index("azimuth_rate")
+    clock = STATE_SIZE + EXTRA_FIELDS.index("round_elapsed")
+    assert seen[2][rate] == pytest.approx(per_frame[12][rate])
+    assert seen[2][clock] == pytest.approx(per_frame[12][clock])
+    assert seen[2][rate] != 0.0, "the drift has to show up, or the test checks nothing"

@@ -127,8 +127,17 @@ class PolicyOpponent:
         self._frames = 0
 
     def __call__(self, telemetry: Telemetry) -> np.ndarray:
+        # Encoded every frame, decided every `action_repeat` frames, exactly
+        # as the training wrapper and the day's client do it. The extended
+        # encoder's rate fields are the difference from the *previous call*
+        # times 60 Hz, and its clock counts calls: encoding only on decision
+        # frames handed this policy rates six times too large and a round
+        # that aged at a sixth of the speed, which is not the policy that was
+        # trained. The seat under test, encoded every frame, won 85% against
+        # the same checkpoint sitting here.
+        observation = self.encoder.encode(telemetry)
         if self._held is None or self._frames >= self.action_repeat:
-            self._held = np.asarray(self.predict(self.encoder.encode(telemetry)), dtype=np.float64)
+            self._held = np.asarray(self.predict(observation), dtype=np.float64)
             self._frames = 0
         self._frames += 1
         action = self._held

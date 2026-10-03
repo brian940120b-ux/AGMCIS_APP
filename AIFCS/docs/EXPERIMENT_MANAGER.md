@@ -57,6 +57,9 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 > 池對手和當天的 client 則照卡片的 `action_repeat`（6 → 10 Hz）持住。所以受測方多了六倍反應速度：v6 自打 85%、
 > v9 自打 80%、v9 vs v6 與 v6 vs v9 都 90%。已修（`play_round` 持住決策）；之前所有 scoreboard／配對列都偏好受測方，
 > 名次要用修正後的評測器重量。真 HOST 預演不受影響。
+>
+> **同日第二個原因**：`PolicyOpponent` 只在決策幀編碼，`extended` 的速率欄被放大 6 倍、時鐘慢 6 倍，所以**池對手一直比它訓練出來的樣子弱**。
+> 影響所有 `--opponent-pool` 列和訓練時的池（EXP-002、EXP-008）；腳本對手的六對手板不受影響。已修。
 
 | ID | 狀態 | 內容 |
 |---|---|---|
@@ -67,7 +70,7 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-005-potential-shaping` | DONE / reject | Kaggle V8：vs v4 65%／−321／cone+ 0.00／best 12°，vs v5 60%／−66／0.23。錐沒動，對 v4 根本沒瞄。跑在位置項修正前（fda84e3），margin 不可比。 EXP-002 配方，`--reward potential`。H4；看 cone+ |
 | `EXP-006-frames-observation` | PLANNED | EXP-002 配方，`--observation frames`。H5 |
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
-| `EXP-008-doctrine-pool` | DONE / keep | Kaggle：vs v4 **100%、一次擊殺、cone+ 3.00**、錐內平均 0.88 s、5° 內 17.7 s；vs v5 100%／0.37。六對手板：cone reference 2.42／wanderer 1.63（v6 全 0），分差五項贏 v6；**弱點 pursuit 17%**（v6 50%）。新基準、冠軍候選，當天模型要先補 pursuit |
-| `EXP-009-wez-start` | DONE / keep（課程階段） | Kaggle：vs v4 95%、一次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。六對手板：cone reference 3.00、wanderer 3.00，**各擊殺 1/6**（bench 上第一次擊殺）；但 pursuit 33%（分差負）、energy 50%。當課程第一階段，接著用 published 幾何續練 |
+| `EXP-008-doctrine-pool` | DONE / keep | Kaggle：vs v4 **100%、一次擊殺、cone+ 3.00**、錐內平均 0.88 s、5° 內 17.7 s；vs v5 100%／0.37。六對手板：cone reference 2.42／wanderer 1.63（v6 全 0），分差五項贏 v6；**弱點 pursuit 17%**（v6 50%）。新基準、冠軍候選，當天模型要先補 pursuit。**10-03 決策率修正後重量**：won 100/33/100/100/100/67，cone reference 0.90／energy 1.98／wanderer 3.00（擊殺 1/6），分差五項最高；pursuit 33%（v6 67%）。訓練時的池對手受「池對手只在決策幀編碼」影響偏弱 |
+| `EXP-009-wez-start` | DONE / keep（課程階段） | Kaggle：vs v4 95%、一次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。六對手板：cone reference 3.00、wanderer 3.00，**各擊殺 1/6**（bench 上第一次擊殺）；但 pursuit 33%（分差負）、energy 50%。當課程第一階段，接著用 published 幾何續練。**10-03 重量**：won 83/33/100/83/83/100，cone reference 3.00（擊殺 1/6）、wanderer 1.05 |
 | `EXP-010-lookahead-observation` | RUNNING（Kaggle） | EXP-008 配方，`--observation lookahead`（預測 1 s／3 s 幾何）。H16 |
 | `EXP-011-defensive-starts` | PLANNED | EXP-008 配方，`--geometry defmix`（50% published／25% defensive／25% wezdef）。補 pursuit：v9_doctrine 訓練期對 pursuit 只有 50%，板上 17% |

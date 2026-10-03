@@ -25,6 +25,15 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — 池對手修正：每幀編碼、每 action_repeat 幀決策（藍方座位優勢的第二個原因）
+
+- 決策率修正後重量（筆電，seed 1000，20 回合）：v9_doctrine vs v6 75%／+79,866／墜毀 20%／cone+ 0.53；v6 vs v9_doctrine 80%／+45,719／墜毀 10%／cone+ 1.10。兩邊加起來 155%，座位優勢還在。
+- 用同一個手寫策略坐兩邊各量 36 回合（action_repeat／地板／G 限各自開關）：藍方 56%，沒有明顯偏差 → 搖桿、地板、G 限都公平，問題在**學出來的模型才讀的東西**。
+- **原因**：`PolicyOpponent` 只在決策幀才呼叫 `encoder.encode`。`extended` 的四個速率欄是「和上一次 encode 的差 × 60」，時鐘欄數的是 encode 次數。池對手因此看到 **6 倍大的速率、慢 6 倍的時鐘**，飛的不是訓練出來的那個策略。受測方（評測器、訓練包裝器、當天 client）都每幀編碼，所以座位不對稱。
+- **修正**：`PolicyOpponent.__call__` 每幀編碼、每 `action_repeat` 幀才 predict，與 `CompetitionClient` 相同。測試 `test_a_pool_opponent_encodes_every_frame_and_decides_every_action_repeat`。
+- **影響**：所有 `extended` 模型當池對手的結果都偏弱——包括**訓練時的池**（EXP-002 v8_pool、EXP-008 v9_doctrine 的池對手 v4/v5/v6/v8）和評測的 `--opponent-pool` 列。腳本對手（reference/pursuit/…/doctrine 四個）用無狀態幾何，不受影響，六對手板有效。配對比較要再重量一次。
+- 六對手板重量（決策率修正後，`results/exp008_009_v2.json`）：v9_doctrine won 100/33/100/100/100/67，cone reference 0.90／energy 1.98／wanderer 3.00（擊殺 1/6）；v9_wez 83/33/100/83/83/100，cone reference 3.00（擊殺 1/6）；v6 100/67/100/100/83/100，cone 全板 ≤ 0.08。分差 v9_doctrine 五項最高，pursuit 一項 v6 最高（+41,725 對 +7,050）。
+
 ## 2026-10-03 — 評測器修正：受測方每 action_repeat 幀決策一次（藍方座位優勢的原因）
 
 - **原因找到**：`evaluate.play_round` 每一幀（60 Hz）都問策略一次，而池對手（`PolicyOpponent`）和當天的 client 都照卡片的 `action_repeat`（v6/v8/v9 皆為 6 → 10 Hz）持住決策。同一個策略坐受測方就多了六倍的反應速度，所以 v6 自打 85%、v9 自打 80%、v9 vs v6 與 v6 vs v9 都 90%。
