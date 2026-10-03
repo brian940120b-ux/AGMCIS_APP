@@ -306,9 +306,20 @@ def play_round(policy: Policy, config: EnvConfig, seed: int, trace: Any | None =
     reason = ""
     lo, hi = SWEET_SPOT_M
     envelope = AttackEnvelope()
+    held: np.ndarray | None = None
+    frames_held = 0
 
     while True:
-        observation, geometry, finished, reason = game.step(policy(observation))
+        # One decision per `action_repeat` frames, exactly as the training
+        # wrapper and the day's client hold it. Asking the policy every frame
+        # instead gave the seat under test a 60 Hz stick against an opponent
+        # holding at 10 Hz, and the same policy on both seats won 85% from
+        # whichever seat was asked more often.
+        if held is None or frames_held >= config.action_repeat:
+            held = policy(observation)
+            frames_held = 0
+        frames_held += 1
+        observation, geometry, finished, reason = game.step(held)
         distances.append(geometry.distance_m)
         if lo <= geometry.distance_m <= hi:
             sweet_frames += 1

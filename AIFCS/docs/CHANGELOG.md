@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — 評測器修正：受測方每 action_repeat 幀決策一次（藍方座位優勢的原因）
+
+- **原因找到**：`evaluate.play_round` 每一幀（60 Hz）都問策略一次，而池對手（`PolicyOpponent`）和當天的 client 都照卡片的 `action_repeat`（v6/v8/v9 皆為 6 → 10 Hz）持住決策。同一個策略坐受測方就多了六倍的反應速度，所以 v6 自打 85%、v9 自打 80%、v9 vs v6 與 v6 vs v9 都 90%。
+- **修正**：`play_round` 現在持住決策 `config.action_repeat` 幀，與訓練包裝器（`gym_env.step`）和 `CompetitionClient` 完全相同。測試：`test_a_round_asks_the_policy_once_per_decision_not_once_per_frame`（2 秒回合 120 幀 → 20 次決策）。
+- **影響**：本 commit 之前所有 scoreboard／evaluate 的「受測方」數字都是 60 Hz 搖桿量出來的，比當天會飛的 10 Hz 搖桿偏好；內建對手列（reference/wanderer/…）和池對手列都受影響，順序可能變。真 HOST 預演（play.bat）不受影響——client 一直是 10 Hz。**exp008_009 / 配對比較需要重量**。
+- 筆電更新後重跑：`scripts\scoreboard.bat models\competition\v9_doctrine models\competition\v6 --json results\exp008_v2.json`。
+
 ## 2026-10-03 — v9_doctrine 對 v6 配對評測：暫定當天模型 = v9_doctrine，帶兩個代價
 
 - 同一批 20 回合、各自坐藍方：v9_doctrine vs v6 90%／+87,946／cone+ 1.08／墜毀 10%；v6 vs v9_doctrine 90%／+48,781／0.42／0%。兩邊都 90% → **藍方座位有優勢**，won 分不出高下（待查：池對手怎麼被飛的）；分差和 cone 分得出：v9 做得多。v9 自打：擊殺 1 次、墜毀 20%。

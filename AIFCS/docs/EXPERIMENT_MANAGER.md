@@ -53,6 +53,11 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 > （`CONFORMANCE.md` C 表 AA 列）。`won`、`cone`、`killed` 不受影響。EXP-001／002 的 margin 數字留著當歷史，不要和之後的比。
 > v6 與 v8_pool 的 `shaped` 獎勵也含同一個反向項；EXP-008 起修正。
 
+> **2026-10-03 的決策率注意事項**：這一天之前 `evaluate`／`scoreboard` 把受測方的策略每一幀（60 Hz）問一次，
+> 池對手和當天的 client 則照卡片的 `action_repeat`（6 → 10 Hz）持住。所以受測方多了六倍反應速度：v6 自打 85%、
+> v9 自打 80%、v9 vs v6 與 v6 vs v9 都 90%。已修（`play_round` 持住決策）；之前所有 scoreboard／配對列都偏好受測方，
+> 名次要用修正後的評測器重量。真 HOST 預演不受影響。
+
 | ID | 狀態 | 內容 |
 |---|---|---|
 | `EXP-001-official-sac-baseline` | DONE / keep | PART 11.1 的 OFFICIAL_SAC_BASELINE，零旗標。筆電配對比較：vs v4 5%／墜毀 75%／−721，vs v5 10%／90%／+96，cone 0。六對手板 cone 全 0、分差與置中搖桿幾乎相同。地板，永不晉升 |

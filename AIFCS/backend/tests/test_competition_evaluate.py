@@ -567,3 +567,30 @@ def test_a_round_records_which_side_was_lost():
 
     assert report.blue_crashed is False, "a centred stick on a working floor survives"
     assert report.as_dict()["blue_crashed"] is False
+
+
+def test_a_round_asks_the_policy_once_per_decision_not_once_per_frame():
+    """The seat under test flies at the decision rate its card says.
+
+    Before this, `play_round` asked the policy every physics frame while a
+    pool opponent held its decision for its own `action_repeat`: v6 against
+    itself won 85% and v9 against itself 80%, from whichever seat was asked
+    more often. The training wrapper and the day's client both hold, so the
+    evaluator has to hold too, or it measures a stick nobody will fly.
+    """
+    from competition.evaluate import play_round
+
+    calls = {"n": 0}
+    centred = neutral_policy()
+
+    def counting(observation):
+        calls["n"] += 1
+        return centred(observation)
+
+    report = play_round(counting, EnvConfig(action_repeat=6, round_seconds=2.0), seed=3)
+    assert report.frames == 120
+    assert calls["n"] == 20
+
+    calls["n"] = 0
+    report = play_round(counting, EnvConfig(action_repeat=1, round_seconds=2.0), seed=3)
+    assert calls["n"] == report.frames == 120
