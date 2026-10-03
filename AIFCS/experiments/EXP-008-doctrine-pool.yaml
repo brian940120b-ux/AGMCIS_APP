@@ -199,6 +199,44 @@ results:
         killed: 0
     note: 'First board under the corrected position term: the centred stick now loses
       to the reference (17%), so won carries signal again. Margins on the new scale.'
+  laptop_paired_vs_v6_2026-10-03:
+    tool: evaluate.bat, 20 rounds, seed 1000, each session as blue against the other
+      as a pool opponent
+    v9_doctrine_vs_v6:
+      won: 0.9
+      killed: 0.0
+      crashed: 0.1
+      margin: 87946
+      sweet_152_500m_s: 36.7
+      under_5deg_s: 4.1
+      best_deg: 0.0
+      cone_s: 0.19
+      cone_plus_s: 1.08
+    v9_doctrine_vs_self:
+      won: 0.8
+      killed: 0.05
+      crashed: 0.2
+      margin: 71408
+      cone_plus_s: 3.0
+    v6_vs_v6:
+      won: 0.85
+      crashed: 0.05
+      margin: 41401
+      cone_plus_s: 0.37
+    v6_vs_v9_doctrine:
+      won: 0.9
+      killed: 0.0
+      crashed: 0.0
+      margin: 48781
+      under_5deg_s: 2.5
+      best_deg: 0.1
+      cone_s: 0.11
+      cone_plus_s: 0.42
+    note: 'Both sessions win 90% from the blue seat, so the blue seat carries an edge
+      the table cannot remove (to check: how a pool opponent is flown). Margin and
+      cone from the blue seat still rank them: v9_doctrine +87,946 / 1.08 s against
+      v6''s +48,781 / 0.42 s. v9_doctrine crashes 10% here and 20% in self-play; v6
+      5% and 0%.'
 decision: keep
 notes: 'INTERIM (Kaggle): vs v4 100% won, ONE KILL in 20 rounds (killed 5%), cone+
   3.00 s, mean cone 0.88 s, 17.7 s within 5 deg in range, best aim 0.0 deg; vs v5
@@ -218,4 +256,11 @@ notes: 'INTERIM (Kaggle): vs v4 100% won, ONE KILL in 20 rounds (killed 5%), con
   candidate, overriding the second clause on purpose: the cone is the thing nothing
   else has moved, and the pursuit weakness is a named, addressable gap (it is the
   one opponent that attacks). Not yet the day''s model: that needs the paired v9_doctrine-vs-v6
-  evaluation, a rehearsal on the real host, and a fix for pursuit (next experiment).'
+  evaluation, a rehearsal on the real host, and a fix for pursuit (next experiment).
+
+  PAIRED vs v6 (laptop): from the blue seat v9_doctrine does more (+87,946, cone+
+  1.08) than v6 does to it (+48,781, 0.42), but both win 90% of their own rows, so
+  the seat matters and ''won'' cannot separate them. v9_doctrine also crashes 10%
+  against v6 and 20% against itself (v6: 5% / 0%): a crash is a loss on the day. PROVISIONAL
+  day model: v9_doctrine, on cone and margin, with two named costs (pursuit, crashes)
+  that EXP-011 and a crash look are to settle before the choice is final.'

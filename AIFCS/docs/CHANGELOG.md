@@ -25,6 +25,11 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — v9_doctrine 對 v6 配對評測：暫定當天模型 = v9_doctrine，帶兩個代價
+
+- 同一批 20 回合、各自坐藍方：v9_doctrine vs v6 90%／+87,946／cone+ 1.08／墜毀 10%；v6 vs v9_doctrine 90%／+48,781／0.42／0%。兩邊都 90% → **藍方座位有優勢**，won 分不出高下（待查：池對手怎麼被飛的）；分差和 cone 分得出：v9 做得多。v9 自打：擊殺 1 次、墜毀 20%。
+- 暫定當天模型 v9_doctrine（錐、分差），代價：pursuit 弱、墜毀率 10–20%（v6 0–5%）。EXP-011 補 pursuit；墜毀要另外看。
+
 ## 2026-10-03 — 訓練期勝率讀出 pursuit 的洞；`--geometry defmix`；EXP-011
 
 - EXP-008 訓練最後 50 回合：總 92%，**pursuit 50%**，其餘 88–100%；EXP-009 寫 100%（含 pursuit 100%）但板上 pursuit 33%：從錐內開始的回合裡「贏 pursuit」沒有意義，課程的意思就在這裡。結論：v9_doctrine 學會追、沒學會被追。
