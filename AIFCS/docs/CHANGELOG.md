@@ -25,6 +25,13 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — `--reward gunsnap`（H7）：錐內付 HOST 量到的 10,000/s；EXP-013 宣告
+
+- ADT 兩隊的 gun-snap 項（Γ(d)·[1−S(θ̄,1e5,1/180)]）就是「射程內、錐內給一步階」，等於 HOST 的錐內指示項。我們的 `shaped` 本來就透過分數項含這一項，差別只在付多少：公告 2,000/s，對上瞄準斜率 400/s，錐只值斜率的五倍；HOST 兩次量到 10,000/s。冠軍對真 HOST 的兩局都是「射程內 149 s、錐內 1.75 s」：穿過去，沒人付它留下。
+- `RewardMode.GUNSNAP` = `GunsnapReward(**kw)` → `ShapedReward` 但 `weights.attack_time` 換成 `ScoringWeights.host_measured().attack_time`（position 權重不動，一次只差一件事）。tier research。`gym_env` 會建；`train.py --reward gunsnap`。測試：錐內且射程內每幀差剛好 (10,000−2,000)/60，錐外、射程外差 0；position 權重照舊；gym 建得出來。
+- 宣告 `EXP-013-gunsnap-reward`（session `v9_gunsnap`）：EXP-010 配方與池，只換獎勵。EXP-012 跑完就開。
+- `test_make_vec_env_holds_the_limit...` 在雲端失敗是因為這台沒裝 SB3，與本次無關（改動前一樣失敗）。
+
 ## 2026-10-03 — v9_lookahead 對真 HOST：贏 39,810 對 406，HP 180 對 75，錐內 1.75 s
 
 - `play.bat models/competition/v9_lookahead --record`：18,937 封包、0 壞包、最差決策 2.3 ms／平均 0.44 ms、3,157 次決策（每 6 幀一次）。40 維觀測沒有拖慢。

@@ -351,3 +351,56 @@ def test_the_gym_env_builds_it():
 
     env = CompetitionEnv(EnvConfig(), reward_mode="potential", seed=1)
     assert isinstance(env._reward, PotentialReward)
+
+
+# ------------------------------------------- the cone at the host's rate (H7)
+
+
+def _gunsnap_minus_shaped(track_deg: float, distance_m: float = 300.0) -> float:
+    from competition.rewards import GunsnapReward, ShapedReward
+    from competition.scoring import AttackEnvelope, ScoringWeights
+
+    geometry = _geometry_at(track_deg, distance_m)
+    gunsnap = GunsnapReward(weights=ScoringWeights(), envelope=AttackEnvelope(), scale=1.0)
+    shaped = ShapedReward(weights=ScoringWeights(), envelope=AttackEnvelope(), scale=1.0)
+    return gunsnap(geometry, g_load=1.0, crashed=False, foe_crashed=False) - shaped(
+        geometry, g_load=1.0, crashed=False, foe_crashed=False
+    )
+
+
+def test_gunsnap_pays_the_cone_at_the_hosts_measured_rate_and_nothing_else():
+    """Inside the cone and in range, the difference from `shaped` is exactly
+    the host's 10,000 a second less the announcement's 2,000, per frame.
+    Outside the cone, or in the cone but out of range, there is no difference
+    at all: a step on the edge, which is what the gun snap is."""
+    from competition.scoring import ScoringWeights
+
+    per_frame = (ScoringWeights.host_measured().attack_time - ScoringWeights().attack_time) / 60.0
+    assert _gunsnap_minus_shaped(0.5) == pytest.approx(per_frame)
+    assert _gunsnap_minus_shaped(1.0) == pytest.approx(per_frame), "the edge is inside"
+    assert _gunsnap_minus_shaped(1.01) == pytest.approx(0.0)
+    assert _gunsnap_minus_shaped(0.5, distance_m=100.0) == pytest.approx(0.0), "under 500 ft"
+    assert _gunsnap_minus_shaped(0.5, distance_m=1000.0) == pytest.approx(0.0), "over 3,000 ft"
+
+
+def test_gunsnap_leaves_the_position_weight_as_configured():
+    from competition.rewards import GunsnapReward
+    from competition.scoring import AttackEnvelope, ScoringWeights
+
+    reward = GunsnapReward(weights=ScoringWeights(position=3.0), envelope=AttackEnvelope())
+    assert reward.weights.position == 3.0
+    assert reward.weights.attack_time == 10_000.0
+
+
+def test_gunsnap_is_a_mode_with_a_research_tier_and_the_gym_env_builds_it():
+    from competition.environment import EnvConfig
+    from competition.experiments import REWARD_TIERS, reward_tier_of
+    from competition.gym_env import CompetitionEnv
+    from competition.rewards import RewardMode, ShapedReward
+
+    assert RewardMode("gunsnap") is RewardMode.GUNSNAP
+    assert REWARD_TIERS["gunsnap"] == "research"
+    assert reward_tier_of("--reward gunsnap") == "research"
+    env = CompetitionEnv(EnvConfig(), reward_mode="gunsnap", seed=1)
+    assert isinstance(env._reward, ShapedReward)
+    assert env._reward.weights.attack_time == 10_000.0

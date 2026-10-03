@@ -82,7 +82,7 @@ EXP-002 **有結果之後**才跑，因為它是 EXP-002 + 一個旗標，比較
 | H4 | **位能差 shaping** Φ(s′)−Φ(s) | **已做**：`--reward potential`；紀錄 `EXP-005-potential-shaping`（= EXP-002 只換獎勵） | 三個來源都用；但 v7p 的教訓是獎勵改動最容易白跑，所以排在對手之後 |
 | H5 | 視線系/速度系觀測 | **已做**：`--observation frames`（105 維）；紀錄 `EXP-006-frames-observation`（= EXP-002 只換觀測） | 改觀測 = 跟舊 pool 不相容，代價最大 |
 | H6 | 課程初始分佈 | **已做**：`--geometry published/abreast/headon/offensive/defensive/mix`；續練可以換（= 課程），card 記歷史；紀錄 `EXP-007-start-geometry` | 只影響訓練，評測仍用規則的隨機起始 |
-| H7 | **錐邊階躍獎勵**（ADT 兩隊都用，SRC-018 表 I） | 未做：reward 模式 `gunsnap` | 1° 邊界 α=1e5 的 logistic × 距離因子；PRIOR_ART 七.5 |
+| H7 | **錐邊階躍獎勵**（ADT 兩隊都用，SRC-018 表 I） | **已做**：`--reward gunsnap` = `shaped` 但錐內付 HOST 量到的 10,000/s（公告 2,000）；紀錄 `EXP-013-gunsnap-reward` | ADT 的 gun-snap 就是 HOST 的錐內指示項；我們的獎勵本來就含它，差在付多少 |
 | H8 | **WEZ 起始課程**（射手從錐內／被咬住開始） | **已做**：`--geometry wez`／`wezdef`；紀錄 `EXP-009-wez-start` | ADT 射手策略 100% 這樣練；PRIOR_ART 七.5 |
 | H9 | **寬淺網路**（單層 12,288） | 未做：`--hidden 8192` 既有旗標即可 | 最便宜；推論時間要量 |
 | H10 | **狀態／動作截斷**求 GPU／CPU 一致 | 未做 | 可能解釋 Kaggle 55% vs 筆電 60%；PRIOR_ART 七.5 |

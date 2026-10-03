@@ -27,6 +27,7 @@ from competition.environment import (
 )
 from competition.league import League
 from competition.rewards import (
+    GunsnapReward,
     PointedReward,
     PotentialReward,
     ReferenceReward,
@@ -92,8 +93,12 @@ class CompetitionEnv(gym.Env[np.ndarray, np.ndarray]):
                 envelope=self.config.envelope,
                 tick_hz=float(SIM_HZ),
             )
-        if self.reward_mode in (RewardMode.SHAPED, RewardMode.POINTED):
-            build = PointedReward if self.reward_mode is RewardMode.POINTED else ShapedReward
+        if self.reward_mode in (RewardMode.SHAPED, RewardMode.POINTED, RewardMode.GUNSNAP):
+            build = {
+                RewardMode.SHAPED: ShapedReward,
+                RewardMode.POINTED: PointedReward,
+                RewardMode.GUNSNAP: GunsnapReward,
+            }[self.reward_mode]
             return build(
                 weights=self.config.weights,
                 envelope=self.config.envelope,

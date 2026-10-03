@@ -60,6 +60,7 @@ REWARD_TIERS: dict[str, str] = {
     "shaped": "research",  # margin plus tracking/range/deck shaping (v6)
     "pointed": "experimental",  # shaped plus the steep near-cone term (v7p)
     "potential": "research",  # margin plus shaped's tracking term as a potential difference (H4)
+    "gunsnap": "research",  # shaped with the cone paid at the host's measured 10,000/s (H7)
 }
 
 

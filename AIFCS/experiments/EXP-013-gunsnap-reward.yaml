@@ -1,0 +1,43 @@
+id: EXP-013-gunsnap-reward
+question: 'The champion holds the cone for 1.75 s of 149 s in range against the real
+  host, and for 2.18 s in v9_doctrine''s round: it passes through the cone, nothing
+  pays it to stay. Does paying the cone at the rate the host was measured to pay it
+  (10,000 a second, CONFORMANCE.md F2) rather than the announcement''s 2,000 teach
+  the hold?'
+hypothesis: 'EXP-010''s recipe and pool with --reward gunsnap: shaped with attack_time
+  10,000 instead of 2,000, nothing else changed (one measured difference). This is
+  the AlphaDogfight gun-snap term (SRC-018 table I) in our units: a step on the one-degree
+  edge inside the firing range, worth five times what shaped paid it and twenty-five
+  times the tracking slope at perfect aim. Expect: mean cone seconds (not only cone+)
+  up against reference and wanderer on the bench, kills vs reference above EXP-010''s
+  1/6, and aim rate inside five degrees no worse. Risk: a steeper cone reward with
+  no slope added can make the policy greedier at the edge and worsen crashes or overshoot
+  (too-close term unchanged). Decision rule: keep if both-seats vs v9_lookahead over
+  60 rounds is above 56% or bench kills rise on two opponents with no bench won falling
+  by more than one round; reject if cone vs reference drops under EXP-010''s 3.00
+  to under 1.5 s or crashes exceed 30% in the pairing.'
+session: v9_gunsnap
+flags: --reward gunsnap --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation lookahead --batch-size 512 --league
+  ema --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+- flare
+- jinker
+- reversal
+- leadturn
+reward_tier: research
+status: PLANNED
+created_at: '2026-10-03T13:11:17+00:00'
+started_at: null
+finished_at: null
+git_commit: 8843d0a
+results: {}
+decision: null
+notes: ''

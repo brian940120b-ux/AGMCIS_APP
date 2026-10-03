@@ -20,7 +20,7 @@ answer is an experiment.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -54,6 +54,10 @@ class RewardMode(StrEnum):
     #: the cone is paid by the official attack term alone. See
     #: `PotentialReward`.
     POTENTIAL = "potential"
+    #: `shaped` with the cone paid at the rate the organiser's host was measured
+    #: to pay it, 10,000 a second, instead of the announcement's 2,000. See
+    #: `GunsnapReward`.
+    GUNSNAP = "gunsnap"
 
 
 def sigmoid(x: float, rate: float, midpoint: float) -> float:
@@ -450,4 +454,32 @@ def PointedReward(**kwargs: Any) -> ShapedReward:
     differ by one thing that was written down.
     """
     kwargs.setdefault("fine_tracking", 400.0)
+    return ShapedReward(**kwargs)
+
+
+def GunsnapReward(**kwargs: Any) -> ShapedReward:
+    """`shaped` with the in-cone term paid at the host's measured rate.
+
+    Both AlphaDogfight teams that published their reward carried a term
+    PHANG-MAN called the gun snap (SRC-018, table I): Gamma_B(d) times a
+    logistic of steepness 1e5 on the one-degree edge, which is a step that
+    pays, inside the firing range, for being inside the cone and nothing for
+    being near it. That is exactly the host's own attack indicator, and the
+    reason they had to write it down is that their score was not in their
+    reward. Ours is: `shaped` already pays the cone through the score term.
+    What `shaped` pays it is the announcement's 2,000 a second, against a
+    tracking slope worth 400 a second at perfect aim: the cone is worth five
+    times the slope. The organiser's host was measured twice (CONFORMANCE.md
+    F2, hostcsv on 2026-10-01 and 2026-10-03) paying 10,000 a second, and
+    the champion's two rounds against it read the same way: 149 seconds in
+    range, 1.75 inside the cone. It passes through; nothing pays it to stay.
+
+    One measured difference from `shaped`: `attack_time` is the host's
+    10,000. The position weight is left as configured, because that term is
+    normalised differently by host and announcement and changing both would
+    make this two experiments. A separate name, as with `pointed`, so v6 and
+    the v9s stay reproducible.
+    """
+    weights = kwargs.get("weights", ScoringWeights())
+    kwargs["weights"] = replace(weights, attack_time=ScoringWeights.host_measured().attack_time)
     return ShapedReward(**kwargs)
