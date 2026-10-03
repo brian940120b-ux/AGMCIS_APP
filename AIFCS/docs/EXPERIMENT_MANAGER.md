@@ -60,6 +60,9 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 >
 > **同日第二個原因**：`PolicyOpponent` 只在決策幀編碼，`extended` 的速率欄被放大 6 倍、時鐘慢 6 倍，所以**池對手一直比它訓練出來的樣子弱**。
 > 影響所有 `--opponent-pool` 列和訓練時的池（EXP-002、EXP-008）；腳本對手的六對手板不受影響。已修。
+>
+> **結案（同日）**：兩個修正後，`actorparity` 證明兩條推論路徑相同（差 ≤ 5e-6），v9 自打 `--both-seats` 60 回合 48%。評測器公平。
+> 混沌讓同 seed 的局不會剛好抵銷，所以 20 回合的勝率有 ±11% 誤差；比模型一律 `--rounds 30 --both-seats`。
 
 | ID | 狀態 | 內容 |
 |---|---|---|
