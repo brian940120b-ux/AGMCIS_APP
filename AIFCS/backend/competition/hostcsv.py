@@ -195,7 +195,20 @@ def summary(hr: HostRound, me: str = "player1", foe: str = "player2") -> dict[st
     in_range = (feet >= 500.0) & (feet <= 3000.0)
     cone = in_range & (geo.track_deg <= 1.0)
     hold = int((np.diff(hr.col(me, "lat_deg")) == 0).sum())
+    foe_hp = hr.col(foe, "Score_RemainingHP")
+    final = hr.col(me, "Score_FinalAdvantage")
+    att = hr.col(me, "Score_AttackAdvantage")
+    pos = hr.col(me, "Score_PositionAdvantage")
+    # Whatever Final gains beyond Att + Pos on a frame is the attack-time term;
+    # read it off the frames the host docked HP on, as a rate per second.
+    hp_drop = np.concatenate([[0.0], -np.diff(foe_hp)]) > 0
+    extra = np.concatenate([[0.0], np.diff(final) - (att + pos)[1:]])
+    attack_weight = float(np.median(extra[hp_drop]) * FRAME_HZ) if hp_drop.any() else None
     return {
+        "foe_hp_lost": float(foe_hp[0] - foe_hp[-1]),
+        "frames_docking_hp": int(hp_drop.sum()),
+        "attack_weight_per_s": attack_weight,
+        "seconds_under_15m": float((geo.distance_m < 15.0).sum() / FRAME_HZ),
         "frames": hr.frames,
         "seconds": float(hr.time[-1] - hr.time[0]) if hr.frames > 1 else 0.0,
         "start": {
@@ -260,6 +273,10 @@ def describe(path: Path, me: str = "player1") -> int:
     h = facts["host"]
     print(f"host: final {h['own_final']:.0f} vs {h['foe_final']:.0f},", end=" ")
     print(f"HP {h['own_hp']:.0f} vs {h['foe_hp']:.0f}, winner column {h['winner']}")
+    print(f"foe HP lost {facts['foe_hp_lost']:.0f} over {facts['frames_docking_hp']} frames", end="")
+    if facts["attack_weight_per_s"] is not None:
+        print(f"; attack-time weight seen: {facts['attack_weight_per_s']:.0f} per second in the cone", end="")
+    print(f"; under 15 m (collision rule): {facts['seconds_under_15m']:.2f} s")
     return 0
 
 

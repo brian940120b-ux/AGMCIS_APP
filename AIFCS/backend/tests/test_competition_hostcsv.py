@@ -185,3 +185,110 @@ def test_the_scoring_engine_itself_reproduces_the_hosts_columns_on_the_sample():
         # The host reads the target's nose; the encoder reads its velocity. For
         # a level PID target they differ by its angle of attack, a degree or two.
         assert ours == pytest.approx(host, abs=0.05), f"frame {i}: ours {ours:.3f} host {host:.3f}"
+
+
+# ------------------------------------------- the second round: the cone
+
+
+SAMPLE2 = Path(__file__).parent / "data" / "host_round_2026-10-03_sample.csv"
+
+
+def _telemetry_from_row(hr, i: int):
+    import numpy as np
+
+    from competition.state import Telemetry
+
+    g = functools.partial(lambda p, k, f: float(hr.col(p, k)[f]), "player1", f=i)
+    e = functools.partial(lambda p, k, f: float(hr.col(p, k)[f]), "player2", f=i)
+    vn, ve, vd = g("vn_fps"), g("ve_fps"), g("vd_fps")
+    vt = (vn * vn + ve * ve + vd * vd) ** 0.5
+    return Telemetry.from_observation(
+        np.array(
+            [
+                g("lat_deg"),
+                g("lon_deg"),
+                g("alt_ft"),
+                g("roll_deg"),
+                g("pitch_deg"),
+                g("yaw_deg"),
+                vn,
+                ve,
+                vd,
+                g("p_radps"),
+                g("q_radps"),
+                g("r_radps"),
+                g("ias_kts") * 1.68781,
+                vt,
+                g("g_acc"),
+                vt,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                e("lat_deg"),
+                e("lon_deg"),
+                e("alt_ft"),
+                e("vn_fps"),
+                e("ve_fps"),
+                e("vd_fps"),
+            ]
+        )
+    )
+
+
+def test_the_host_docks_one_hp_per_frame_inside_our_envelope():
+    """v9_doctrine on the real host, 2026-10-03: the host took 131 HP over the
+    131 frames our own AttackEnvelope (half-angle 1 degree, 500-3000 ft) says
+    were inside the cone, and no others. Eleven rows of it here, in consecutive
+    pairs: HP drops by exactly one on the frames our envelope contains."""
+    from competition.scoring import AttackEnvelope
+    from competition.state import StateEncoder
+
+    hr = read_host_csv(SAMPLE2)
+    envelope = AttackEnvelope()
+    encoder = StateEncoder()
+    pairs = [(0, 1), (2, 3), (3, 4), (5, 6), (7, 8), (9, 10)]
+    seen_cone = 0
+    for before, after in pairs:
+        inside = envelope.contains(encoder.geometry(_telemetry_from_row(hr, after)))
+        dropped = (
+            hr.col("player2", "Score_RemainingHP")[before] - hr.col("player2", "Score_RemainingHP")[after]
+        )
+        assert dropped == (1.0 if inside else 0.0), (
+            f"rows {before}->{after}: inside {inside}, dropped {dropped}"
+        )
+        seen_cone += inside
+    assert seen_cone == 3, "the fixture carries three in-cone transitions"
+
+
+def test_the_attack_time_weight_is_ten_thousand_per_second():
+    """Final gains Att + Pos every frame and 166.667 more on a cone frame:
+    W_time = 10,000 per second, not the announcement's reference 2,000."""
+    hr = read_host_csv(SAMPLE2)
+    final = hr.col("player1", "Score_FinalAdvantage")
+    att = hr.col("player1", "Score_AttackAdvantage")
+    pos = hr.col("player1", "Score_PositionAdvantage")
+    hp = hr.col("player2", "Score_RemainingHP")
+    for before, after in [(0, 1), (2, 3), (3, 4), (5, 6), (7, 8), (9, 10)]:
+        extra = (final[after] - final[before]) - (att[after] + pos[after])
+        docked = hp[before] - hp[after] == 1.0
+        assert extra == pytest.approx(10_000.0 / 60.0 if docked else 0.0, abs=0.01), f"rows {before}->{after}"
+    facts = summary(hr)
+    assert facts["attack_weight_per_s"] == pytest.approx(10_000.0, abs=1.0)
+    assert facts["foe_hp_lost"] == hp[0] - hp[-1]
+
+
+def test_the_summary_counts_time_under_the_collision_radius():
+    hr = read_host_csv(SAMPLE2)
+    facts = summary(hr)
+    # Rows 7 and 8 of the fixture are the 4.3 m pass and the frame after it.
+    assert facts["seconds_under_15m"] == pytest.approx(2 / 60.0, abs=1e-6)
+
+
+def test_the_measured_host_weights_are_a_named_set():
+    from competition.scoring import ScoringWeights
+
+    host = ScoringWeights.host_measured()
+    assert host.attack_time == 10_000.0
+    assert host.position == 1.0
+    assert host.kill_base == ScoringWeights().kill_base, "not exercised, so not changed"

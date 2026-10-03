@@ -25,6 +25,12 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — v9_doctrine 對真 HOST：第一次扣血；錐、HP、W_time 量到；4 m 擦過
+
+- 回合：19,353 幀、0 錯誤、最慢決策 2.7 ms。HOST：對手 HP 180 → 49（扣 131），我們錐內 2.18 s = 131 幀，**HP 每幀扣 1、只在我們的 `AttackEnvelope` 判定的幀**（131／131／0），U02 半角 1° 與 U03 累積確認。**W_time = 10,000／秒**（錐內每幀 Final 多 166.667），U06 部分關；`ScoringWeights.host_measured()` 新增，評測預設不變。
+- **相撞風險**：最近 4.3 m，15 m 內 2.43 秒，公開版 HOST 沒反應；規則是比優勢分。記在 `CONFORMANCE.md` F2 與 `TACTICS.md`。
+- `hostcsv.py` 摘要加 `foe_hp_lost`、`attack_weight_per_s`、`seconds_under_15m`；第二回合 11 列樣本進 `backend/tests/data/`，測試 4 個。
+
 ## 2026-10-02 — 六對手板（修正後計分的第一張）：EXP-008 keep、EXP-009 keep（課程階段）
 
 - 置中搖桿對 reference 只剩 17%（之前 83%）：位置項修正後 won 又有意義了。

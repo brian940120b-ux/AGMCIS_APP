@@ -96,11 +96,11 @@ R0–R12，見 `OFFICIAL_COMPETITION_SPEC.md` §Restrictions。要點：封閉�
 | # | 沒有說的事 | 影響 |
 |---|---|---|
 | U01 | 比賽日的初始**航向**（相對幾何）；兩機高度是否相同 | 訓練分佈、開局策略 | 公開版 HOST 一回合（2026-10-01）：航向 303°/123° 相反、並排、同高、1,702 m；比賽日版本未知（`CONFORMANCE.md` F） |
-| U02 | 「鼻軸線 2 度」是全錐還是半角（圖 4 畫全錐） | 擊殺判定 |
+| U02 | 「鼻軸線 2 度」是全錐還是半角（圖 4 畫全錐） | 擊殺判定 | **公開版 HOST 實測：半角 1°**，HP 每幀扣 1，與 `AttackEnvelope` 逐幀對齊（`CONFORMANCE.md` F2） |
 | U03 | 「累積」3 秒是否允許中斷後續算；Host 幀內如何計 | 擊殺判定 |
 | U04 | 超過 9G 的「超過」用 n-pilot-z-norm 的哪個方向/絕對值；G 值符號慣例 | T_G |
 | U05 | ΣP_t 的累加頻率（每幀？） | 位置優勢分尺度 | 公開版 HOST：每幀，且含 START 前保持幀；有效 W_pos = 1/幀（`CONFORMANCE.md` F） |
-| U06 | 當天的 W_base / W_time / W_G / W_pos 實際值（皆「參考值」） | 分數 |
+| U06 | 當天的 W_base / W_time / W_G / W_pos 實際值（皆「參考值」） | 分數 | 公開版 HOST：W_time = 10,000／秒、W_pos = 1／幀（`ScoringWeights.host_measured()`）；W_G、W_base 未觸發（`CONFORMANCE.md` F、F2） |
 | U07 | 賽制（5戰3勝／3戰2勝／循環） | 戰略 |
 | U08 | Host 是否對飛機配平；Host 的 JSBSim 初始化順序；Host 用套件內引擎還是 pip 引擎 | 訓練用機體是否等於比賽用機體 |
 | U09 | Host 每秒送幾包 OBS（60 Hz 運算 ≠ 明文 60 包/秒）；封包時序/抖動 | 決策節奏 |

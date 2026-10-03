@@ -88,13 +88,25 @@ def distance_factor(distance_m: float) -> float:
 
 @dataclass(frozen=True)
 class ScoringWeights:
-    """The reference values the organiser published. They may set others."""
+    """The reference values the organiser published. They may set others.
+
+    `host_measured()` is what the organiser's public host program was seen to
+    use (2026-10-03, CONFORMANCE.md F2): 10,000 per second in the cone and 1
+    per frame of P(t) — twenty times the reference on attack time and a tenth
+    on position. The kill and G weights were not exercised in that round and
+    stay at the reference values. Which set the competition host runs is not
+    known; the evaluator keeps the reference as its default.
+    """
 
     kill_base: float = 1000.0
     kill_time_budget_s: float = 300.0
     attack_time: float = 2000.0
     high_g: float = 1000.0
     position: float = 10.0
+
+    @classmethod
+    def host_measured(cls) -> ScoringWeights:
+        return cls(attack_time=10_000.0, position=1.0)
 
 
 @dataclass(frozen=True)
