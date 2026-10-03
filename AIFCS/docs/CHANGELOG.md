@@ -25,6 +25,12 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — v9_lookahead 對真 HOST：贏 39,810 對 406，HP 180 對 75，錐內 1.75 s
+
+- `play.bat models/competition/v9_lookahead --record`：18,937 封包、0 壞包、最差決策 2.3 ms／平均 0.44 ms、3,157 次決策（每 6 幀一次）。40 維觀測沒有拖慢。
+- `hostcsv`（`飛行競賽Host端Record_20261003_2052.csv`）：18,002 幀、300 s；起始 1,545 m、航向 260／80、同高 11,376 ft、340 kt，機頭 90° 離；射程內 149.4 s、一度錐內 1.75 s、最佳瞄準 0.03°、max |G| 8.5；最近 240 m（上次 v9_doctrine 4.3 m）；15 m 以內 0 s。HOST 的 Final 39,810 對 406，HP 180 對 75（掉 105 = 105 幀），W_time 10,000/s 再次量到；HOST 用 host 正規化（差 0.0000）。
+- 判讀：和 v9_doctrine 那局（HP 49、錐內 2.18 s）一樣是「咬得到、咬不滿 3 秒」。射程內 149 秒卻只累積 1.75 秒錐 → 問題在**持續**不在瞄準。H7 錐邊階躍獎勵（gunsnap）是下一個要做的獎勵項，排在 EXP-012 之後。
+
 ## 2026-10-03 — EXP-010／011 結案：v9_lookahead 是冠軍、暫定當天模型；EXP-012 宣告
 
 - 筆電、修正後評測器。六對手板 won：v9_lookahead 100/67/83/100/100/100、v9_defmix 100/50/100/100/100/100、v9_doctrine 100/33/100/100/100/67。cone：lookahead reference 3.00（擊殺 1/6）、wanderer 3.00（擊殺 2/6）；defmix 六個對手中五個非零；doctrine 三個。pursuit 分差：lookahead +121,365、defmix +41,753、doctrine +7,050。
