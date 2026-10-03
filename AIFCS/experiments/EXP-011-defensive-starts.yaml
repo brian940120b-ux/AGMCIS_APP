@@ -28,11 +28,16 @@ pool:
 - reversal
 - leadturn
 reward_tier: research
-status: PLANNED
+status: DONE
 created_at: '2026-10-03T03:54:58+00:00'
 started_at: null
-finished_at: null
+finished_at: '2026-10-03T12:36:12+00:00'
 git_commit: 78c3d32
 results: {}
-decision: null
-notes: ''
+decision: keep
+notes: 'Laptop, corrected evaluator. Bench: won 100/50/100/100/100/100, pursuit 33%
+  -> 50% (rule met), cone on five of six opponents (0.57/0.90/0.43/1.15/3.00, kill
+  vs wanderer 1/6) where v9_doctrine had cone on three. Paired vs v9_doctrine both
+  seats, 60 rounds: 63% / +54,314. Cost: crashes 27% / 17%. Kept as the defensive-start
+  ingredient for EXP-012; not the day model (v9_lookahead beats it on the bench and
+  in the pairing).'

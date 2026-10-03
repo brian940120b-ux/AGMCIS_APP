@@ -25,6 +25,14 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — EXP-010／011 結案：v9_lookahead 是冠軍、暫定當天模型；EXP-012 宣告
+
+- 筆電、修正後評測器。六對手板 won：v9_lookahead 100/67/83/100/100/100、v9_defmix 100/50/100/100/100/100、v9_doctrine 100/33/100/100/100/67。cone：lookahead reference 3.00（擊殺 1/6）、wanderer 3.00（擊殺 2/6）；defmix 六個對手中五個非零；doctrine 三個。pursuit 分差：lookahead +121,365、defmix +41,753、doctrine +7,050。
+- 配對 vs v9_doctrine（30 seed 兩座，60 回合）：**v9_lookahead 67%／+58,815**（兩座各 67%）、v9_defmix 63%／+54,314。兩個都明顯贏舊冠軍（56% 門檻）。
+- **EXP-010 keep → 冠軍、暫定當天模型 = v9_lookahead**；**EXP-011 keep** 當材料（pursuit 33→50、錐最廣）。兩者共同代價：墜毀 17–27%，是下一個要量的東西（地板參數／守勢起始靠地）。
+- 宣告 **EXP-012-lookahead-defmix-v9pool**（session `v9_combo`）：lookahead + defmix，池 = v5 + 三個 v9 + 腳本十一個。Kaggle 要先把 `v9_lookahead/`、`v9_defmix/`、`v9_doctrine/`（各含 card.json）上傳到 Dataset `aifcs_pool`。
+- 當天 play.bat 改用 `models\competition\v9_lookahead`；真 HOST 預演要用它再跑一次（lookahead 觀測 40 維、決策時間可能略增，selftest 會量）。
+
 ## 2026-10-03 — 座位問題結案：兩條推論路徑相同；自打 60 回合 48%
 
 - 筆電 `actorparity`：v9_doctrine 四通道最大差 4.0e-06／2.9e-06／1e-23／1.0e-06，v6 4.7e-06／2.9e-06／1e-23／1.4e-06 → **同一個策略，只差 float32 捨入**。

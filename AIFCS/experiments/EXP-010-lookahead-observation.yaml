@@ -28,11 +28,18 @@ pool:
 - reversal
 - leadturn
 reward_tier: research
-status: PLANNED
+status: DONE
 created_at: '2026-10-01T12:34:38+00:00'
 started_at: null
-finished_at: null
+finished_at: '2026-10-03T12:36:12+00:00'
 git_commit: 401c927
 results: {}
-decision: null
-notes: ''
+decision: keep
+notes: 'Laptop, corrected evaluator (decisions held, pool opponent encoding every
+  frame). Bench: won 100/67/83/100/100/100, cone reference 3.00 (kill 1/6) and wanderer
+  3.00 (kills 2/6), pursuit margin +121,365 against v9_doctrine''s +7,050. Paired
+  vs v9_doctrine, 30 seeds both seats: 67% / +58,815 (67% from either chair). Cost:
+  crashes 20%. Decision rule met on cone (2 of 6 bench opponents up: reference 0.90
+  -> 3.00, wanderer kills 1 -> 2) with one bench loss (break 100 -> 83). New champion
+  and the provisional day model; Kaggle run stopped at 1,997,568 steps on the 7.5
+  h budget.'
