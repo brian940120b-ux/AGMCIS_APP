@@ -920,6 +920,10 @@ scripts/tryout.bat --rounds 6 --steps 5000    # 仔細
 scripts/evaluate.bat models/competition/v9_doctrine --rounds 20 --both-seats --opponent-pool models/competition/v6
 ```
 
+同一個模型自打加 `--both-seats`，合計必須是 50%。不是的話先跑 `scripts/actorparity.bat models/competition/<session>`：
+它把同一個 checkpoint 用 SB3 `predict`（受測方走的路）和 numpy 重播（池對手走的路）各算一次，印每個通道的最大差。
+差在 1e-4 以內是同一個策略，只是 float32 捨入；更大就是池對手飛的不是受測方飛的那個策略。
+
 ## 一行搞定
 
 雙擊 **`scripts\evaluate.bat`** —— 不給參數就會把 `models\competition\` 底下
