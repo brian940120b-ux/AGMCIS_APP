@@ -34,9 +34,9 @@ pool:
 - reversal
 - leadturn
 reward_tier: research
-status: PLANNED
+status: RUNNING
 created_at: '2026-10-03T12:36:25+00:00'
-started_at: null
+started_at: '2026-10-03T13:08:57+00:00'
 finished_at: null
 git_commit: e416f56
 results: {}
