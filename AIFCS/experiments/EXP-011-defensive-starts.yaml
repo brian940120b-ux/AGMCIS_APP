@@ -1,0 +1,38 @@
+id: EXP-011-defensive-starts
+question: 'v9_doctrine learned to chase and not to be chased: 50% against the pursuit
+  opponent in training, 17% on the bench, while beating everything that does not attack.
+  Does starting a quarter of rounds with the target already on our tail, and a quarter
+  with it inside its own gun envelope behind us, teach the defence?'
+hypothesis: 'EXP-008''s recipe and pool with --geometry defmix (50% published, 25%
+  defensive, 25% wezdef); nothing else changes. The handbook''s defensive chapter
+  (docs/TACTICS.md 3) is what has to be learned: get out of the plane, make the attacker
+  overshoot, reverse. Expect on the bench: won vs pursuit at or above v6''s 50% (from
+  17%), cone vs reference and wanderer within one round of EXP-008''s 2.42 / 1.63,
+  and no bench opponent dropping below EXP-008 by more than one round. Decision rule:
+  keep if pursuit >= 50% and cone holds on both; reject if pursuit stays under 33%
+  or cone vs reference falls under 1.5 s.'
+session: v9_defmix
+flags: --reward shaped --rudder-limit 0.6 --ground-avoidance --g-limit 9 --action-repeat
+  6 --gamma 0.995 --gradient-steps -1 --observation extended --batch-size 512 --league
+  ema --geometry defmix --timesteps 2000000
+pool:
+- v4
+- v5
+- break
+- energy
+- scissors
+- wanderer
+- pursuit
+- flare
+- jinker
+- reversal
+- leadturn
+reward_tier: research
+status: PLANNED
+created_at: '2026-10-03T03:54:58+00:00'
+started_at: null
+finished_at: null
+git_commit: 78c3d32
+results: {}
+decision: null
+notes: ''

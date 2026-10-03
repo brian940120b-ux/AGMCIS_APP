@@ -88,7 +88,35 @@ GEOMETRIES: tuple[str, ...] = (
     "wez",
     "wezdef",
     "cz",
+    "defmix",
 )
+
+#: Mixtures resolved per round, before the range and the angles are drawn:
+#: the concrete geometry then sets both. `mix` is not here because it predates
+#: this and draws inside `initial_geometry`; moving it would reseed EXP-007.
+MIXTURES: dict[str, tuple[tuple[str, float], ...]] = {
+    # Half the rules' own start, a quarter with the target already on our
+    # tail from the rules' range, a quarter with it inside its own gun
+    # envelope behind us. For a policy that learned to chase and not to be
+    # chased: v9_doctrine won 50% of its training rounds against the pursuit
+    # opponent and 17% on the bench.
+    "defmix": (("published", 0.5), ("defensive", 0.25), ("wezdef", 0.25)),
+}
+
+
+def resolve_geometry(rng: random.Random, geometry: str) -> str:
+    """The concrete geometry this round uses; a mixture draws one, others pass."""
+    parts = MIXTURES.get(geometry)
+    if parts is None:
+        return geometry
+    roll = rng.random()
+    total = 0.0
+    for name, share in parts:
+        total += share
+        if roll < total:
+            return name
+    return parts[-1][0]
+
 
 #: Geometries that also set the separation, because the tactic they start is
 #: defined by a range: inside the gun envelope, or inside the control zone. The
@@ -509,14 +537,15 @@ class CompetitionRound:
         setup = self.config.setup
         root = resolve_jsbsim_root(self.config.jsbsim_root)
 
-        separation_ft = initial_separation_ft(self.random, setup.geometry, setup.separations_ft)
+        geometry = resolve_geometry(self.random, setup.geometry)
+        separation_ft = initial_separation_ft(self.random, geometry, setup.separations_ft)
         altitude_ft = self.random.uniform(*setup.altitude_range_ft)
         # Measured against the real host, 2026-09-25: both aircraft started at
         # 19,116.00001 and 19,116.00002 ft, matching to a hundred-thousandth of
         # a foot. Two independent draws from a 10,000 ft range do not do that,
         # so the altitude is shared by construction and is shared here.
         foe_altitude_ft = altitude_ft
-        bearing_deg, own_heading, foe_heading = initial_geometry(self.random, setup.geometry)
+        bearing_deg, own_heading, foe_heading = initial_geometry(self.random, geometry)
 
         foe_lat, foe_lon = _offset(
             setup.centre_lat_deg, setup.centre_lon_deg, bearing_deg, separation_ft * FT_TO_M
@@ -639,6 +668,10 @@ def initial_geometry(rng: random.Random, geometry: str) -> tuple[float, float, f
         return rng.uniform(0.0, 360.0), rng.uniform(0.0, 360.0), rng.uniform(0.0, 360.0)
     if geometry not in GEOMETRIES:
         raise ValueError(f"geometry must be one of {GEOMETRIES}, not {geometry!r}")
+    if geometry in MIXTURES:
+        geometry = resolve_geometry(rng, geometry)
+        if geometry == "published":
+            return rng.uniform(0.0, 360.0), rng.uniform(0.0, 360.0), rng.uniform(0.0, 360.0)
     own = rng.uniform(0.0, 360.0)
     if geometry == "mix":
         geometry = "abreast" if rng.random() < 0.8 else "headon"

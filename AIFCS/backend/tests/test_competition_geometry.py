@@ -14,11 +14,13 @@ import pytest
 
 from competition.environment import (
     GEOMETRIES,
+    MIXTURES,
     RANGED_GEOMETRIES,
     CompetitionRound,
     EnvConfig,
     RoundSetup,
     initial_geometry,
+    resolve_geometry,
 )
 
 HOLD = np.array([0.0, 0.0, 0.0, 0.8])
@@ -175,3 +177,28 @@ def test_a_round_flies_from_each_geometry():
         for _ in range(5):
             state, _, _, _ = round_.step(HOLD)
         assert np.all(np.isfinite(state))
+
+
+def test_defmix_is_half_published_and_a_quarter_each_of_the_two_defensive_starts():
+    rng = random.Random(11)
+    draws = [resolve_geometry(rng, "defmix") for _ in range(4000)]
+    assert abs(draws.count("published") / 4000 - 0.5) < 0.04
+    assert abs(draws.count("defensive") / 4000 - 0.25) < 0.04
+    assert abs(draws.count("wezdef") / 4000 - 0.25) < 0.04
+    assert set(MIXTURES) == {"defmix"}
+    assert resolve_geometry(rng, "published") == "published", "a concrete name passes through"
+
+
+def test_a_defmix_round_sets_the_range_from_the_geometry_it_drew():
+    """When the draw is wezdef the range is the envelope's; otherwise the rules'."""
+    seen = {"inside": 0, "rules": 0}
+    for seed in range(12):
+        g = start("defmix", seed)
+        if g.distance_ft < 2900.0:
+            seen["inside"] += 1
+            assert 500.0 < g.distance_ft < 3000.0
+            assert abs(g.azimuth_deg) > 178.0, "wezdef: on our tail"
+        else:
+            seen["rules"] += 1
+            assert 2900.0 <= g.distance_ft <= 9200.0
+    assert seen["inside"] and seen["rules"], seen

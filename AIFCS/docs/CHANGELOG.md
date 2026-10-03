@@ -25,6 +25,12 @@ git push origin --tags
 - 筆電與 Kaggle 同 seed 數字略不同（v8_pool vs v4：60%／+585／0.62 對 55%／+426／0.22）：JSBSim 版本（筆電 1.3.1 GitHub build）與 CPU／GPU 推論差異。順序與結論相同。
 - 欠：兩個實驗的六對手 scoreboard 列，等筆電拿到新 code（熱點 `git pull` 或 Kaggle V8 Output 的 `AGMCIS_APP.bundle`）再補。
 
+## 2026-10-03 — 訓練期勝率讀出 pursuit 的洞；`--geometry defmix`；EXP-011
+
+- EXP-008 訓練最後 50 回合：總 92%，**pursuit 50%**，其餘 88–100%；EXP-009 寫 100%（含 pursuit 100%）但板上 pursuit 33%：從錐內開始的回合裡「贏 pursuit」沒有意義，課程的意思就在這裡。結論：v9_doctrine 學會追、沒學會被追。
+- **新**：`--geometry defmix` = 50% published／25% defensive／25% wezdef，`MIXTURES` + `resolve_geometry()` 在 reset 先抽具體幾何再決定距離；`mix` 不動（避免重播 EXP-007 的種子）。測試 2 個。
+- 紀錄 `EXP-011-defensive-starts`（v9_defmix = EXP-008 只換起始）。
+
 ## 2026-10-03 — v9_doctrine 對真 HOST：第一次扣血；錐、HP、W_time 量到；4 m 擦過
 
 - 回合：19,353 幀、0 錯誤、最慢決策 2.7 ms。HOST：對手 HP 180 → 49（扣 131），我們錐內 2.18 s = 131 幀，**HP 每幀扣 1、只在我們的 `AttackEnvelope` 判定的幀**（131／131／0），U02 半角 1° 與 U03 累積確認。**W_time = 10,000／秒**（錐內每幀 Final 多 166.667），U06 部分關；`ScoringWeights.host_measured()` 新增，評測預設不變。

@@ -64,4 +64,5 @@ scripts\experiment.bat result EXP-00N --scoreboard results\exp00N.json --decisio
 | `EXP-007-start-geometry` | PLANNED | EXP-002 配方，`--geometry mix`。H6 |
 | `EXP-008-doctrine-pool` | DONE / keep | Kaggle：vs v4 **100%、一次擊殺、cone+ 3.00**、錐內平均 0.88 s、5° 內 17.7 s；vs v5 100%／0.37。六對手板：cone reference 2.42／wanderer 1.63（v6 全 0），分差五項贏 v6；**弱點 pursuit 17%**（v6 50%）。新基準、冠軍候選，當天模型要先補 pursuit |
 | `EXP-009-wez-start` | DONE / keep（課程階段） | Kaggle：vs v4 95%、一次擊殺、cone+ 3.00、5° 內 21.5 s；vs v5 85%、墜毀 15%、cone+ 0.70。六對手板：cone reference 3.00、wanderer 3.00，**各擊殺 1/6**（bench 上第一次擊殺）；但 pursuit 33%（分差負）、energy 50%。當課程第一階段，接著用 published 幾何續練 |
-| `EXP-010-lookahead-observation` | PLANNED | EXP-008 配方，`--observation lookahead`（預測 1 s／3 s 幾何）。H16 |
+| `EXP-010-lookahead-observation` | RUNNING（Kaggle） | EXP-008 配方，`--observation lookahead`（預測 1 s／3 s 幾何）。H16 |
+| `EXP-011-defensive-starts` | PLANNED | EXP-008 配方，`--geometry defmix`（50% published／25% defensive／25% wezdef）。補 pursuit：v9_doctrine 訓練期對 pursuit 只有 50%，板上 17% |
