@@ -913,6 +913,13 @@ scripts/tryout.bat --rounds 6 --steps 5000    # 仔細
 和當天的 client 一樣；池對手也照它自己的卡片。2026-10-03 之前評測器每一幀都問受測方，
 受測方因此多六倍反應速度（同一個模型自打也能贏 85%），那之前的數字要重量。
 
+比兩個模型時加 `--both-seats`：每個 seed 再從對手的座位（它的起點、它的航向）飛一次，印兩列和兩列合計。
+同一批 seed 不加這個旗標，兩個模型其實坐在不同的交戰裡；加了才是真正的配對比較。
+
+```bash
+scripts/evaluate.bat models/competition/v9_doctrine --rounds 20 --both-seats --opponent-pool models/competition/v6
+```
+
 ## 一行搞定
 
 雙擊 **`scripts\evaluate.bat`** —— 不給參數就會把 `models\competition\` 底下

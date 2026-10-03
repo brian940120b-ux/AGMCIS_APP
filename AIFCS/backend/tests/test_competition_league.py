@@ -521,6 +521,7 @@ NOT_THE_AIRCRAFT = {
     "round_seconds",
     "rudder_enabled",
     "speed_before_altitude",
+    "swap_seats",  # which chair, not which aeroplane
     "seed",
 }
 

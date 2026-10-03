@@ -410,6 +410,11 @@ class EnvConfig:
     #: True reproduces the reference's initial-condition ordering, which
     #: leaves the aircraft 106 knots slower than asked for.
     speed_before_altitude: bool = False
+    #: Fly the same seeded engagement from the other chair: we start where
+    #: the opponent would have, on its heading, and it starts where we would
+    #: have. A paired comparison of two policies needs both seats of the same
+    #: round, or it measures the seat as much as the policy.
+    swap_seats: bool = False
     #: Who we fly against.
     #:
     #: "reference" ports the package's own auto_run, which is a target drone:
@@ -476,6 +481,7 @@ class EnvConfig:
             "rudder_limit": self.rudder_limit,
             "high_speed_elevator_limit": self.high_speed_elevator_limit,
             "speed_before_altitude": self.speed_before_altitude,
+            "swap_seats": self.swap_seats,
             "opponent": self.opponent,
             "opponent_aggression": self.opponent_aggression,
             "opponent_policy": type(self.opponent_policy).__name__
@@ -550,22 +556,28 @@ class CompetitionRound:
         foe_lat, foe_lon = _offset(
             setup.centre_lat_deg, setup.centre_lon_deg, bearing_deg, separation_ft * FT_TO_M
         )
+        own_start = (setup.centre_lat_deg, setup.centre_lon_deg, own_heading)
+        foe_start = (foe_lat, foe_lon, foe_heading)
+        if self.config.swap_seats:
+            # Drawn in the same order, so the same seed is the same engagement
+            # seen from the other chair.
+            own_start, foe_start = foe_start, own_start
 
         self.own = Aircraft(
             root=root,
-            lat_deg=setup.centre_lat_deg,
-            lon_deg=setup.centre_lon_deg,
+            lat_deg=own_start[0],
+            lon_deg=own_start[1],
             altitude_ft=altitude_ft,
-            heading_deg=own_heading,
+            heading_deg=own_start[2],
             speed_kcas=setup.speed_kcas,
             speed_before_altitude=self.config.speed_before_altitude,
         )
         self.foe = Aircraft(
             root=root,
-            lat_deg=foe_lat,
-            lon_deg=foe_lon,
+            lat_deg=foe_start[0],
+            lon_deg=foe_start[1],
             altitude_ft=foe_altitude_ft,
-            heading_deg=foe_heading,
+            heading_deg=foe_start[2],
             speed_kcas=setup.speed_kcas,
             speed_before_altitude=self.config.speed_before_altitude,
         )

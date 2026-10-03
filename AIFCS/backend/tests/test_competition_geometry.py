@@ -202,3 +202,47 @@ def test_a_defmix_round_sets_the_range_from_the_geometry_it_drew():
             seen["rules"] += 1
             assert 2900.0 <= g.distance_ft <= 9200.0
     assert seen["inside"] and seen["rules"], seen
+
+
+def test_swapping_seats_flies_the_same_engagement_from_the_other_chair():
+    """Same seed, other chair: we start where they would have, on their
+    heading, and they start where we would have."""
+    from competition.environment import CompetitionRound, EnvConfig
+
+    normal = CompetitionRound(config=EnvConfig(), seed=5)
+    normal.reset(seed=5)
+    swapped = CompetitionRound(config=EnvConfig(swap_seats=True), seed=5)
+    swapped.reset(seed=5)
+
+    a, b = normal.telemetry(), swapped.telemetry()
+    assert b.own_lat_deg == pytest.approx(a.enemy_lat_deg, abs=1e-6)
+    assert b.own_lon_deg == pytest.approx(a.enemy_lon_deg, abs=1e-6)
+    assert b.enemy_lat_deg == pytest.approx(a.own_lat_deg, abs=1e-6)
+    assert b.enemy_lon_deg == pytest.approx(a.own_lon_deg, abs=1e-6)
+    assert b.own_yaw_deg == pytest.approx(normal.foe.telemetry_against(normal.own).own_yaw_deg, abs=0.01)
+    assert b.own_yaw_deg != pytest.approx(a.own_yaw_deg, abs=1.0)
+
+
+def test_the_same_policy_on_both_seats_scores_the_same_round_from_either_chair():
+    """With one policy on both chairs, the swapped round is the same fight
+    with the names exchanged, so our score there is their score here. This
+    is the check that the chair itself is worth nothing — which it was not,
+    twice, before the evaluator held decisions and the pool opponent encoded
+    every frame."""
+    from competition.environment import CompetitionRound, EnvConfig
+    from competition.evaluate import neutral_policy, play_round
+    from competition.league import PolicyOpponent
+
+    stick = neutral_policy()
+    foe = PolicyOpponent(lambda observation: stick(observation))
+    config = EnvConfig(round_seconds=3.0, opponent_policy=foe)
+    normal = play_round(stick, config, seed=9)
+    swapped = play_round(stick, EnvConfig(round_seconds=3.0, opponent_policy=foe, swap_seats=True), seed=9)
+    assert normal.frames == swapped.frames == 180
+    assert swapped.outcome.blue["advantage_score"] == pytest.approx(
+        normal.outcome.red["advantage_score"], rel=0.02, abs=1.0
+    )
+    assert swapped.outcome.red["advantage_score"] == pytest.approx(
+        normal.outcome.blue["advantage_score"], rel=0.02, abs=1.0
+    )
+    assert CompetitionRound  # imported for the reader: the swap lives in its reset

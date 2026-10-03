@@ -20,7 +20,7 @@ from __future__ import annotations
 import statistics
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -646,6 +646,16 @@ def main(argv: list[str] | None = None) -> int:
             "stick, so beating them says nothing"
         ),
     )
+    parser.add_argument(
+        "--both-seats",
+        action="store_true",
+        help=(
+            "with --opponent-pool, also fly every seed from the opponent's chair "
+            "(its start position and heading), and report the two rows plus their "
+            "mean. Two policies on the same seeds otherwise sit in different "
+            "engagements, and the chair itself can be worth a few rounds"
+        ),
+    )
     parser.add_argument("--algorithm", choices=["sac", "ppo"], default="sac")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--json", type=Path, default=None, help="also write the full detail here")
@@ -743,22 +753,38 @@ def main(argv: list[str] | None = None) -> int:
 
         for foe_name, foe in foes:
             against = f" vs {foe_name}" if foe is not None else ""
+            paired = config_from_card(
+                card,
+                args.opponent,
+                args.opponent_aggression,
+                args.ground_avoidance,
+                opponent_policy=foe,
+            )
+            label = session.name + _floor_suffix(card, args.ground_avoidance) + against
             reports.append(
                 evaluate(
-                    policy,
-                    config_from_card(
-                        card,
-                        args.opponent,
-                        args.opponent_aggression,
-                        args.ground_avoidance,
-                        opponent_policy=foe,
-                    ),
-                    rounds=args.rounds,
-                    seed=args.seed,
-                    label=session.name + _floor_suffix(card, args.ground_avoidance) + against,
-                    trace_dir=args.trace,
+                    policy, paired, rounds=args.rounds, seed=args.seed, label=label, trace_dir=args.trace
                 )
             )
+            if args.both_seats and foe is not None:
+                reports.append(
+                    evaluate(
+                        policy,
+                        replace(paired, swap_seats=True),
+                        rounds=args.rounds,
+                        seed=args.seed,
+                        label=label + " [other seat]",
+                        trace_dir=args.trace,
+                    )
+                )
+                both = reports[-2].rounds + reports[-1].rounds
+                margins = [
+                    _number(r.outcome.blue["advantage_score"]) - _number(r.outcome.red["advantage_score"])
+                    for r in both
+                ]
+                won = sum(1 for r in both if r.won) / len(both)
+                mean_margin = statistics.fmean(margins)
+                print(f"    both seats, {len(both)} rounds: won {won:.0%}, margin {mean_margin:+,.0f}")
 
     print()
     if args.baseline:
